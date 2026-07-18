@@ -206,6 +206,7 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <tr><td><span class="badge badge-purple">Prix Unique</span></td><td>1 seul prix d'entrée (pas de zone)</td><td><code>BUY XAUUSD @ 4512, TP1=4517, TP2=4522, TPf=4527, SL 4502</code></td></tr>
 <tr><td><span class="badge badge-green">Zone</span></td><td>2 prix d'entrée (zone)</td><td><code>SELL XAUUSD 4075/4080, TP1=4072, TP2=4069, TPf=4054, SL 4090</code></td></tr>
 <tr><td><span class="badge badge-cyan">Quick Alert</span></td><td>Direction + prix, pas de TP/SL</td><td><code>BUY 4512</code></td></tr>
+<tr><td><span class="badge badge-yellow">Market Price</span></td><td>Direction + NOW/MARKET, aucun prix</td><td><code>GOLD BUY NOW</code>, <code>BUY XAUUSD NOW</code>, <code>SELL MARKET</code></td></tr>
 </table>
 </section>
 
@@ -343,8 +344,64 @@ BUY XAUUSD | Entrée: 4512.0 | TPf: 4527.0 SL: 4502.0
 SELL XAUUSD | Entrée: 4060.0 | TPf: 4045.0 SL: 4070.0
   LIMIT #401 @4060.0 lot0.01</div>
 
+<h3>4.6.1 Market Price — Signal sans prix</h3>
+<p>Un signal <strong>Market Price</strong> est un ordre d'achat/vente <strong>sans aucun prix spécifié</strong>, uniquement une direction et un mot-clé d'exécution immédiate. Exemples : <code>GOLD BUY NOW</code>, <code>BUY XAUUSD NOW</code>, <code>SELL MARKET</code>, <code>XAUUSD BUY IMMEDIATELY</code>.</p>
+
+<div class="flow"><span class="cyan">Signal reçu :</span> GOLD BUY NOW
+ &darr;
+<span class="muted">Détection :</span> symbole=XAUUSD, action=BUY, aucun prix → is_market_price=true
+ &darr;
+<span class="muted">SL/TP auto (offsets relatifs) :</span> SL = -10 pts, TP = +15 pts (RR_RATIO=1.5)
+ &darr;
+<span class="green">Exécution MARKET immédiate</span> au prix actuel du tick
+ &darr;
+<span class="cyan">Résultat :</span>
+===== | CH6-MP | =====
+BUY XAUUSD | Entrée: prix_marché | TPf: +15.0 SL: -10.0
+  MKT #xxx @prix_actuel lot0.01</div>
+
+<h4>Mots-clés détectés</h4>
+<table>
+<tr><th>Mot-clé</th><th>Exemple</th></tr>
+<tr><td><code>NOW</code></td><td><code>GOLD BUY NOW</code></td></tr>
+<tr><td><code>MARKET</code></td><td><code>SELL XAUUSD MARKET</code></td></tr>
+<tr><td><code>MKT</code></td><td><code>BUY MKT</code></td></tr>
+<tr><td><code>IMMEDIATELY</code></td><td><code>BUY XAUUSD IMMEDIATELY</code></td></tr>
+<tr><td><code>IMMEDIATE</code></td><td><code>SELL GOLD IMMEDIATE</code></td></tr>
+<tr><td><code>INSTANT</code></td><td><code>BUY BTCUSD INSTANT</code></td></tr>
+</table>
+
+<div class="highlight warn"><strong>Important :</strong> Le signal ne doit contenir <strong>aucun prix</strong> (nombre à 4-6 chiffres). Si un prix est présent, il sera traité comme un Quick Alert classique.</div>
+
+<h4>Commentaire MT5</h4>
+<table>
+<tr><th>Commentaire</th><th>Signification</th></tr>
+<tr><td><code>CH{num}-MP</code></td><td>Market Price (ordre marché sans prix)</td></tr>
+</table>
+
 <h3>4.7 Fusion — Quick Alert + Signal complet</h3>
-<p>Quand un signal complet arrive après un Quick Alert, le bot fusionne les deux si l'entry du QA est dans la zone du signal complet (±2 points).</p>
+<p>Quand un signal complet arrive après un Quick Alert, le bot fusionne les deux si l'entry du QA est dans la zone du signal complet (±<code>FUSION_TOLERANCE</code> points, configurable dans <code>.env</code>, défaut=3).</p>
+
+<h4>4.7.1 Merge Price — Prix d'edge (BUY MORE / SELL MORE)</h4>
+<p>Le signal complet peut contenir un <strong>prix de merge</strong> supplémentaire via les mots-clés <code>BUY MORE</code> ou <code>SELL MORE</code>. Ce prix représente l'<strong>edge</strong> où un ordre LIMIT supplémentaire sera placé.</p>
+<div class="signal-box"><span class="muted">Exemple :</span>
+XAUUSD BUY 3885       <span class="muted">← prix principal (fusion ±2 avec QA)</span>
+BUY MORE 3880         <span class="muted">← merge_price (edge = LIMIT order)</span>
+TP 3890 / 3895 / 3900 / 3905
+SL 3860
+
+<span class="cyan">Fusion :</span>
+QA (ex: 3883) ∈ [3885-2, 3885+2] = [3883, 3887] → ✅ FUSION
+→ Position QA : modifier SL=3860, TP=3905
+→ LIMIT @ 3880 (merge_price) → ticket ajouté (merge_limit)</div>
+
+<table>
+<tr><th>Champ</th><th>Valeur</th><th>Rôle</th></tr>
+<tr><td><code>zone_low / zone_high</code></td><td>3885</td><td>Prix principal — check fusion ±2</td></tr>
+<tr><td><code>merge_price</code></td><td>3880</td><td>Edge — prix de l'ordre LIMIT</td></tr>
+</table>
+
+<div class="highlight info"><strong>Commentaire MT5 :</strong> Le LIMIT de merge utilise <code>CH{num}-MG</code> (identique à la fusion classique).</div>
 
 <div class="flow"><span class="cyan">Quick Alert existant :</span> BUY 4511 (position ouverte ou pending)
 <span class="cyan">Signal complet reçu :</span> BUY zone 4510-4515, TP1=4520, TP2=4525, TPf=4530
@@ -1172,6 +1229,7 @@ Ordres annulés : 3
 <tr><td class="config-key">SL_PLUS_PROCHE</td><td class="config-val">10.0</td><td>Distance SL pour zone (pts)</td></tr>
 <tr><td class="config-key">QUICK_ALERT_SL_OFFSET</td><td class="config-val">10.0</td><td>SL provisoire alerte rapide</td></tr>
 <tr><td class="config-key">RR_RATIO_DEFAULT</td><td class="config-val">1.5</td><td>RR pour générer TP si SL seul</td></tr>
+<tr><td class="config-key">FUSION_TOLERANCE</td><td class="config-val">3</td><td>Tolérance (pts) pour fusion QA → signal complet</td></tr>
 <tr><td class="config-key">ORDER_EXPIRY_MINUTES</td><td class="config-val">240</td><td>Expiration ordres (4h)</td></tr>
 <tr><td class="config-key">POLL_INTERVAL_SEC</td><td class="config-val">1</td><td>Intervalle monitoring</td></tr>
 </table>

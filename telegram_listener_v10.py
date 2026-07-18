@@ -148,6 +148,7 @@ HEARTBEAT_INTERVAL_MIN = int(os.getenv("HEARTBEAT_INTERVAL_MIN", "10"))  # minut
 # === PARAMÈTRES SL (définis dans .env) ===
 SL_PRIX_UNIQUE = float(os.getenv("SL_PRIX_UNIQUE", "15.0"))
 SL_PLUS_PROCHE = float(os.getenv("SL_PLUS_PROCHE", "10.0"))
+FUSION_TOLERANCE = float(os.getenv("FUSION_TOLERANCE", "3"))
 
 # === AUTRES ===
 TG_ALERT_CHANNEL = os.getenv("TG_ALERT_CHANNEL", "")
@@ -1017,7 +1018,7 @@ def adjust_sl_to_nearest_entry(prices: List[float], sl: float, action: str, max_
 # TRADE MANAGER (avec whitelist BE)
 # =============================================================
 class TradeManager:
-    def __init__(self, bridge: MT5Bridge, tracker=None):
+    def __init__(self, bridge: MT5Bridge, tracker=None, quick_alerts_ref=None):
         self.bridge = bridge
         self.tracker = tracker
         self.active = []
@@ -1025,6 +1026,7 @@ class TradeManager:
         self._daily_lock = threading.Lock()
         self._stop = False
         self._task = None
+        self._quick_alerts_ref = quick_alerts_ref if quick_alerts_ref is not None else {}
 
         # ★★★ WHITELIST des rôles autorisés à déclencher le BE ★★★
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
@@ -1649,6 +1651,49 @@ class TradeManager:
                     self.bridge.cancel_order(o["order"])
                     expired_orders.append(o)
                 else:
+                    # --- Vérifier SL/TP provisoire sur les QA-LMT ---
+                    if entry.get("_is_quick_alert") and o.get("role") == "quick_limit":
+                        current_price = self.bridge.current_price(symbol, action)
+                        if current_price is not None:
+                            provisional_sl = signal.get("sl", 0)
+                            provisional_tp = signal.get("tps", [0])[0] if signal.get("tps") else 0
+                            sl_hit = False
+                            tp_hit = False
+                            if action == "BUY":
+                                if provisional_sl and current_price <= provisional_sl:
+                                    sl_hit = True
+                                elif provisional_tp and current_price >= provisional_tp:
+                                    tp_hit = True
+                            else:  # SELL
+                                if provisional_sl and current_price >= provisional_sl:
+                                    sl_hit = True
+                                elif provisional_tp and current_price <= provisional_tp:
+                                    tp_hit = True
+
+                            if sl_hit or tp_hit:
+                                self.bridge.cancel_order(o["order"])
+                                reason = "SL" if sl_hit else "TP"
+                                emoji = "❌" if sl_hit else "✅"
+                                log.info(f"[QA-LMT] #{o['order']} annulé — {reason} provisoire touché @{current_price}")
+                                send_alert_sync(
+                                    f"{emoji} QA-LMT {reason} TOUCHÉ | {action}\n"
+                                    f"━━━━━━━━━━━━━━━━━━\n"
+                                    f"QA-LMT : #{o['order']} annulé\n"
+                                    f"{reason} provisoire : @{provisional_sl if sl_hit else provisional_tp}\n"
+                                    f"Prix actuel : @{current_price}\n"
+                                    f"Canal: {canal}"
+                                )
+                                # Retirer le QA de _quick_alerts
+                                qa_key = _qa_key(symbol, action, canal)
+                                if qa_key in self._quick_alerts_ref:
+                                    self._quick_alerts_ref[qa_key] = [
+                                        qa for qa in self._quick_alerts_ref[qa_key]
+                                        if qa.get("ticket") != o["order"]
+                                    ]
+                                    if not self._quick_alerts_ref[qa_key]:
+                                        del self._quick_alerts_ref[qa_key]
+                                continue
+
                     still_pending.append(o)
 
             if expired_orders:
@@ -2342,6 +2387,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     symbol = signal["symbol"]
     sl = signal.get("sl")
     entry_price = signal["zone_mid"]
+    is_market_price = signal.get("is_market_price", False)
 
     total_signals = len(manager.active)
     if total_signals >= MAX_POSITIONS:
@@ -2356,6 +2402,24 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     if current is None:
         log.error(f"Quick alert rejeté — prix indisponible: {symbol}")
         return
+
+    # --- MARKET PRICE : résoudre les offsets relatifs en prix absolus ---
+    if is_market_price and entry_price is None:
+        entry_price = current
+        sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
+        RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
+        if action == "BUY":
+            sl = entry_price - sl_offset
+            tp = entry_price + sl_offset * RR_RATIO
+        else:
+            sl = entry_price + sl_offset
+            tp = entry_price - sl_offset * RR_RATIO
+        signal["sl"] = round(sl, 2)
+        signal["tps"] = [round(tp, 2)]
+        signal["zone_mid"] = entry_price
+        signal["zone_low"] = entry_price
+        signal["zone_high"] = entry_price
+        log.info(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP={tp}")
 
     canal = signal.get("source_channel", "Inconnu")
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
@@ -2442,7 +2506,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     is_limit_order = False
 
     if in_market_zone:
-        mt5_comment_qa = f"CH{ch_num}-AL-MKT"
+        mt5_comment_qa = f"CH{ch_num}-MP-MKT" if is_market_price else f"CH{ch_num}-AL-MKT"
         log.info(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
         log.debug(f"Quick Alert MARKET {action} {symbol} @{current} SL={sl}, TP={default_tp}")
         try:
@@ -2468,10 +2532,12 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             order_ticket = t
             log.info(msg.log_order_placed(mt5_comment_qa, "MKT", t, current, sl))
             log.debug(f"✓ QUICK MARKET #{t}")
+            alert_label = "QA-MP" if is_market_price else "QA-MKT"
+            type_label = "MP" if is_market_price else "MKT"
             send_alert_sync(
-                f"⚡ {action} {symbol} | QUICK ALERT\n"
+                f"⚡ {action} {symbol} | {alert_label}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"Type: MARKET @{current} | Lot: {LOT_UNIQUE_TRADE}\n"
+                f"{type_label} : @{current} | Lot: {LOT_UNIQUE_TRADE}\n"
                 f"Ticket : #{t}\n"
                 f"TP: {default_tp} | SL: {sl}\n"
                 f"Canal: {canal}"
@@ -2480,7 +2546,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             log.error("✗ QUICK MARKET échoué")
             return
     else:
-        mt5_comment_qa = f"CH{ch_num}-AL-LMT"
+        mt5_comment_qa = f"CH{ch_num}-MP-LMT" if is_market_price else f"CH{ch_num}-AL-LMT"
         log.info(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
         log.debug(f"Quick Alert LIMIT {action} {symbol} @{entry_price} SL={sl}, TP={default_tp}")
         try:
@@ -2506,9 +2572,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             log.info(msg.log_order_placed(mt5_comment_qa, "LIMIT", o, entry_price, sl))
             log.debug(f"✓ QUICK LIMIT #{o}")
             send_alert_sync(
-                f"⚡ {action} {symbol} | QUICK ALERT\n"
+                f"⚡ {action} {symbol} | QA-LMT\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"Type: LIMIT @{entry_price} | Lot: {LOT_UNIQUE_TRADE}\n"
+                f"LMT : @{entry_price} | Lot: {LOT_UNIQUE_TRADE}\n"
                 f"Ticket : #{o}\n"
                 f"TP: {default_tp} | SL: {sl}\n"
                 f"Canal: {canal}"
@@ -2538,6 +2604,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         "ticket": order_ticket,
         "is_limit": is_limit_order,
         "entry_price": entry_price,
+        "is_market_price": signal.get("is_market_price", False),
         "time": datetime.now(timezone.utc),
     })
     log.debug(f"Quick Alert enregistré: {key}")
@@ -2566,6 +2633,20 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                         break
             if sl_hit:
                 log.info(msg.log_merge(qa_ticket, "SL touché -> signal complet ignore"))
+                deal_pnl = 0.0
+                for deal in reversed(deals):
+                    if deal.position_id == qa_ticket and deal.entry == mt5.DEAL_ENTRY_OUT:
+                        deal_pnl = deal.profit + deal.commission + deal.swap
+                        break
+                canal = full_signal.get("source_channel", "Inconnu")
+                send_alert_sync(
+                    f"❌ QA SL TOUCHÉ | {full_signal['action']}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"QA-LMT : #{qa_ticket}\n"
+                    f"P&L : {deal_pnl:+.2f} $\n"
+                    f"Signal complet ignoré\n"
+                    f"Canal: {canal}"
+                )
             else:
                 log.info(msg.log_merge(qa_ticket, "expire/annule -> executer signal complet"))
                 execute_signal(full_signal, bridge, manager, tracker)
@@ -2591,10 +2672,35 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                             elif deal.reason == mt5.DEAL_REASON_TP:
                                 tp_hit = True
                             break
+            deal_pnl = 0.0
+            for deal in reversed(deals):
+                if deal.symbol == full_signal["symbol"] and (
+                    deal.position_id == qa_ticket or deal.order == qa_ticket
+                ):
+                    if deal.entry == mt5.DEAL_ENTRY_OUT:
+                        deal_pnl = deal.profit + deal.commission + deal.swap
+                        break
+            canal = full_signal.get("source_channel", "Inconnu")
             if sl_hit:
                 log.info(msg.log_merge(qa_ticket, "SL touché -> signal complet ignore"))
+                send_alert_sync(
+                    f"❌ QA SL TOUCHÉ | {full_signal['action']}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"QA : #{qa_ticket}\n"
+                    f"P&L : {deal_pnl:+.2f} $\n"
+                    f"Signal complet ignoré\n"
+                    f"Canal: {canal}"
+                )
             elif tp_hit:
                 log.info(msg.log_merge(qa_ticket, "TP touche -> signal complet ignore"))
+                send_alert_sync(
+                    f"✅ QA TP TOUCHÉ | {full_signal['action']}\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"QA : #{qa_ticket}\n"
+                    f"P&L : {deal_pnl:+.2f} $\n"
+                    f"Signal complet ignoré\n"
+                    f"Canal: {canal}"
+                )
             else:
                 log.info(msg.log_merge(qa_ticket, "ferme (autre raison) -> executer signal complet"))
                 execute_signal(full_signal, bridge, manager, tracker)
@@ -2618,9 +2724,21 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 t["tp3"]       = t["tp_target"]
                 t["tp_index"]  = tp_trigger_idx
                 break
-        _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+        merge_ticket = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
         entry["signal"]           = full_signal
         entry["_is_quick_alert"]  = False
+        # Alerte Telegram fusion réussie
+        merge_p = full_signal.get("merge_price")
+        canal   = full_signal.get("source_channel", "Inconnu")
+        send_alert_sync(
+            f"✅ FUSION RÉUSSIE | PO-OV\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"QA : #{qa_ticket}\n"
+            f"MERGE LMT: @{merge_p}\n"
+            f"Ticket : #{merge_ticket}\n"
+            f"SL: {real_sl} | TPf: {tp_final}\n"
+            f"Canal: {canal}"
+        )
     else:
         # Vérifier si le limit QA a été rempli entre-temps
         resolved_pos = manager._resolve_order(qa_ticket, full_signal["symbol"])
@@ -2648,9 +2766,20 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
             entry["tickets"].append(tk)
             entry["orders"] = [o for o in entry["orders"] if o["order"] != qa_ticket]
             bridge.modify_sl_tp(resolved_pos.ticket, real_sl, tp_final, "[MERGE-SL-TP]")
-            _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+            merge_ticket = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
             entry["signal"]          = full_signal
             entry["_is_quick_alert"] = False
+            merge_p = full_signal.get("merge_price")
+            canal   = full_signal.get("source_channel", "Inconnu")
+            send_alert_sync(
+                f"✅ FUSION RÉUSSIE | LMT-RP\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"QA : #{qa_ticket}\n"
+                f"MERGE REMPLI : @{merge_p}\n"
+                f"Ticket : #{merge_ticket}\n"
+                f"SL: {real_sl} | TPf: {tp_final}\n"
+                f"Canal: {canal}"
+            )
         else:
             # ★ Limit encore pending → modifier l'ordre pending
             log.info(f"MERGE: LIMIT #{qa_ticket} pending → modif SL/TP + LIMIT")
@@ -2666,9 +2795,20 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                     o["tp3"]       = o["tp_target"]
                     o["tp_index"]  = tp_trigger_idx
                     break
-            _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+            merge_ticket = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
             entry["signal"]          = full_signal
             entry["_is_quick_alert"] = False
+            merge_p = full_signal.get("merge_price")
+            canal   = full_signal.get("source_channel", "Inconnu")
+            send_alert_sync(
+                f"✅ FUSION RÉUSSIE | LMT-PDN\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"QA-LMT : #{qa_ticket}\n"
+                f"MERGE LMT: @{merge_p}\n"
+                f"Ticket : #{merge_ticket}\n"
+                f"SL: {real_sl} | TPf: {tp_final}\n"
+                f"Canal: {canal}"
+            )
 
     if abs(full_signal["zone_high"] - full_signal["zone_low"]) >= 1:
         market_entry_price = None
@@ -2698,12 +2838,17 @@ def _place_merge_limit(
     zone_low  = full_signal["zone_low"]
     zone_high = full_signal["zone_high"]
     action    = full_signal["action"]
-    if abs(zone_high - zone_low) < 1:
+    merge_price = full_signal.get("merge_price")
+    # Si merge_price existe, l'utiliser comme prix LIMIT (edge)
+    if merge_price is not None:
+        limit_price = merge_price
+    elif abs(zone_high - zone_low) >= 1:
+        limit_price = zone_high if action == "SELL" else zone_low
+    else:
         return
     sym_info = bridge._sym(full_signal["symbol"])
     if not sym_info:
         return
-    limit_price = zone_high if action == "SELL" else zone_low
     expiry      = datetime.now(timezone.utc) + timedelta(minutes=ORDER_EXPIRY_MIN)
     canal       = full_signal.get("source_channel", "Inconnu")
     ch_num      = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
@@ -2729,8 +2874,10 @@ def _place_merge_limit(
             "trail_active": False,
         })
         log.info(msg.log_merge_limit_placed(ch_num, action, full_signal['symbol'], o, limit_price, real_sl))
+        return o
     else:
         log.error(msg.log_merge_limit_failed(ch_num, limit_price))
+        return None
 
 # =============================================================
 # MAIN
@@ -2762,7 +2909,8 @@ async def main():
             log.critical("Bot arrêté — corrigez MT5 puis relancez.")
             return
 
-        manager = TradeManager(bridge, tracker)
+        _quick_alerts = {}
+        manager = TradeManager(bridge, tracker, quick_alerts_ref=_quick_alerts)
         acc_info = mt5.account_info()
         if acc_info:
             log.info(msg.log_balance_startup(acc_info.balance, manager._daily_pnl))
@@ -2778,8 +2926,6 @@ async def main():
         log.info("Telegram connecté.")
 
         asyncio.create_task(heartbeat_loop(manager, tracker))
-
-        _quick_alerts = {}
 
         chats = []
         channel_names = [
@@ -2849,7 +2995,9 @@ async def main():
                 tp_final = signal_data.tp_final or 0
                 ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
 
-                if signal_data.is_quick_alert:
+                if signal_data.is_market_price:
+                    mode = "MP"
+                elif signal_data.is_quick_alert:
                     mode = "AL"
                 elif signal_data.is_single_price:
                     mode = "PU"
@@ -2938,7 +3086,7 @@ async def main():
 
                 for idx, qa in enumerate(qa_list):
                     qa_price = qa["entry_price"]
-                    if zone_low - 2 <= qa_price <= zone_high + 2:
+                    if zone_low - FUSION_TOLERANCE <= qa_price <= zone_high + FUSION_TOLERANCE:
                         found_qa = qa
                         found_idx = idx
                         break
@@ -2946,6 +3094,37 @@ async def main():
                 if found_qa is not None:
                     merge_quick_alert(found_qa, key, sig_dict, bridge, manager, tracker, _quick_alerts)
                 else:
+                    # --- Échec fusion : annuler le QA (Market Price) s'il existe ---
+                    cancelled_qa = False
+                    qa_pnl = 0.0
+                    for idx, qa in enumerate(qa_list):
+                        if qa.get("is_market_price", False):
+                            ticket = qa.get("ticket")
+                            if ticket:
+                                pos = mt5.positions_get(ticket=ticket)
+                                if pos:
+                                    qa_pnl = pos[0].profit + pos[0].commission + pos[0].swap
+                                    bridge.close_position(ticket)
+                                    log.info(f"[FUSION FAIL] QA Market Price #{ticket} annulé (hors tolérance ±{FUSION_TOLERANCE})")
+                                    cancelled_qa = True
+                                else:
+                                    log.debug(f"[FUSION FAIL] QA #{ticket} déjà fermé")
+                            # Retirer le QA de la liste
+                            qa_list.pop(idx)
+                            if not qa_list:
+                                _quick_alerts.pop(key, None)
+                            break
+
+                    if cancelled_qa:
+                        log.info(f"[FUSION FAIL] Exécution signal complet après annulation QA")
+                        send_alert_sync(
+                            f"⚠️ FUSION ÉCHOUÉE | {sig_dict['action']}\n"
+                            f"━━━━━━━━━━━━━━━━━━\n"
+                            f"QA annulé (hors ±{FUSION_TOLERANCE})\n"
+                            f"P&L : {qa_pnl:+.2f} $\n"
+                            f"Signal complet exécuté\n"
+                            f"Canal: {canal_name}"
+                        )
                     execute_signal(sig_dict, bridge, manager, tracker)
 
         # Banner

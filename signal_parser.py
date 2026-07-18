@@ -40,6 +40,8 @@ class TradeSignal:
     new_sl: Optional[float] = None
     is_single_price: bool = False
     is_quick_alert: bool = False
+    is_market_price: bool = False
+    merge_price: Optional[float] = None
     format_profile: Optional['FormatProfile'] = None
     source_channel: Optional[str] = None   # ✅ BUG #1 corrigé
 
@@ -61,6 +63,8 @@ class TradeSignal:
             "close_symbol": self.close_symbol,
             "is_single_price": self.is_single_price,
             "is_quick_alert": self.is_quick_alert,
+            "is_market_price": self.is_market_price,
+            "merge_price": self.merge_price,
         }
 
     @property
@@ -421,6 +425,17 @@ def _extract_sl(normalized_text: str) -> Optional[float]:
     return None
 
 
+def _extract_merge_price(normalized_text: str) -> Optional[float]:
+    """Extrait le prix après BUY MORE / SELL MORE / ADD MORE.
+    Ex: 'XAUUSD BUY 3885 BUY MORE 3880' → 3880.0"""
+    m = re.search(r'(?:BUY|SELL|ADD)\s+MORE\s+(\d{4,6}(?:\.\d+)?)', normalized_text)
+    if m:
+        val = float(m.group(1))
+        if 1000 <= val <= 99999:
+            return val
+    return None
+
+
 # =============================================================
 # PARSER PRINCIPAL
 # =============================================================
@@ -526,11 +541,40 @@ class SignalParser:
 
         zone_low, zone_high, is_single = _extract_entry_and_zone(normalized_text)
         if zone_low is None:
+            # --- MARKET PRICE : signal sans prix (ex: GOLD BUY NOW, BUY XAUUSD NOW) ---
+            if self._is_market_now(normalized_text):
+                log.info(f"[PARSING] Market price signal détecté: {action} {symbol}")
+                sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
+                RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
+                if action == "BUY":
+                    default_sl = -sl_offset  # offset relatif, le prix réel sera résolu à l'exécution
+                    default_tp = sl_offset * RR_RATIO
+                else:
+                    default_sl = sl_offset
+                    default_tp = -(sl_offset * RR_RATIO)
+                return TradeSignal(
+                    signal_type="TRADE",
+                    direction=action,
+                    entry=None,  # prix marché → résolu par le bridge MT5
+                    zone_low=None,
+                    zone_high=None,
+                    tps=[round(default_tp, 2)],
+                    sl=round(default_sl, 2),
+                    pair=symbol,
+                    raw_text=normalized_text[:200],
+                    timestamp=timestamp,
+                    confidence=0.15,
+                    is_single_price=True,
+                    is_quick_alert=True,
+                    is_market_price=True,
+                    format_profile=self.format_profile,
+                )
             log.debug(f"[PARSING] Entrée non trouvée dans : {normalized_text[:100]}")
             return None
 
         tps = _extract_all_tps(normalized_text)
         sl = _extract_sl(normalized_text)
+        merge_price = _extract_merge_price(normalized_text)
 
         # Génération auto SL si TPs présents mais pas de SL
         if tps and sl is None:
@@ -582,6 +626,7 @@ class SignalParser:
                 confidence=0.2,
                 is_single_price=is_single,
                 is_quick_alert=True,
+                merge_price=merge_price,
                 format_profile=self.format_profile,
             )
 
@@ -614,8 +659,24 @@ class SignalParser:
             confidence=confidence,
             is_single_price=is_single,
             is_quick_alert=False,
+            merge_price=merge_price,
             format_profile=self.format_profile,
         )
+
+    @staticmethod
+    def _is_market_now(normalized_text: str) -> bool:
+        """Détecte les signaux sans prix : BUY NOW, SELL NOW, GOLD BUY NOW, etc."""
+        # Mots-clés indiquant un ordre marché immédiat
+        market_keywords = ['NOW', 'MARKET', 'MKT', 'IMMEDIATELY', 'IMMEDIATE', 'INSTANT', 'OPEN']
+        # Vérifier qu'il n'y a AUCUN prix dans le texte (pas de nombre 4-5 chiffres)
+        has_price = re.search(r'\b\d{4,6}(?:\.\d+)?\b', normalized_text)
+        if has_price:
+            return False
+        # Vérifier présence d'un mot-clé marché
+        for kw in market_keywords:
+            if re.search(rf'\b{kw}\b', normalized_text):
+                return True
+        return False
 
     @staticmethod
     def _validate_sl(action: str, entry_price: float, sl: float) -> bool:
