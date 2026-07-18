@@ -552,7 +552,7 @@ timesfm_validator = TimesFMValidator()
 # =============================================================
 # SIGNAL PARSER
 # =============================================================
-from signal_parser_v10 import SignalParser, is_spam, TradeSignal
+from signal_parser import SignalParser, is_spam, TradeSignal
 import bot_messages as msg
 
 # =============================================================
