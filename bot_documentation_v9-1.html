@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GZL TradingBot V9.0.0 — Documentation Complète</title>
+<title>GZL TradingBot V10.1.1 — Documentation Complète</title>
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--text-muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff;--cyan:#39d2c0;--yellow:#e3b341}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -58,7 +58,7 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <div class="hero">
 <h1>GZL TradingBot</h1>
 <p class="subtitle">Bot de Copy Trading Telegram &rarr; MetaTrader 5</p>
-<span class="version">V9.0.0</span>
+<span class="version">V10.1.1</span>
 <span class="version-new">Signal Parser V7.4.14</span>
 <p style="margin-top:1rem;color:var(--text-muted);font-size:0.9rem">SL Configurable &bull; BE Whitelist &bull; Gain fixe par position &bull; Fusion QA &bull; 17 Formats de Log &bull; Race Condition Fix &bull; BE LATE</p>
 </div>
@@ -455,6 +455,32 @@ BUY XAUUSD | Zone: 4510.0-4515.0 | TPf: 4530.0 SL: 4500.0
 <tr><td><code>CH{num}-AL</code></td><td>Quick Alert (market ou limit)</td></tr>
 <tr><td><code>CH{num}-MG</code></td><td>Merge limit (fusion QA + signal complet)</td></tr>
 <tr><td><code>CH{num}-QA-F</code></td><td>Quick Alert + Fusion (log)</td></tr>
+</table>
+
+<h4>4.7.2 SL lors de la Fusion (SL_PLUS_PROCHE)</h4>
+<p>Lors de la fusion, le SL est calculé depuis l'entrée du <strong>merge limit</strong> (MG) qui est la position la plus proche du SL :</p>
+<div class="signal-box"><span class="cyan">Règle :</span>
+SL = merge_entry + SL_PLUS_PROCHE (6 pts)
+
+<span class="muted">Exemple CH5 (AMELIA GOLD TRADER) :</span>
+QA Market Price : SELL @4012.335, SL provisoire=4022.335
+Signal fusion   : SELL 4029, SL=4040
+
+<span class="green">APRÈS fusion :</span>
+MG (@4020.0)  → SL = 4020 + 6 = 4026.0  <span class="muted">(SL_PLUS_PROCHE)</span>
+MP-MKT (@4012.335) → SL = 4026.0        <span class="muted">(même SL que MG)</span>
+
+<span class="red">AVANT fix (bug) :</span>
+MG SL = 4040 (SL du signal brut, 18 pts de risque !)</div>
+
+<h4>4.7.3 Résumé des règles SL</h4>
+<table>
+<tr><th>Type de position</th><th>Règle SL</th><th>Exemple</th></tr>
+<tr><td>Quick Alert (provisoire)</td><td><code>entry + QUICK_ALERT_SL_OFFSET (10)</code></td><td>@4012 → SL @4022</td></tr>
+<tr><td>Prix Unique</td><td><code>min(signal_sl, entry + SL_PRIX_UNIQUE)</code></td><td>@4013, signal SL=4027 → SL @4023</td></tr>
+<tr><td>CAS 1/2a/2b</td><td><code>adjust_sl_to_nearest_entry(SL_PLUS_PROCHE)</code></td><td>Position la plus proche + 6 pts</td></tr>
+<tr><td>Merge MG</td><td><code>merge_entry + SL_PLUS_PROCHE</code></td><td>@4020 → SL @4026</td></tr>
+<tr><td>Merge MP-MKT/LMT</td><td>Même SL que MG</td><td>@4012 → SL @4026</td></tr>
 </table>
 </section>
 
@@ -1242,6 +1268,7 @@ Ordres annulés : 3
 <tr><td class="config-key">TRADING_END_HOUR</td><td class="config-val">20</td><td>Heure UTC fin</td></tr>
 <tr><td class="config-key">DAILY_PROFIT_LIMIT</td><td class="config-val">30.0</td><td>Seuil P&amp;L quotidien ($)</td></tr>
 <tr><td class="config-key">NEWS_FILTER_ENABLED</td><td class="config-val">false</td><td>Filtre news</td></tr>
+<tr><td class="config-key">NEWS_MIN_IMPACT</td><td class="config-val">high</td><td>Impact min news (high/medium). Log 1h avant NY</td></tr>
 <tr><td class="config-key">DEMO_MODE</td><td class="config-val">true</td><td>Mode démo</td></tr>
 </table>
 
