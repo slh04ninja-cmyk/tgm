@@ -1,14 +1,10 @@
 """
 =============================================================
  TELEGRAM → MT5 | Bot Trading
- Version 10.0.0 — BUG FIXES SESSION (5 bugs corrigés)
- MODIFICATIONS v9.0.0 :
- - FIX #1 : Race condition dans _cancel_pending_orders_for_entry (cancel échoué → résolution immédiate)
- - FIX #2 : BE LATE — protection des limits remplis après le BE initial
- - FIX #3 : TP_TRIGGER nettoyage immédiat de self.active
- - FIX #4 : SL_MOVE met à jour les ordres pending
- - FIX #5 : Alerte BE LATE avec ancien/nouveau target_gain
- - FIX #6 : Fusion QA — limit rempli non géré (_resolve_order + quick_limit_filled)
+ Version 10.1.1 — FIX #7 (Alert Timeout) + FIX #8 (News Filter)
+ MODIFICATIONS v10.1.0 :
+ - FIX #7 : Alert Timeout — non-bloquant + retry (8s × 2 tentatives)
+ - FIX #8 : News Filter — impact configurable (NEWS_MIN_IMPACT) + warning unique
 =============================================================
 """
 
@@ -175,6 +171,8 @@ NEWS_AFTER_MIN_FOMC = int(os.getenv("NEWS_WINDOW_AFTER_FOMC", "45"))
 NEWS_BLOCK_MIN_SPIKE = int(os.getenv("NEWS_WINDOW_BEFORE_BLOCK_SPIKE", "20"))
 NEWS_CLOSE_MIN_SPIKE = int(os.getenv("NEWS_WINDOW_BEFORE_CLOSE_SPIKE", "10"))
 NEWS_AFTER_MIN_SPIKE = int(os.getenv("NEWS_WINDOW_AFTER_SPIKE", "20"))
+# Niveau d'impact minimum pour filtrer les news ("high" ou "medium")
+NEWS_MIN_IMPACT = os.getenv("NEWS_MIN_IMPACT", "high").lower()
 
 # Mots-clés (titre en minuscules) pour classer chaque news dans le bon tier
 _NEWS_KEYWORDS_NFPCPI = [
@@ -267,17 +265,28 @@ def in_blocked_window() -> tuple[bool, str]:
 _alert_client = None
 _main_loop = None
 
-def send_alert_sync(message: str):
+def send_alert_sync(message: str, _retries: int = 2):
+    """Envoie non-bloquant avec retry automatique.
+    - 1er essai : timeout 8s
+    - Si échec : 1 retry après 2s (connexion Telegram instable)
+    - Ne bloque JAMAIS la boucle de trading plus de 10s total"""
     if not TG_ALERT_CHANNEL or not _alert_client or not _main_loop:
         return
-    try:
-        coro = _alert_client.send_message(TG_ALERT_CHANNEL, message)
-        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
-        future.result(timeout=15)  # ✅ 15s au lieu de 5s
-    except TimeoutError:
-        log.warning(f"[ALERT] Timeout envoi alerte Telegram (15s)")
-    except Exception as e:
-        log.warning(f"[ALERT] Erreur envoi alerte Telegram: {type(e).__name__}: {e}")
+    for attempt in range(_retries):
+        try:
+            coro = _alert_client.send_message(TG_ALERT_CHANNEL, message)
+            future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+            future.result(timeout=8)
+            return  # ✅ succès
+        except TimeoutError:
+            if attempt < _retries - 1:
+                log.info(f"[ALERT] Timeout tentative {attempt+1}, retry dans 2s...")
+                time.sleep(2)
+            else:
+                log.warning(f"[ALERT] Timeout envoi alerte Telegram ({_retries} tentatives)")
+        except Exception as e:
+            log.warning(f"[ALERT] Erreur envoi alerte Telegram: {type(e).__name__}: {e}")
+            return  # erreur non-récupérable, pas de retry
 
 # =============================================================
 # PERFORMANCE TRACKER
@@ -612,15 +621,27 @@ class NewsManager:
                 data = json.loads(r.read().decode())
             # ★ FIX : le champ JSON de cet endpoint est "country" (pas "currency").
             # On vérifie les deux par sécurité, au cas où le schéma varie.
+            # ★ FIX #8 : filtre d'impact configurable (high ou medium)
+            _impact_levels = [NEWS_MIN_IMPACT]
+            if NEWS_MIN_IMPACT == "high":
+                _impact_levels.append("medium")  # inclure medium quand on filtre sur high
             self._news = [
                 n for n in data
-                if n.get("impact", "").lower() == "high"
+                if n.get("impact", "").lower() in _impact_levels
                 and (n.get("country", "") in ("USD", "XAU") or n.get("currency", "") in ("USD", "XAU"))
             ]
-            log.info(msg.log_news_loaded(len(self._news)))
-            if len(self._news) == 0 and len(data) > 0:
-                sample_keys = list(data[0].keys())
-                log.warning(msg.log_news_zero_debug(len(data), sample_keys))
+            # ★ FIX #8 : log les news 1h avant l'ouverture NY (12:30 UTC)
+            now_utc = datetime.now(timezone.utc)
+            is_pre_ny = (now_utc.hour == 12 and 25 <= now_utc.minute <= 35)
+            if is_pre_ny or not hasattr(self, '_news_logged'):
+                self._news_logged = True
+                log.info(msg.log_news_loaded(len(self._news)))
+                if len(self._news) == 0 and len(data) > 0:
+                    sample_keys = list(data[0].keys())
+                    log.warning(msg.log_news_zero_debug(len(data), sample_keys))
+                elif len(self._news) > 0:
+                    for n in self._news:
+                        log.info(f"  NEWS: {n.get('title', '?')} @ {n.get('date', '?')} ({n.get('country', '?')})")
         except Exception as e:
             log.error(msg.log_news_fetch_error(str(e)))
 
@@ -2029,6 +2050,8 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
             sl = max(sl, entry_price - SL_PRIX_UNIQUE)
         else:
             sl = min(sl, entry_price + SL_PRIX_UNIQUE)
+        # ★ FIX : mettre à jour le signal dict pour que place_limit_order utilise le SL ajusté
+        signal["sl"] = sl
 
         if scenario == 1:
             log.debug(f"  → MARKET {action} @{current} lot={unique_lot} TP={tp_final} SL={sl}")
@@ -2712,7 +2735,10 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
 
     if not qa_is_limit:
         log.info(msg.log_merge(qa_ticket, "position ouverte -> SL/TP + LIMIT"))
-        bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[MERGE-SL-TP]")
+        # ★ FIX SL_PLUS_PROCHE : placer le merge limit d'abord pour obtenir le SL correct
+        merge_ticket, merge_sl = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+        # Appliquer le SL du merge (SL_PLUS_PROCHE) sur la position MP-MKT existante
+        bridge.modify_sl_tp(qa_ticket, merge_sl, tp_final, "[MERGE-SL-TP]")
         for t in entry["tickets"]:
             if t["ticket"] == qa_ticket:
                 if len(full_signal["tps"]) == 1:
@@ -2724,7 +2750,6 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 t["tp3"]       = t["tp_target"]
                 t["tp_index"]  = tp_trigger_idx
                 break
-        merge_ticket = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
         entry["signal"]           = full_signal
         entry["_is_quick_alert"]  = False
         # Alerte Telegram fusion réussie
@@ -2736,7 +2761,7 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
             f"QA : #{qa_ticket}\n"
             f"MERGE LMT: @{merge_p}\n"
             f"Ticket : #{merge_ticket}\n"
-            f"SL: {real_sl} | TPf: {tp_final}\n"
+            f"SL: {merge_sl} | TPf: {tp_final}\n"
             f"Canal: {canal}"
         )
     else:
@@ -2765,8 +2790,9 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
             }
             entry["tickets"].append(tk)
             entry["orders"] = [o for o in entry["orders"] if o["order"] != qa_ticket]
-            bridge.modify_sl_tp(resolved_pos.ticket, real_sl, tp_final, "[MERGE-SL-TP]")
-            merge_ticket = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+            merge_ticket, merge_sl = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+            # ★ FIX : appliquer le SL du merge (SL_PLUS_PROCHE) sur la position remplie
+            bridge.modify_sl_tp(resolved_pos.ticket, merge_sl, tp_final, "[MERGE-SL-TP]")
             entry["signal"]          = full_signal
             entry["_is_quick_alert"] = False
             merge_p = full_signal.get("merge_price")
@@ -2777,7 +2803,7 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 f"QA : #{qa_ticket}\n"
                 f"MERGE REMPLI : @{merge_p}\n"
                 f"Ticket : #{merge_ticket}\n"
-                f"SL: {real_sl} | TPf: {tp_final}\n"
+                f"SL: {merge_sl} | TPf: {tp_final}\n"
                 f"Canal: {canal}"
             )
         else:
@@ -2787,7 +2813,6 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 tp_trigger_idx = 0
             else:
                 tp_trigger_idx = 2 if 3 <= len(full_signal["tps"]) else len(full_signal["tps"]) - 1
-            bridge.modify_pending_order(qa_ticket, real_sl, tp_final, "[MERGE-ORD-SL-TP]")
             for o in entry["orders"]:
                 if o["order"] == qa_ticket:
                     o["tp_final"]  = tp_final
@@ -2795,7 +2820,9 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                     o["tp3"]       = o["tp_target"]
                     o["tp_index"]  = tp_trigger_idx
                     break
-            merge_ticket = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+            merge_ticket, merge_sl = _place_merge_limit(full_signal, bridge, entry, real_sl, tp_final)
+            # ★ FIX : appliquer le SL du merge (SL_PLUS_PROCHE) sur l'ordre pending
+            bridge.modify_pending_order(qa_ticket, merge_sl, tp_final, "[MERGE-ORD-SL-TP]")
             entry["signal"]          = full_signal
             entry["_is_quick_alert"] = False
             merge_p = full_signal.get("merge_price")
@@ -2806,7 +2833,7 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 f"QA-LMT : #{qa_ticket}\n"
                 f"MERGE LMT: @{merge_p}\n"
                 f"Ticket : #{merge_ticket}\n"
-                f"SL: {real_sl} | TPf: {tp_final}\n"
+                f"SL: {merge_sl} | TPf: {tp_final}\n"
                 f"Canal: {canal}"
             )
 
@@ -2845,10 +2872,20 @@ def _place_merge_limit(
     elif abs(zone_high - zone_low) >= 1:
         limit_price = zone_high if action == "SELL" else zone_low
     else:
-        return
+        return None, real_sl
     sym_info = bridge._sym(full_signal["symbol"])
     if not sym_info:
-        return
+        return None, real_sl
+
+    # ★ FIX SL_PLUS_PROCHE : calculer le SL depuis l'entrée du merge limit
+    # MG est la position la plus proche du SL → SL = MG_entry + SL_PLUS_PROCHE
+    if action == "SELL":
+        merge_sl = round(limit_price + SL_PLUS_PROCHE, sym_info.digits)
+    else:
+        merge_sl = round(limit_price - SL_PLUS_PROCHE, sym_info.digits)
+    # Mettre à jour le signal pour que place_limit_order utilise le bon SL
+    full_signal["sl"] = merge_sl
+
     expiry      = datetime.now(timezone.utc) + timedelta(minutes=ORDER_EXPIRY_MIN)
     canal       = full_signal.get("source_channel", "Inconnu")
     ch_num      = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
@@ -2873,11 +2910,11 @@ def _place_merge_limit(
             "sl_step":    0,
             "trail_active": False,
         })
-        log.info(msg.log_merge_limit_placed(ch_num, action, full_signal['symbol'], o, limit_price, real_sl))
-        return o
+        log.info(msg.log_merge_limit_placed(ch_num, action, full_signal['symbol'], o, limit_price, merge_sl))
+        return o, merge_sl
     else:
         log.error(msg.log_merge_limit_failed(ch_num, limit_price))
-        return None
+        return None, real_sl
 
 # =============================================================
 # MAIN
@@ -3142,6 +3179,7 @@ async def main():
         log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC)")
         log.info(f" Filtre news : {'ON' if NEWS_ENABLED else 'OFF'}")
         if NEWS_ENABLED:
+            log.info(f"   Impact min : {NEWS_MIN_IMPACT.upper()}")
             log.info(f"   Défaut    : {NEWS_BLOCK_MIN}/{NEWS_CLOSE_MIN}/{NEWS_AFTER_MIN} min (avant-bloc/avant-close/après)")
             log.info(f"   NFP/CPI   : {NEWS_BLOCK_MIN_NFPCPI}/{NEWS_CLOSE_MIN_NFPCPI}/{NEWS_AFTER_MIN_NFPCPI} min")
             log.info(f"   FOMC      : {NEWS_BLOCK_MIN_FOMC}/{NEWS_CLOSE_MIN_FOMC}/{NEWS_AFTER_MIN_FOMC} min")
