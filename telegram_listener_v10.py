@@ -1059,7 +1059,6 @@ class TradeManager:
             "limit_1",             # CAS 2-b
             "quick_market",        # Quick Alert market
             "quick_limit_filled",  # Quick Alert limit rempli
-            "merge_limit",         # Fusion QA → limit
         }
         # Rôles volontairement exclus (ne déclenchent jamais le BE) :
         #   "limit_2"     → pending en CAS 2-b (annulé par BE déclenché via limit_1, ou par TP_TRIGGER)
