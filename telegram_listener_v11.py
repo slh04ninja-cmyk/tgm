@@ -1878,9 +1878,16 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
 
     all_tps = signal["tps"]
     if not all_tps:
-        log.info(msg.log_refuse(ch_num, "", msg.MOTIF_AUCUN_TP))
-        log.warning(f"Signal ignoré — aucun TP trouvé ({symbol} {action})")
-        return
+        # ★ Signal sans TP (TP = "open") → utiliser TP_FIXED_GAIN_USD
+        entry_for_tp = (zone_low + zone_high) / 2
+        tp_fixed_points = TP_FIXED_GAIN_USD  # 10$ = 10 pts pour XAUUSD 0.01 lot
+        if action == "BUY":
+            generated_tp = round(entry_for_tp + tp_fixed_points, 2)
+        else:
+            generated_tp = round(entry_for_tp - tp_fixed_points, 2)
+        all_tps = [generated_tp]
+        signal["tps"] = all_tps
+        log.info(f"Signal sans TP → TP généré: {generated_tp} (entry={entry_for_tp} ± {TP_FIXED_GAIN_USD}$)")
 
     if action == "SELL":
         all_tps = sorted(all_tps, reverse=True)
