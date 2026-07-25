@@ -1865,6 +1865,24 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
     bridge.close_all(symbol=symbol, channel_num=ch_num)
     return True
 
+def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager) -> bool:
+    """Ferme le signal actif d'un canal s'il en existe déjà un."""
+    with manager._lock:
+        for entry in list(manager.active):
+            sig = entry.get("signal", {})
+            entry_canal = sig.get("source_channel", "Inconnu")
+            if entry_canal == canal:
+                # Trouver les positions ouvertes
+                for t in entry.get("tickets", []):
+                    pos = manager._get_pos(t["ticket"])
+                    if pos:
+                        bridge.close_position(t["ticket"], "NEW-SIGNAL")
+                        log.info(f"[1-PER-CH] Position #{t['ticket']} fermée pour canal {canal}")
+                # Retirer l'entrée
+                manager.active.remove(entry)
+                return True
+    return False
+
 def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
     action = signal["action"]
     symbol = signal["symbol"]
@@ -1875,6 +1893,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
     canal = signal.get("source_channel", "Inconnu")
     mode = "DEMO" if DEMO_MODE else "LIVE"
     ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+
+    # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
+    _close_previous_signal(canal, bridge, manager)
 
     all_tps = signal["tps"]
     if not all_tps:
@@ -2110,6 +2131,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
     ch_num = CHANNEL_NUM_MAP.get(clean_canal, CHANNEL_NUM_MAP.get(clean_canal.lstrip("-"), "?"))
     expiry = datetime.now(timezone.utc) + timedelta(minutes=ORDER_EXPIRY_MIN)
+
+    # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
+    _close_previous_signal(canal, bridge, manager)
 
     # Utiliser le TP fourni par le parser s'il existe
     if signal.get("tps") and len(signal["tps"]) > 0:
