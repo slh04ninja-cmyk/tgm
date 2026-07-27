@@ -33,7 +33,7 @@ import threading
 import ssl
 import sys
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple  # ← IMPORT ESSENTIEL
+
 from dotenv import load_dotenv
 
 # =============================================================
@@ -603,7 +603,7 @@ timesfm_validator = TimesFMValidator()
 # =============================================================
 # SIGNAL PARSER
 # =============================================================
-from signal_parser import SignalParser, is_spam, TradeSignal
+from signal_parser import SignalParser, is_spam
 import bot_messages as msg
 
 # =============================================================
@@ -959,26 +959,6 @@ class MT5Bridge:
             log.debug(f"Fermeture #{ticket} ({comment}) P&L={pos.profit:.2f}")
         return ok
 
-    def modify_sl(self, ticket: int, new_sl: float, label: str = "") -> bool:
-        positions = mt5.positions_get(ticket=ticket)
-        if not positions:
-            return False
-        pos = positions[0]
-        sym = mt5.symbol_info(pos.symbol)
-        if sym is None:
-            return False
-        result = mt5.order_send({
-            "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": pos.symbol,
-            "position": ticket,
-            "sl": round(new_sl, sym.digits),
-            "tp": pos.tp,
-        })
-        ok = result and result.retcode == mt5.TRADE_RETCODE_DONE
-        if ok:
-            log.debug(f"SL modifié #{ticket} → {new_sl} {label}")
-        return ok
-
     def modify_sl_tp(self, ticket: int, new_sl: float, new_tp: float, label: str = "") -> bool:
         positions = mt5.positions_get(ticket=ticket)
         if not positions:
@@ -1050,26 +1030,6 @@ class MT5Bridge:
                 log.debug(f"SL modifié #{pos.ticket} (canal CH{channel_num}) → {new_sl}")
         log.info(f"<<<<< INFO >>>>> SL MOVE canal {channel_num} → {new_sl} sur {updated} positions")
 
-    def update_sl_all(self, new_sl: float):
-        updated = 0
-        positions = mt5.positions_get()
-        if positions:
-            for pos in positions:
-                if pos.magic != MAGIC_NUMBER:
-                    continue
-                sym = mt5.symbol_info(pos.symbol)
-                if not sym:
-                    continue
-                result = mt5.order_send({
-                    "action": mt5.TRADE_ACTION_SLTP,
-                    "symbol": pos.symbol,
-                    "position": pos.ticket,
-                    "sl": round(new_sl, sym.digits),
-                    "tp": pos.tp,
-                })
-                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                    updated += 1
-        log.info(f"<<<<< INFO >>>>> SL MOVE global → {new_sl} sur {updated} positions")
 
     def close_all(self, symbol: str | None = None, channel_num: int | None = None):
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
@@ -1354,22 +1314,6 @@ class TradeManager:
                 log.debug(f"Annulation ordre pending #{ticket}")
         entry["orders"] = []
 
-    def _get_gain_per_position(self, entry: dict) -> float:
-        signal = entry.get("signal", {})
-        action = signal.get("action", "")
-        zone_low = signal.get("zone_low", 0)
-        zone_high = signal.get("zone_high", 0)
-        entry_price = (zone_low + zone_high) / 2
-        tps = signal.get("tps", [])
-        if not tps:
-            return TP_FIXED_GAIN_USD
-        tp_final = tps[-1]
-        if action == "BUY":
-            potential_gain = tp_final - entry_price
-        else:
-            potential_gain = entry_price - tp_final
-        return min(TP_FIXED_GAIN_USD, potential_gain)
-
     def _get_tp_trigger(self, entry: dict) -> float:
         signal = entry.get("signal", {})
         tps = signal.get("tps", [])
@@ -1380,35 +1324,6 @@ class TradeManager:
         elif len(tps) >= 1:
             return tps[0]
         return 0.0
-
-    def _close_entry_tp_fixed(self, entry: dict, action: str, symbol: str, mt5_comment: str,
-                               canal: str, active_tickets: list, total_pnl: float):
-        """Ferme toutes les positions actives d'une entrée via TP-FIXED, met à jour le
-        P&L quotidien avec le P&L RÉEL (pas l'estimation flottante), et retire l'entrée
-        de self.active. Factorisé pour être appelable depuis le chemin normal ET depuis
-        le raccourci de détection précoce (voir _check_pnl_trigger / phase BE)."""
-        log.info(msg.log_tp_fixed_header(mt5_comment))
-        ticket_list = ", ".join([f"#{t['ticket']}" for t in active_tickets])
-        log.info(msg.log_tp_fixed_estimate(action, symbol, total_pnl, len(active_tickets)))
-        log.info(msg.log_tp_fixed_tickets(ticket_list))
-        actual_total_pnl = 0.0
-        for t in active_tickets:
-            if not t.get("_tp_fixed_closed"):
-                closed_ok = self.bridge.close_position(t["ticket"], "TP-FIXED")
-                t["_tp_fixed_closed"] = True
-                if closed_ok:
-                    real_pnl = self._get_last_pnl(t["ticket"], symbol)
-                    t["_last_pnl"] = real_pnl
-                    t["_reported"] = True
-                    actual_total_pnl += real_pnl
-                    self._update_daily_pnl(real_pnl)
-        if actual_total_pnl != total_pnl:
-            log.info(msg.log_tp_fixed_real_vs_estime(action, symbol, actual_total_pnl, total_pnl))
-        log.info(msg.log_daily_pnl_final(self._daily_pnl))
-        send_alert_sync(msg.alert_tp_fixed(action, symbol, actual_total_pnl, len(active_tickets), ticket_list, self._daily_pnl, canal))
-        with self._lock:
-            if entry in self.active:
-                self.active.remove(entry)
 
     def _check_pnl_trigger(self, entry: dict) -> bool:
         # ★★★ FIX : utiliser min_profit (pire position) au lieu de best_profit ★★★
@@ -2685,10 +2600,6 @@ def _is_signal_message(text: str) -> bool:
         return True
     return False
 
-async def heartbeat_loop(manager, tracker):
-    """Heartbeat désactivé — pas de messages BOT ACTIF"""
-    return
-
 async def main():
     global _main_loop, _alert_client
     _main_loop = asyncio.get_running_loop()
@@ -2718,8 +2629,6 @@ async def main():
         await client.start()
         _alert_client = client
         log.info("Telegram connecté.")
-
-        asyncio.create_task(heartbeat_loop(manager, tracker))
 
         chats = []
         channel_names = [
