@@ -741,7 +741,17 @@ class NewsManager:
                 for o in entry.get("orders", []):
                     self.bridge.cancel_order(o["order"])
                 entry["orders"] = []
+            # Capturer P&L avant fermeture
+            positions_before = mt5.positions_get()
+            tickets_before = {p.ticket: p for p in positions_before if p.magic == MAGIC_NUMBER} if positions_before else {}
             self.bridge.close_all()
+            # Mettre à jour le P&L quotidien pour chaque position fermée
+            import time as _t; _t.sleep(0.3)
+            for ticket, pos in tickets_before.items():
+                deals = mt5.history_deals_get(position=ticket)
+                if deals:
+                    pnl = sum(d.profit for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT)
+                    self.manager._update_daily_pnl(pnl)
 
     def stop(self):
         self._stop = True
@@ -1877,10 +1887,25 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
         for o in entry.get("orders", []):
             bridge.cancel_order(o["order"])
         to_remove.append(entry)
+    # Capturer P&L des positions avant fermeture
+    positions_before = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+    conflict_tickets = {}
+    if positions_before:
+        for p in positions_before:
+            if p.magic == MAGIC_NUMBER:
+                if ch_num is None or p.comment.startswith(f"CH{ch_num}-"):
+                    conflict_tickets[p.ticket] = p.profit
     for e in to_remove:
         if e in manager.active:
             manager.active.remove(e)
     bridge.close_all(symbol=symbol, channel_num=ch_num)
+    # Mettre à jour le P&L quotidien
+    import time as _t; _t.sleep(0.3)
+    for ticket in conflict_tickets:
+        deals = mt5.history_deals_get(position=ticket)
+        if deals:
+            pnl = sum(d.profit for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT)
+            manager._update_daily_pnl(pnl)
     return True
 
 def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager) -> bool:
@@ -1894,8 +1919,13 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                 for t in entry.get("tickets", []):
                     pos = manager._get_pos(t["ticket"])
                     if pos:
-                        bridge.close_position(t["ticket"], "NEW-SIGNAL")
-                        log.info(f"[1-PER-CH] Position #{t['ticket']} fermée pour canal {canal}")
+                        ticket = t["ticket"]
+                        symbol = sig.get("symbol", "")
+                        bridge.close_position(ticket, "NEW-SIGNAL")
+                        # Mettre à jour le P&L quotidien
+                        pnl = manager._get_last_pnl(ticket, symbol)
+                        manager._update_daily_pnl(pnl)
+                        log.info(f"[1-PER-CH] Position #{ticket} fermée pour canal {canal} P&L={pnl:+.2f}")
                 # Retirer l'entrée
                 manager.active.remove(entry)
                 return True
@@ -2807,7 +2837,23 @@ async def main():
             if signal_data.signal_type == "CLOSE":
                 canal = canal_name
                 ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), None))
-                bridge.close_all(symbol=signal_data.close_symbol, channel_num=ch_num)
+                # Capturer P&L avant fermeture
+                close_symbol = signal_data.close_symbol
+                positions_before = mt5.positions_get(symbol=close_symbol) if close_symbol else mt5.positions_get()
+                close_tickets = {}
+                if positions_before:
+                    for p in positions_before:
+                        if p.magic == MAGIC_NUMBER:
+                            if ch_num is None or p.comment.startswith(f"CH{ch_num}-"):
+                                close_tickets[p.ticket] = p
+                bridge.close_all(symbol=close_symbol, channel_num=ch_num)
+                # Mettre à jour le P&L quotidien
+                import time as _t; _t.sleep(0.3)
+                for ticket in close_tickets:
+                    deals = mt5.history_deals_get(position=ticket)
+                    if deals:
+                        pnl = sum(d.profit for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT)
+                        manager._update_daily_pnl(pnl)
                 return
 
             elif signal_data.signal_type == "SL_MOVE":
@@ -2906,7 +2952,8 @@ async def main():
                                     bridge.close_position(ticket)
                                     # ★ FIX : P&L réel post-clôture (pas le snapshot flottant pré-clôture)
                                     qa_pnl = manager._get_last_pnl(ticket, sig_dict["symbol"])
-                                    log.info(f"[FUSION FAIL] QA Market Price #{ticket} annulé (hors tolérance ±{FUSION_TOLERANCE})")
+                                    manager._update_daily_pnl(qa_pnl)
+                                    log.info(f"[FUSION FAIL] QA Market Price #{ticket} annulé (hors tolérance ±{FUSION_TOLERANCE}) P&L={qa_pnl:+.2f}")
                                     cancelled_qa = True
                                     qa_type_label = "Market Price"
                                 else:
