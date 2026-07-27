@@ -103,17 +103,19 @@ CHANNEL_NAME_17 = os.getenv("TG_CHANNEL_17", "")
 CHANNEL_NAME_18 = os.getenv("TG_CHANNEL_18", "")
 CHANNEL_NAME_19 = os.getenv("TG_CHANNEL_19", "")
 
-# Mapping canal → numéro
+# Mapping canal → numéro (TOUS les canaux 1-19)
 CHANNEL_NUM_MAP = {}
-for _i, _name in enumerate([CHANNEL_NAME, CHANNEL_NAME_2, CHANNEL_NAME_3,
-                             CHANNEL_NAME_4, CHANNEL_NAME_5, CHANNEL_NAME_6,
-                             CHANNEL_NAME_7, CHANNEL_NAME_8, CHANNEL_NAME_9], 1):
+_ALL_CHANNEL_NAMES = [
+    CHANNEL_NAME, CHANNEL_NAME_2, CHANNEL_NAME_3, CHANNEL_NAME_4, CHANNEL_NAME_5,
+    CHANNEL_NAME_6, CHANNEL_NAME_7, CHANNEL_NAME_8, CHANNEL_NAME_9, CHANNEL_NAME_10,
+    CHANNEL_NAME_11, CHANNEL_NAME_12, CHANNEL_NAME_13, CHANNEL_NAME_14, CHANNEL_NAME_15,
+    CHANNEL_NAME_16, CHANNEL_NAME_17, CHANNEL_NAME_18, CHANNEL_NAME_19,
+]
+for _i, _name in enumerate(_ALL_CHANNEL_NAMES, 1):
     if _name:
         CHANNEL_NUM_MAP[_name] = _i
         if _name.lstrip("-").isdigit():
             CHANNEL_NUM_MAP[_name.lstrip("-")] = _i
-            if _name not in CHANNEL_NUM_MAP:
-                CHANNEL_NUM_MAP[_name] = _i
 
 MT5_LOGIN    = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
@@ -154,7 +156,7 @@ TIMESFM_SYMBOL          = os.getenv("TIMESFM_SYMBOL", "XAUUSDm")  # symbole MT5 
 
 
 # === HEARTBEAT ===
-HEARTBEAT_INTERVAL_MIN = int(os.getenv("HEARTBEAT_INTERVAL_MIN", "10"))  # minutes
+
 
 # === PARAMÈTRES SL (définis dans .env) ===
 SL_PRIX_UNIQUE = float(os.getenv("SL_PRIX_UNIQUE", "15.0"))
@@ -746,7 +748,7 @@ class NewsManager:
             tickets_before = {p.ticket: p for p in positions_before if p.magic == MAGIC_NUMBER} if positions_before else {}
             self.bridge.close_all()
             # Mettre à jour le P&L quotidien pour chaque position fermée
-            import time as _t; _t.sleep(0.3)
+            time.sleep(0.3)
             for ticket, pos in tickets_before.items():
                 deals = mt5.history_deals_get(position=ticket)
                 if deals:
@@ -1096,7 +1098,7 @@ class TradeManager:
         # à l'OUVERTURE (DEAL_ENTRY_IN) de chaque position, sur une fenêtre élargie
         # (la position a pu être ouverte avant le début de la journée de trading),
         # et on l'utilise comme référence fiable au lieu du magic du deal OUT.
-        lookup_start = start - timedelta(days=7)
+        lookup_start = start - timedelta(days=3)
         all_deals = mt5.history_deals_get(lookup_start, now)
         if all_deals is None or len(all_deals) == 0:
             return 0.0
@@ -1499,16 +1501,15 @@ class TradeManager:
         return total if found else 0.0
 
     def _get_close_reason(self, ticket: int, symbol: str) -> str:
-        since = datetime.now(timezone.utc) - timedelta(days=7)
-        deals = mt5.history_deals_get(since, datetime.now(timezone.utc))
+        # ★ Optimisation : chercher directement par position_id au lieu de scanner tout l'historique
+        deals = mt5.history_deals_get(position=ticket)
         if deals:
             for deal in reversed(deals):
-                if deal.symbol == symbol and deal.position_id == ticket:
-                    if deal.entry == mt5.DEAL_ENTRY_OUT:
-                        if deal.reason == mt5.DEAL_REASON_TP:
-                            return "TP"
-                        elif deal.reason == mt5.DEAL_REASON_SL:
-                            return "SL"
+                if deal.entry == mt5.DEAL_ENTRY_OUT:
+                    if deal.reason == mt5.DEAL_REASON_TP:
+                        return "TP"
+                    elif deal.reason == mt5.DEAL_REASON_SL:
+                        return "SL"
         return "OTHER"
 
     # =============================================================
@@ -1784,24 +1785,26 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
                 conflict = True
                 break
     if not conflict:
-        for entry in manager.active:
-            if (entry["signal"]["symbol"] == symbol
-                    and entry["signal"]["action"] == opposite
-                    and entry["signal"].get("source_channel") == canal):
-                conflict = True
-                break
+        with manager._lock:
+            for entry in manager.active:
+                if (entry["signal"]["symbol"] == symbol
+                        and entry["signal"]["action"] == opposite
+                        and entry["signal"].get("source_channel") == canal):
+                    conflict = True
+                    break
     if not conflict:
         return False
     log.warning(f"<<<<< WARNING >>>>> CONFLIT {symbol} (canal {canal}) : entrant={new_action} existant={opposite}")
     to_remove = []
-    for entry in manager.active:
-        if entry["signal"]["symbol"] != symbol:
-            continue
-        if entry["signal"].get("source_channel") != canal:
-            continue
-        for o in entry.get("orders", []):
-            bridge.cancel_order(o["order"])
-        to_remove.append(entry)
+    with manager._lock:
+        for entry in manager.active:
+            if entry["signal"]["symbol"] != symbol:
+                continue
+            if entry["signal"].get("source_channel") != canal:
+                continue
+            for o in entry.get("orders", []):
+                bridge.cancel_order(o["order"])
+            to_remove.append(entry)
     # Capturer P&L des positions avant fermeture
     positions_before = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
     conflict_tickets = {}
@@ -1815,7 +1818,7 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
             manager.active.remove(e)
     bridge.close_all(symbol=symbol, channel_num=ch_num)
     # Mettre à jour le P&L quotidien
-    import time as _t; _t.sleep(0.3)
+    time.sleep(0.3)
     for ticket in conflict_tickets:
         deals = mt5.history_deals_get(position=ticket)
         if deals:
@@ -1837,7 +1840,8 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                         ticket = t["ticket"]
                         symbol = sig.get("symbol", "")
                         bridge.close_position(ticket, "NEW-SIGNAL")
-                        # Mettre à jour le P&L quotidien
+                        # Mettre à jour le P&L quotidien (attendre que le deal apparaisse)
+                        time.sleep(0.3)
                         pnl = manager._get_last_pnl(ticket, symbol)
                         manager._update_daily_pnl(pnl)
                         log.info(f"[1-PER-CH] Position #{ticket} fermée pour canal {canal} P&L={pnl:+.2f}")
@@ -2757,7 +2761,7 @@ async def main():
                                 close_tickets[p.ticket] = p
                 bridge.close_all(symbol=close_symbol, channel_num=ch_num)
                 # Mettre à jour le P&L quotidien
-                import time as _t; _t.sleep(0.3)
+                time.sleep(0.3)
                 for ticket in close_tickets:
                     deals = mt5.history_deals_get(position=ticket)
                     if deals:
@@ -2859,7 +2863,8 @@ async def main():
                                 pos = mt5.positions_get(ticket=ticket)
                                 if pos:
                                     bridge.close_position(ticket)
-                                    # ★ FIX : P&L réel post-clôture (pas le snapshot flottant pré-clôture)
+                                    # ★ FIX : P&L réel post-clôture (attendre que le deal soit dans l'historique)
+                                    time.sleep(0.3)
                                     qa_pnl = manager._get_last_pnl(ticket, sig_dict["symbol"])
                                     manager._update_daily_pnl(qa_pnl)
                                     log.info(f"[FUSION FAIL] QA Market Price #{ticket} annulé (hors tolérance ±{FUSION_TOLERANCE}) P&L={qa_pnl:+.2f}")
@@ -2910,8 +2915,6 @@ async def main():
         log.info(f" Gain fixe par position : {TP_FIXED_GAIN_USD}$")
         log.info(f" BE déclenché à : {PNL_TRIGGER_USD}$")
         log.info(f" Objectif quotidien : {DAILY_PROFIT_LIMIT}$")
-
-        log.info(f" Heartbeat : {HEARTBEAT_INTERVAL_MIN} min")
         log.info(f" SL prix unique: {SL_PRIX_UNIQUE}$")
         log.info(f" SL total (2 positions) : {SL_TOTAL}$")
         log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC)")
