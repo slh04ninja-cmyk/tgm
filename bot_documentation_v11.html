@@ -337,11 +337,12 @@ Canal: Alixza Gold Trading</div>
 
 <h3>6.1 Types de Quick Alert</h3>
 <table>
-<tr><th>Type</th><th>Format</th><th>Prix</th><th>Exécution</th></tr>
-<tr><td><span class="badge badge-green">AL-MP (Type 1)</span></td><td><code>ALERT</code> (sans prix)</td><td>Aucun</td><td>MARKET au prix actuel, pas de tolérance</td></tr>
-<tr><td><span class="badge badge-orange">AL-MP (Type 2)</span></td><td><code>SELL XAUUSD @ 4030</code></td><td>Dans le signal</td><td>MARKET si prix dans tolérance ±3$</td></tr>
-<tr><td><span class="badge badge-yellow">Market Price</span></td><td><code>GOLD BUY NOW</code></td><td>Aucun</td><td>MARKET immédiat</td></tr>
+<tr><th>Type</th><th>Format</th><th>Prix</th><th>Tolérance</th><th>Exécution</th></tr>
+<tr><td><span class="badge badge-green">Sans prix</span></td><td><code>ALERT</code>, <code>BUY NOW</code>, <code>SELL MARKET</code></td><td>Aucun</td><td>Aucune</td><td>MARKET au prix actuel</td></tr>
+<tr><td><span class="badge badge-orange">Avec prix</span></td><td><code>SELL XAUUSD @ 4030</code></td><td>Dans le signal</td><td>± QA_PRICE_TOLERANCE</td><td>MARKET si prix dans tolérance</td></tr>
 </table>
+
+<div class="highlight info"><strong>AL-MP (Type 1) et Market Price sont identiques :</strong> les deux sont des signaux sans prix (<code>is_market_price=True</code>) qui s'exécutent au prix actuel du marché. Le nom change selon le canal d'origine, mais le comportement est le même.</div>
 
 <h3>6.2 Flux d'exécution</h3>
 <div class="flow"><span class="cyan">Quick Alert reçue :</span> BUY XAUUSD @ 4095
