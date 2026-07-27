@@ -288,13 +288,31 @@ def in_blocked_window() -> tuple[bool, str]:
 _alert_client = None
 _main_loop = None
 
+# ★ DÉDUPLICATION DES ALERTES : éviter d'envoyer 2x le même message
+_alert_dedup_cache: dict = {}  # hash(message) -> timestamp
+_ALERT_DEDUP_TTL = 10.0  # secondes
+
 def send_alert_sync(message: str, _retries: int = 2):
     """Envoie non-bloquant avec retry automatique.
     - 1er essai : timeout 8s
     - Si échec : 1 retry après 2s (connexion Telegram instable)
-    - Ne bloque JAMAIS la boucle de trading plus de 10s total"""
+    - Ne bloque JAMAIS la boucle de trading plus de 10s total
+    - Dédup: ignore les messages identiques envoyés dans les 10 dernières secondes"""
     if not TG_ALERT_CHANNEL or not _alert_client or not _main_loop:
         return
+    # --- Déduplication envoi ---
+    now_ts = time.time()
+    msg_hash = hash(message)
+    if len(_alert_dedup_cache) > 200:
+        cutoff = now_ts - _ALERT_DEDUP_TTL
+        stale = [k for k, v in _alert_dedup_cache.items() if v < cutoff]
+        for k in stale:
+            del _alert_dedup_cache[k]
+    if msg_hash in _alert_dedup_cache:
+        log.debug(f"[ALERT-DEDUP] Message déjà envoyé récemment → ignoré")
+        return
+    _alert_dedup_cache[msg_hash] = now_ts
+    # --- Fin dédup ---
     for attempt in range(_retries):
         try:
             coro = _alert_client.send_message(TG_ALERT_CHANNEL, message)
@@ -2721,11 +2739,34 @@ async def main():
             except Exception as e:
                 log.warning(f"Canal introuvable ({env_name}={ch_value}) : {e}")
 
+        # ★ DÉDUPLICATION : éviter le double traitement du même message
+        # (ex: canal + groupe de discussion lié → Telegram livre 2x le même msg)
+        # Clé = hash(contenu + chat_id) pour couvrir les messages identiques
+        # livrés via des chats différents (canal vs discussion group).
+        _seen_messages: dict = {}  # dedup_key -> timestamp
+        _SEEN_TTL = 60.0
+
         @client.on(events.NewMessage(chats=chats))
         async def handler(event):
             text = event.message.text or ""
             chat = await event.get_chat()
             canal_name = entity_to_name.get(chat.id, getattr(chat, "title", "inconnu"))
+
+            # --- Déduplication ---
+            now_ts = time.time()
+            # Clé basée sur le contenu : même texte du même canal → même clé
+            text_hash = hash(text.strip())
+            dedup_key = (canal_name, text_hash)
+            if len(_seen_messages) > 500:
+                cutoff = now_ts - _SEEN_TTL
+                stale = [k for k, v in _seen_messages.items() if v < cutoff]
+                for k in stale:
+                    del _seen_messages[k]
+            if dedup_key in _seen_messages:
+                log.debug(f"[DEDUP] message déjà traité pour {canal_name} → ignoré")
+                return
+            _seen_messages[dedup_key] = now_ts
+            # --- Fin déduplication ---
 
             if is_spam(text):
                 return
