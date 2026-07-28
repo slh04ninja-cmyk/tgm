@@ -305,15 +305,29 @@ def _extract_entry_and_zone(normalized_text: str) -> Tuple[Optional[float], Opti
             if 1000 <= low <= 99999 and 1000 <= high <= 99999:
                 return min(low, high), max(low, high), False
 
-    # ★★★ BUG #7 CORRIGÉ : priorité aux mots-clés ★★★
-    # 4. Prix unique avec mots-clés (ENTRY, OPEN, ZONE, @)
-    entry_keywords = ['ENTRY', 'OPEN', 'ZONE', '@']
+    # ★★★ FIX : détecter les zones AVANT les mots-clés ★★★
+    # Ex: @4067-4060 → zone 4060-4067 (tiret ou espace comme séparateur)
+    m = re.search(r'(?:@|ENTRY|OPEN|ZONE)\s*:?\s*(\d{4,6}(?:\.\d+)?)\s*[-\s]\s*(\d{4,6}(?:\.\d+)?)', normalized_text)
+    if m:
+        low = float(m.group(1)); high = float(m.group(2))
+        if 1000 <= low <= 99999 and 1000 <= high <= 99999:
+            return min(low, high), max(low, high), False
+
+    # 4. Prix unique avec mots-clés (ENTRY, OPEN, ZONE, @) — un seul prix
+    entry_keywords = ['ENTRY', 'ZONE', '@']
     for kw in entry_keywords:
         m = re.search(rf'{kw}\s*:?\s*' + RE_NUM, normalized_text)
         if m:
             val = float(m.group(1))
             if 1000 <= val <= 99999:
                 return val, val, True
+
+    # 4b. OPEN comme mot-clé d'entrée (mais pas "TP OPEN")
+    m = re.search(r'(?<!TP\s)OPEN\s*:?\s*' + RE_NUM, normalized_text)
+    if m:
+        val = float(m.group(1))
+        if 1000 <= val <= 99999:
+            return val, val, True
 
     # 5. Mot-clé LIMIT/LMT
     m = re.search(r'(\d{4,6}(?:\.\d+)?)\s+(?:LIMIT|LMT)\s+(\d{4,6}(?:\.\d+)?)', normalized_text)
@@ -394,27 +408,34 @@ def _extract_entry_and_zone(normalized_text: str) -> Tuple[Optional[float], Opti
     return None, None, False
 
 def _extract_all_tps(normalized_text: str) -> List[float]:
+    # ★ FIX : "TP OPEN" = pas de TP spécifique (sera généré par le bot)
+    if re.search(r'TP\s+OPEN', normalized_text):
+        return []
+
+    # ★ FIX : extraire le SL pour l'exclure des TP
+    sl_val = _extract_sl(normalized_text)
+
     tps = {}
     sep = r'[:\-=_/|▶️➡️→]?'
 
     for m in re.finditer(r'TP\s*(\d+)?\s*' + sep + r'\s*' + RE_NUM, normalized_text):
         num = int(m.group(1)) if m.group(1) else len(tps) + 1
         val = float(m.group(2))
-        if 1000 <= val <= 99999:
+        if 1000 <= val <= 99999 and val != sl_val:
             tps[num] = val
 
     if not tps:
         for m in re.finditer(r'(?:TAKE\s*PROFIT|TARGET|TGT)\s*(\d+)?\s*' + sep + r'\s*' + RE_NUM, normalized_text):
             num = int(m.group(1)) if m.group(1) else len(tps) + 1
             val = float(m.group(2))
-            if 1000 <= val <= 99999:
+            if 1000 <= val <= 99999 and val != sl_val:
                 tps[num] = val
 
     if not tps:
         for m in re.finditer(r'T\s*(\d+)?\s*' + sep + r'\s*' + RE_NUM, normalized_text):
             num = int(m.group(1)) if m.group(1) else len(tps) + 1
             val = float(m.group(2))
-            if 1000 <= val <= 99999:
+            if 1000 <= val <= 99999 and val != sl_val:
                 tps[num] = val
 
     return [tps[k] for k in sorted(tps.keys())]
