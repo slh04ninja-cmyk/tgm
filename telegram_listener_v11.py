@@ -4,7 +4,7 @@
  Version 11.1.0 — Position unique (plus de cas à 2 positions)
  MODIFICATIONS v11.0.0 :
  - Un seul MARKET par signal, toujours (pas de LIMIT, pas de pending, pas de fusion 2 positions)
- - Signaux zone convertis en Prix Unique (midian) → ZN1/ZN2
+ - Signaux zone : ZN1 (prix dans zone) ou ZN2 (prix entre zone et SL) → MARKET
  - Prix Unique : PU1 (entry→SL) ou PU2 (tolérance) → MARKET
  - Quick Alert : AL-MP uniquement, tolérance prix QA_PRICE_TOLERANCE
  - Fusion : SL/TP mis à jour sur QA existant (pas de 2ème position)
@@ -1930,20 +1930,82 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
     orders, tickets = [], []
     is_single_price = signal.get("is_single_price", False)
 
-    # ★ CONVERTIR LES SIGNAUX ZONE EN PRIX UNIQUE (midian de la zone)
-    # Un signal zone (BUY 4000 4010) devient un Prix Unique avec entry=4005
+    # ★ SIGNAUX ZONE : garder la zone intacte (pas de conversion en midian)
+    # Exécution MARKET si le prix est dans la zone OU entre la zone et SL.
+    # Sinon annulé.
     is_zone_signal = False
     if not is_single_price and zone_low != zone_high:
-        midian = round((zone_low + zone_high) / 2, 2)
-        log.debug(f"Signal zone converti en Prix Unique: {zone_low}-{zone_high} → entry={midian}")
-        zone_low = midian
-        zone_high = midian
-        zone_mid = midian
-        signal["zone_low"] = midian
-        signal["zone_high"] = midian
-        signal["zone_mid"] = midian
-        is_single_price = True
         is_zone_signal = True
+
+    # ── Signaux Zone ──
+    # Prix dans la zone [zone_low, zone_high] → MARKET ZN1
+    # Prix entre la zone et SL → MARKET ZN2
+    # Sinon annulé
+    if is_zone_signal and len(all_tps) >= 1:
+        unique_lot = LOT_UNIQUE_TRADE
+
+        # ZN1 : prix dans la zone
+        in_zone = zone_low <= current <= zone_high
+        # ZN2 : prix entre la zone et SL (meilleur prix)
+        if action == "BUY":
+            # SL < zone_low, prix entre SL et zone_low
+            between_zone_sl = sl < current < zone_low
+        else:
+            # SL > zone_high, prix entre zone_high et SL
+            between_zone_sl = zone_high < current < sl
+
+        if in_zone:
+            mt5_comment_zn = f"CH{ch_num}-ZN1"
+        elif between_zone_sl:
+            mt5_comment_zn = f"CH{ch_num}-ZN2"
+        else:
+            log.info(msg.log_refuse(ch_num, "-ZN", msg.MOTIF_PRIX_HORS_ZONE))
+            log.warning(f"ZN annulé — prix={current} hors zone | "
+                        f"zone={zone_low}-{zone_high} SL={sl}")
+            return
+
+        log.debug(f"ZN — {mt5_comment_zn} | zone={zone_low}-{zone_high} SL={sl} prix={current}")
+
+        log.debug(f"  → MARKET {action} @{current} lot={unique_lot} TP={tp_final} SL={sl}")
+        try:
+            t = bridge.place_market_order(signal, unique_lot, tp=tp_final, sl=sl, comment=mt5_comment_zn)
+        except Exception as e:
+            log.error(f"  MARKET EXCEPTION: {e}")
+            t = None
+        if t:
+            tickets.append({
+                "ticket": t, "lot": unique_lot, "role": "market_single",
+                "entry_price": current, "tp_index": tp_trigger_idx, "tp_target": tp3,
+                "tp3": tp3, "tp_final": tp_final, "sl_step": 0, "trail_active": False,
+                "be_active": False, "be_sl": 0,
+            })
+            log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final}")
+            send_alert_sync(
+                f"🟢 {action} {symbol} | {mt5_comment_zn}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"MARKET: @{current} | Lot: {unique_lot}\n"
+                f"TICKET: {t}\n"
+                f"TP: {tp_final} | SL: {sl}\n"
+                f"Canal: {canal}"
+            )
+        else:
+            log.error("  ✗ MARKET échoué")
+            return
+
+        entry = {
+            "signal": signal,
+            "orders": orders,
+            "tickets": tickets,
+            "expiry": expiry,
+            "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "_signal_id": f"{symbol}_{action}_{int(time.time())}",
+            "_expected_positions": 1,
+            "_mt5_comment": mt5_comment_zn,
+        }
+        manager.register(entry)
+        tracker.log_trade_open(entry)
+        log.info(msg.log_order_placed(mt5_comment_zn, "MKT", t, current, sl))
+        return
 
     # ── Prix unique ──
     if is_single_price and len(all_tps) >= 1:
@@ -1951,13 +2013,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
         sl_price = sl
         unique_lot = LOT_UNIQUE_TRADE
 
-        # ★ TOLÉRANCE selon type : ZN pour zone, PU pour prix unique
-        if is_zone_signal:
-            PRICE_TOLERANCE = float(os.getenv("ZN_PRICE_TOLERANCE", "3.0"))
-            prefix = "ZN"
-        else:
-            PRICE_TOLERANCE = float(os.getenv("PU_PRICE_TOLERANCE", "3.0"))
-            prefix = "PU"
+        # ★ TOLÉRANCE : PU pour prix unique
+        PRICE_TOLERANCE = float(os.getenv("PU_PRICE_TOLERANCE", "3.0"))
+        prefix = "PU"
 
         # Type 1 : prix entre entry et SL
         if action == "BUY":
@@ -2134,19 +2192,29 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             default_tp = entry_price - 10.0
             log.warning(f"Quick Alert : TP ajusté à {default_tp} (doit être < entry)")
 
-    # ★ VÉRIFICATION TOLÉRANCE DE PRIX (QA Type 2 avec prix)
-    # Si le signal n'est pas un "market price" (pas de prix), on exécute directement.
-    # Si le signal a un prix, on vérifie que le prix actuel est dans [entry ± TOLERANCE].
+    # ★ VÉRIFICATION TOLÉRANCE DE PRIX (QA avec prix)
+    # Si le prix a bougé dans le sens du TP (favorable) → MARKET (meilleur prix, pas de limite).
+    # Si le prix a bougé CONTRE le signal de > QA_PRICE_TOLERANCE → annulé.
+    # Ex: BUY 4000, prix actuel 3990 → favorable (meilleur prix) → MARKET
+    # Ex: BUY 4000, prix actuel 4004 → défavorable (> 3$ contre) → annulé
     QA_PRICE_TOLERANCE = float(os.getenv("QA_PRICE_TOLERANCE", "3.0"))
     if not is_market_price and entry_price is not None:
-        if abs(current - entry_price) > QA_PRICE_TOLERANCE:
-            log.info(f"Quick Alert annulée — prix hors tolérance | "
-                     f"prix={current} entry={entry_price} écart={abs(current-entry_price):.1f} > tolérance={QA_PRICE_TOLERANCE}")
+        if action == "BUY":
+            # Favorable: prix <= entry (on achète moins cher)
+            # Défavorable: prix > entry + tolerance
+            is_unfavorable = current > entry_price + QA_PRICE_TOLERANCE
+        else:  # SELL
+            # Favorable: prix >= entry (on vend plus cher)
+            # Défavorable: prix < entry - tolerance
+            is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
+        if is_unfavorable:
+            log.info(f"Quick Alert annulée — prix défavorable | "
+                     f"prix={current} entry={entry_price} écart>défavorable de {QA_PRICE_TOLERANCE}")
             send_alert_sync(
                 f"❌ QA ANNULÉE | {action} {symbol}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"Prix: {current} | Entry signal: {entry_price}\n"
-                f"Écart: {abs(current-entry_price):.1f} > {QA_PRICE_TOLERANCE}\n"
+                f"Prix défavorable (>{QA_PRICE_TOLERANCE}$ contre signal)\n"
                 f"Canal: {canal}"
             )
             return
@@ -2408,10 +2476,12 @@ async def main():
 
         # ★ DÉDUPLICATION : éviter le double traitement du même message
         # (ex: canal + groupe de discussion lié → Telegram livre 2x le même msg)
-        # Clé = hash(contenu + chat_id) pour couvrir les messages identiques
+        # Clé 1 = message_id (fiable côté Telegram, unique par message)
+        # Clé 2 = hash(contenu + canal) pour couvrir les messages identiques
         # livrés via des chats différents (canal vs discussion group).
         _seen_messages: dict = {}  # dedup_key -> timestamp
-        _SEEN_TTL = 60.0
+        _seen_msg_ids: set = set()  # message_ids déjà traités
+        _SEEN_TTL = 120.0
 
         @client.on(events.NewMessage(chats=chats))
         async def handler(event):
@@ -2421,7 +2491,12 @@ async def main():
 
             # --- Déduplication ---
             now_ts = time.time()
-            # Clé basée sur le contenu : même texte du même canal → même clé
+            msg_id = event.message.id
+            # Clé 1 : message_id (le plus fiable)
+            if msg_id in _seen_msg_ids:
+                log.debug(f"[DEDUP] message_id {msg_id} déjà traité → ignoré")
+                return
+            # Clé 2 : contenu + canal (même texte du même canal → même clé)
             text_hash = hash(text.strip())
             dedup_key = (canal_name, text_hash)
             if len(_seen_messages) > 500:
@@ -2432,6 +2507,10 @@ async def main():
             if dedup_key in _seen_messages:
                 log.debug(f"[DEDUP] message déjà traité pour {canal_name} → ignoré")
                 return
+            _seen_msg_ids.add(msg_id)
+            if len(_seen_msg_ids) > 2000:
+                # Garder seulement les 1000 plus récents
+                _seen_msg_ids.clear()
             _seen_messages[dedup_key] = now_ts
             # --- Fin déduplication ---
 
@@ -2574,62 +2653,50 @@ async def main():
                 if found_qa is not None:
                     merge_quick_alert(found_qa, key, sig_dict, bridge, manager, tracker, _quick_alerts)
                 else:
-                    # --- Échec fusion : annuler le QA, qu'il soit une position ouverte
-                    # (Market Price) OU un ordre LIMIT encore en attente ---
-                    cancelled_qa = False
-                    qa_pnl = 0.0
-                    qa_type_label = ""
+                    # --- Hors tolérance de fusion : mettre à jour SL/TP du QA existant
+                    # (pas de fermeture, pas de 2ème position) ---
+                    updated_qa = False
+                    real_sl = sig_dict["sl"]
+                    tp_final_fusion = sig_dict["tps"][-1] if sig_dict["tps"] else 0
                     for idx, qa in enumerate(qa_list):
                         ticket = qa.get("ticket")
-                        if qa.get("is_market_price", False):
-                            # QA déjà ouverte en position réelle → fermer
-                            if ticket:
-                                pos = mt5.positions_get(ticket=ticket)
-                                if pos:
-                                    bridge.close_position(ticket)
-                                    # ★ FIX : P&L réel post-clôture (attendre que le deal soit dans l'historique)
-                                    time.sleep(0.3)
-                                    qa_pnl = manager._get_last_pnl(ticket, sig_dict["symbol"])
-                                    manager._update_daily_pnl(qa_pnl)
-                                    log.info(f"[FUSION FAIL] QA Market Price #{ticket} annulé (hors tolérance ±{FUSION_TOLERANCE}) P&L={qa_pnl:+.2f}")
-                                    cancelled_qa = True
-                                    qa_type_label = "Market Price"
-                                else:
-                                    log.debug(f"[FUSION FAIL] QA #{ticket} déjà fermé")
-                        else:
-                            # ★ FIX : QA-LMT encore pending → annuler l'ORDRE (pas une position),
-                            # sinon il reste orphelin dans MT5, jamais suivi par le bot s'il se
-                            # remplit plus tard (aucune entrée ne le référence plus).
-                            if ticket:
-                                order = mt5.orders_get(ticket=ticket)
-                                if order:
-                                    bridge.cancel_order(ticket)
-                                    qa_entry = qa.get("entry")
-                                    if qa_entry is not None:
-                                        qa_entry["orders"] = [o for o in qa_entry.get("orders", []) if o["order"] != ticket]
-                                    log.info(f"[FUSION FAIL] QA-LMT #{ticket} annulé (hors tolérance ±{FUSION_TOLERANCE})")
-                                    cancelled_qa = True
-                                    qa_type_label = "LMT"
-                                else:
-                                    log.debug(f"[FUSION FAIL] QA-LMT #{ticket} déjà résolu (rempli ou expiré)")
-                        # Retirer le QA de la liste
-                        qa_list.pop(idx)
-                        if not qa_list:
-                            _quick_alerts.pop(key, None)
-                        break
+                        if ticket:
+                            pos = mt5.positions_get(ticket=ticket)
+                            if pos:
+                                # QA actif → mettre à jour SL/TP avec ceux du signal complet
+                                bridge.modify_sl_tp(ticket, real_sl, tp_final_fusion, "[FUSION-SL-TP-OOT]")
+                                entry_qa = qa.get("entry")
+                                if entry_qa:
+                                    for t in entry_qa.get("tickets", []):
+                                        if t["ticket"] == ticket:
+                                            t["tp_final"] = tp_final_fusion
+                                            t["tp_target"] = tp_final_fusion
+                                            t["tp3"] = tp_final_fusion
+                                            break
+                                    entry_qa["signal"] = sig_dict
+                                    entry_qa["_is_quick_alert"] = False
+                                updated_qa = True
+                                log.info(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
+                                send_alert_sync(
+                                    f"✏️ FUSION SL/TP mis à jour (hors tolérance)\n"
+                                    f"━━━━━━━━━━━━━━━━━━\n"
+                                    f"QA : #{ticket}\n"
+                                    f"Nouveau SL: {real_sl} | Nouveau TP: {tp_final_fusion}\n"
+                                    f"Canal: {canal_name}"
+                                )
+                                break
+                            else:
+                                # QA déjà fermé → ignorer le signal complet
+                                log.info(f"[FUSION OOT] QA #{ticket} déjà fermé → signal complet ignoré")
+                                qa_list.pop(idx)
+                                if not qa_list:
+                                    _quick_alerts.pop(key, None)
+                                updated_qa = True
+                                break
 
-                    if cancelled_qa:
-                        log.info(f"[FUSION FAIL] Exécution signal complet après annulation QA")
-                        pnl_line = f"P&L : {qa_pnl:+.2f} $\n" if qa_type_label == "Market Price" else ""
-                        send_alert_sync(
-                            f"⚠️ FUSION ÉCHOUÉE | {sig_dict['action']}\n"
-                            f"━━━━━━━━━━━━━━━━━━\n"
-                            f"QA {qa_type_label} annulé (hors ±{FUSION_TOLERANCE})\n"
-                            f"{pnl_line}"
-                            f"Signal complet exécuté\n"
-                            f"Canal: {canal_name}"
-                        )
-                    execute_signal(sig_dict, bridge, manager, tracker)
+                    if not updated_qa:
+                        # Aucun QA trouvé → exécuter le signal complet normalement
+                        execute_signal(sig_dict, bridge, manager, tracker)
 
         # Banner
         mode = "🔲 DEMO" if DEMO_MODE else "💰 LIVE"
