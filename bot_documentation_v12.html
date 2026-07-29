@@ -781,19 +781,120 @@ Max = 500 entrées (FIFO)
 
 <p>La ligne "Canal: ..." est supprimée de la clé pour capter les doublons canal+discussion group.</p>
 
-<h3>Types d'alertes</h3>
+<h3>Formats d'alertes (v12.1.0)</h3>
+
+<h4>🟢 Ouvertures de position (ZN1/ZN2/PU1/PU2)</h4>
+<div class="signal-box">🟢 XAUUSD | SELL | CH6-ZN1
+━━━━━━━━━━━━━━━━━━
+MARKET: 4028.56 | Lot: 0.01
+TICKET: 1591670605
+TP: 4021.0 | SL: 4036.0
+Canal: FX VIP SERVICE</div>
+<div class="signal-box">🟢 XAUUSD | BUY | CH3-ZN2
+━━━━━━━━━━━━━━━━━━
+MARKET: 4026.00 | Lot: 0.01
+TICKET: 1591794427
+TP: 4004.0 | SL: 4039.0
+Canal: EAGLE FOREX PESEARCH</div>
+
+<h4>⚡ Quick Alert (AL-MP)</h4>
+<div class="signal-box">⚡ XAUUSD | SELL | CH5-AL-MP
+━━━━━━━━━━━━━━━━━━
+MARKET: 4042.85 | Lot: 0.01
+TICKET: 1592437254
+TP: 4029.0 | SL: 4054.0
+Canal: AMELIA GOLD TRADER</div>
+
+<h4>🎯 Clôtures (TP / SL / CLOSE)</h4>
+<div class="signal-box">🎯 SELL | CH6-ZN1 | TP
+━━━━━━━━━━━━━━━━━━
+P&L: +10.00$
+Ticket: 1591670605
+P&L QT: 45.50$
+Canal: FX VIP SERVICE</div>
+<div class="signal-box">🛑 BUY | CH3-ZN2 | SL
+━━━━━━━━━━━━━━━━━━
+P&L: -7.20$
+Ticket: 1591794427
+P&L QT: -7.20$
+Canal: EAGLE FOREX PESEARCH</div>
+
+<h4>🔒 Break-Even</h4>
+<div class="signal-box">🔒 BUY | CH15-AL-MP | BE
+━━━━━━━━━━━━━━━━━━
+SL → 4023.39
+TP → 4033.39 (+10.0$)
+Canal: GOLD BASICS ACADEMY</div>
+
+<h4>✅ Fusion (QA + signal complet)</h4>
+<div class="signal-box">✅ BUY | CH5 | FUSION
+━━━━━━━━━━━━━━━━━━
+QA : #1592437254
+SL : 4060.0
+TP : 4035.0
+Canal: AMELIA GOLD TRADER</div>
+<div class="signal-box">✏️ SELL | CH6 | FUSION (hors tolérance)
+━━━━━━━━━━━━━━━━━━
+QA : #1592437254
+SL : 4060.0
+TP : 4035.0
+Canal: FX VIP SERVICE</div>
+
+<h4>❌ QA déjà fermé</h4>
+<div class="signal-box">❌ BUY | CH15 | QA déjà SL
+━━━━━━━━━━━━━━━━━━
+QA : #1592437254
+P&L : -7.20 $
+FUSION IGNORÉ
+Canal: GOLD BASICS ACADEMY</div>
+<div class="signal-box">✅ SELL | CH5 | QA déjà TP
+━━━━━━━━━━━━━━━━━━
+QA : #1592437254
+P&L : +10.00 $
+FUSION IGNORÉ
+Canal: AMELIA GOLD TRADER</div>
+
+<h4>❌ QA annulée (prix défavorable)</h4>
+<div class="signal-box">❌ SELL | CH6 | QA ANNULÉE
+━━━━━━━━━━━━━━━━━━
+Prix: 4010.00 | Entry: 4045.00
+Prix défavorable (>3.0$)
+Canal: FX VIP SERVICE</div>
+
+<h4>🚫 TimesFM rejet</h4>
+<div class="signal-box">🚫 SIGNAL REJETÉ PAR TIMESFM
+━━━━━━━━━━━━━━━━━━
+BUY XAUUSD
+Prédit: SELL (5.2 pips)
+Confiance: 0.42
+Raison: direction prédite=SELL ≠ signal=BUY
+Canal: EAGLE FOREX PESEARCH</div>
+
+<h4>🚨 Système</h4>
+<div class="signal-box">🚨 OBJECTIF QUOTIDIEN ATTEINT
+━━━━━━━━━━━━━━━━━━
+P&L total: 72.30$ / Limite: 70.0$
+Positions fermées : 3
+⏸️ Trading arrêté pour aujourd'hui</div>
+<div class="signal-box">💥 BOT CRASH !
+━━━━━━━━━━━━━━━━━━
+Erreur: ConnectionError: MT5 timeout
+⏰ 2026-07-29 14:30:00 UTC</div>
+
+<h3>Tableau récapitulatif</h3>
 <table>
-<tr><th>Emoji</th><th>Type</th><th>Trigger</th></tr>
-<tr><td>🟢</td><td>Ouverture MARKET</td><td>Signal ZN1/ZN2/PU1/PU2 exécuté</td></tr>
-<tr><td>⚡</td><td>Quick Alert</td><td>QA AL-MP exécuté</td></tr>
-<tr><td>🎯</td><td>TP touché</td><td>Position fermée par Take Profit</td></tr>
-<tr><td>🛑</td><td>SL touché</td><td>Position fermée par Stop Loss</td></tr>
-<tr><td>🔒</td><td>BE activé</td><td>Break-Even déclenché</td></tr>
-<tr><td>✏️</td><td>Fusion SL/TP</td><td>QA + signal complet → SL/TP mis à jour</td></tr>
-<tr><td>❌</td><td>Signal rejeté</td><td>Prix défavorable, TimesFM, etc.</td></tr>
-<tr><td>🚫</td><td>TimesFM rejet</td><td>Direction prédite ≠ signal</td></tr>
-<tr><td>🚨</td><td>Limite quotidienne</td><td>P&L quotidien atteint</td></tr>
-<tr><td>💥</td><td>Crash</td><td>Exception non rattrapée</td></tr>
+<tr><th>Emoji</th><th>Type</th><th>Format</th><th>Trigger</th></tr>
+<tr><td>🟢</td><td>Ouverture MARKET</td><td><code>SYMBOL | ACTION | CH{N}-ZN1/PU1</code></td><td>Signal zone/prix unique exécuté</td></tr>
+<tr><td>⚡</td><td>Quick Alert</td><td><code>SYMBOL | ACTION | CH{N}-AL-MP</code></td><td>QA AL-MP exécuté</td></tr>
+<tr><td>🎯</td><td>TP touché</td><td><code>ACTION | CH{N}-XXX | TP</code></td><td>Position fermée par Take Profit</td></tr>
+<tr><td>🛑</td><td>SL touché</td><td><code>ACTION | CH{N}-XXX | SL</code></td><td>Position fermée par Stop Loss</td></tr>
+<tr><td>🔒</td><td>BE activé</td><td><code>ACTION | CH{N}-XXX | BE</code></td><td>Break-Even déclenché</td></tr>
+<tr><td>✅</td><td>Fusion</td><td><code>ACTION | CH{N} | FUSION</code></td><td>QA + signal complet → SL/TP mis à jour</td></tr>
+<tr><td>❌</td><td>QA déjà fermé</td><td><code>ACTION | CH{N} | QA déjà SL/TP</code></td><td>QA fermé avant fusion</td></tr>
+<tr><td>❌</td><td>QA annulée</td><td><code>ACTION | CH{N} | QA ANNULÉE</code></td><td>Prix défavorable</td></tr>
+<tr><td>🚫</td><td>TimesFM rejet</td><td><code>SIGNAL REJETÉ PAR TIMESFM</code></td><td>Direction prédite ≠ signal</td></tr>
+<tr><td>🚨</td><td>Limite quotidienne</td><td><code>OBJECTIF QUOTIDIEN ATTEINT</code></td><td>P&L quotidien atteint</td></tr>
+<tr><td>💥</td><td>Crash</td><td><code>BOT CRASH !</code></td><td>Exception non rattrapée</td></tr>
 </table>
 
 <h3>Retry automatique</h3>
