@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GZL TradingBot V12.0.0 — Documentation Complète</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--text-muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff;--cyan:#39d2c0;--yellow:#e3b341}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;padding:0}
+.container{max-width:1000px;margin:0 auto;padding:2rem 1.5rem}
+.hero{background:linear-gradient(135deg,#1a1e2e 0%,#0d1117 100%);border:1px solid var(--border);border-radius:12px;padding:2.5rem;margin-bottom:2rem;text-align:center}
+.hero h1{font-size:2rem;color:var(--accent);margin-bottom:0.5rem}
+.hero .subtitle{color:var(--text-muted);font-size:1.1rem}
+.hero .version{display:inline-block;background:var(--accent);color:var(--bg);padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;font-weight:600;margin-top:1rem}
+.hero .version-new{display:inline-block;background:var(--green);color:var(--bg);padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;font-weight:600;margin-top:0.5rem;margin-left:0.3rem}
+section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2rem;margin-bottom:1.5rem}
+section h2{color:var(--accent);font-size:1.4rem;margin-bottom:1rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border)}
+section h3{color:var(--cyan);font-size:1.1rem;margin:1.5rem 0 0.8rem}
+section h4{color:var(--yellow);font-size:1rem;margin:1.2rem 0 0.6rem}
+p{margin-bottom:0.8rem}
+ul,ol{padding-left:1.5rem;margin-bottom:1rem}
+li{margin-bottom:0.4rem}
+.signal-box{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.85rem;margin:0.8rem 0;overflow-x:auto;white-space:pre;line-height:1.5}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:0.9rem}
+th,td{padding:0.6rem 0.8rem;border:1px solid var(--border);text-align:left}
+th{background:#1a1e2e;color:var(--accent);font-weight:600}
+td{background:var(--bg)}
+.badge{display:inline-block;padding:0.15rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600}
+.badge-green{background:rgba(63,185,80,0.15);color:var(--green)}
+.badge-red{background:rgba(248,81,73,0.15);color:var(--red)}
+.badge-orange{background:rgba(210,153,34,0.15);color:var(--orange)}
+.badge-purple{background:rgba(188,140,255,0.15);color:var(--purple)}
+.badge-cyan{background:rgba(57,210,192,0.15);color:var(--cyan)}
+.badge-yellow{background:rgba(227,179,65,0.15);color:var(--yellow)}
+.flow{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:1.2rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.82rem;line-height:1.6;margin:1rem 0;overflow-x:auto;white-space:pre}
+.flow .green{color:var(--green)}.flow .red{color:var(--red)}.flow .orange{color:var(--orange)}.flow .cyan{color:var(--cyan)}.flow .purple{color:var(--purple)}.flow .muted{color:var(--text-muted)}.flow .yellow{color:var(--yellow)}
+.config-key{color:var(--cyan);font-family:monospace}.config-val{color:var(--orange);font-family:monospace}
+.toc{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:1.2rem 1.5rem;margin-bottom:1.5rem}
+.toc h3{margin:0 0 0.8rem;color:var(--accent)}.toc ol{padding-left:1.2rem}.toc a{color:var(--accent);text-decoration:none}.toc a:hover{text-decoration:underline}.toc li{margin-bottom:0.3rem}
+.highlight{border-left:3px solid var(--accent);padding:0.8rem 1rem;background:rgba(88,166,255,0.05);border-radius:0 8px 8px 0;margin:1rem 0}
+.highlight.warn{border-left-color:var(--orange);background:rgba(210,153,34,0.05)}
+.highlight.danger{border-left-color:var(--red);background:rgba(248,81,73,0.05)}
+.highlight.success{border-left-color:var(--green);background:rgba(63,185,80,0.05)}
+.highlight.info{border-left-color:var(--purple);background:rgba(188,140,255,0.05)}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin:1rem 0}
+.stat-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem;text-align:center}
+.stat-card .stat-value{font-size:1.6rem;font-weight:800;color:var(--accent)}.stat-card .stat-label{font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem}
+.log-box{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:0.8rem 1rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.82rem;margin:0.6rem 0;overflow-x:auto;white-space:pre;line-height:1.5}
+.log-box .header{color:var(--cyan)}.log-box .info{color:var(--text)}.log-box .green{color:var(--green)}.log-box .red{color:var(--red)}.log-box .orange{color:var(--orange)}
+footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0;border-top:1px solid var(--border);margin-top:2rem}
+@media(max-width:640px){.container{padding:1rem}.hero{padding:1.5rem}.hero h1{font-size:1.4rem}section{padding:1.2rem}.signal-box,.flow,.log-box{font-size:0.75rem;padding:0.8rem}.stat-row{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ============================================================ -->
+<!-- HERO -->
+<!-- ============================================================ -->
+<div class="hero">
+<h1>GZL TradingBot</h1>
+<p class="subtitle">Bot de Copy Trading Telegram &rarr; MetaTrader 5</p>
+<span class="version">V12.0.0</span>
+<span class="version-new">Code Cleanup &amp; Bug Fixes</span>
+<p style="margin-top:1rem;color:var(--text-muted);font-size:0.9rem">
+18 Canaux &bull; MARKET Only &bull; ZN1/ZN2 &bull; PU1/PU2 &bull; Quick Alert &bull; Fusion SL/TP &bull; BE Auto &bull; TimesFM &bull; News Filter &bull; Déduplication Robuste &bull; P&amp;L Quotidien
+</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- TABLE DES MATIÈRES -->
+<!-- ============================================================ -->
+<div class="toc">
+<h3>Table des matières</h3>
+<ol>
+<li><a href="#overview">Vue d'ensemble &amp; Architecture</a></li>
+<li><a href="#v12-changes">Changements V12 vs V11</a></li>
+<li><a href="#files">Structure des fichiers</a></li>
+<li><a href="#startup">Démarrage du bot</a></li>
+<li><a href="#handler">Handler Telegram &amp; Déduplication</a></li>
+<li><a href="#parser">Signal Parser</a></li>
+<li><a href="#signals">Formats de signaux acceptés</a></li>
+<li><a href="#filters">Filtres avant exécution</a></li>
+<li><a href="#execution">Cas d'exécution des ordres</a></li>
+<li><a href="#quick-alert">Quick Alert (QA)</a></li>
+<li><a href="#fusion">Fusion QA + Signal complet</a></li>
+<li><a href="#be-tpfixed">Gestion BE + Gain fixe</a></li>
+<li><a href="#trade-manager">Trade Manager (boucle de polling)</a></li>
+<li><a href="#daily-pnl">P&amp;L Quotidien</a></li>
+<li><a href="#news">Filtre News</a></li>
+<li><a href="#timesfm">Validation TimesFM</a></li>
+<li><a href="#alerts">Système d'alertes Telegram</a></li>
+<li><a href="#config">Configuration (.env)</a></li>
+<li><a href="#mt5-comment">Commentaires MT5</a></li>
+<li><a href="#changelog">Changelog complet</a></li>
+</ol>
+</div>
+
+<!-- ============================================================ -->
+<!-- 1. VUE D'ENSEMBLE -->
+<!-- ============================================================ -->
+<section id="overview">
+<h2>1. Vue d'ensemble &amp; Architecture</h2>
+
+<h3>Architecture générale</h3>
+<div class="flow">
+<span class="cyan">Telegram</span> (18 canaux) → <span class="yellow">Signal Parser</span> → <span class="green">MT5 Bridge</span> → <span class="purple">MetaTrader 5</span> (Exness)
+    ↑                                        ↓
+ <span class="orange">TimesFM Validator</span>                 <span class="cyan">Alertes Telegram</span> (@TrdReport)
+    ↑                                        ↓
+ <span class="orange">News Manager</span>                    <span class="muted">Performance Tracker</span>
+</div>
+
+<h3>Principe de fonctionnement</h3>
+<p>Le bot écoute 18 canaux Telegram, parse les signaux de trading (BUY/SELL), et exécute des ordres MARKET sur MetaTrader 5. En v12, le mode est <strong>MARKET uniquement</strong> — pas de LIMIT, pas de pending orders.</p>
+
+<div class="stat-row">
+<div class="stat-card"><div class="stat-value">18</div><div class="stat-label">Canaux Telegram</div></div>
+<div class="stat-card"><div class="stat-value">MARKET</div><div class="stat-label">Type d'ordre unique</div></div>
+<div class="stat-card"><div class="stat-value">0.3s</div><div class="stat-label">Polling interval</div></div>
+<div class="stat-card"><div class="stat-value">30s</div><div class="stat-label">Alert dedup TTL</div></div>
+</div>
+
+<h3>Types de signaux</h3>
+<table>
+<tr><th>Type</th><th>Commentaire MT5</th><th>Description</th></tr>
+<tr><td><span class="badge badge-green">ZN1</span></td><td>CH{N}-ZN1</td><td>Signal zone — prix dans la zone [low, high]</td></tr>
+<tr><td><span class="badge badge-green">ZN2</span></td><td>CH{N}-ZN2</td><td>Signal zone — prix entre zone et SL (meilleur prix)</td></tr>
+<tr><td><span class="badge badge-cyan">PU1</span></td><td>CH{N}-PU1</td><td>Prix unique — prix entre entry et SL</td></tr>
+<tr><td><span class="badge badge-cyan">PU2</span></td><td>CH{N}-PU2</td><td>Prix unique — prix dans tolérance</td></tr>
+<tr><td><span class="badge badge-orange">AL-MP</span></td><td>CH{N}-AL-MP</td><td>Quick Alert — MARKET direct</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 2. CHANGEMENTS V12 -->
+<!-- ============================================================ -->
+<section id="v12-changes">
+<h2>2. Changements V12 vs V11</h2>
+
+<h3>Bugs critiques corrigés</h3>
+<table>
+<tr><th>Bug</th><th>Sévérité</th><th>Impact</th><th>Fix</th></tr>
+<tr>
+<td><code>NameError: orders</code></td>
+<td><span class="badge badge-red">CRITIQUE</span></td>
+<td>Crash au premier signal PU avec échec MARKET</td>
+<td><code>if not orders and not tickets</code> → <code>if not tickets</code></td>
+</tr>
+<tr>
+<td><code>TypeError: entry_price=None</code></td>
+<td><span class="badge badge-red">CRITIQUE</span></td>
+<td>Crash dans le filtre distance TP (Quick Alert)</td>
+<td>Ajout guard <code>if entry_price is None: return</code></td>
+</tr>
+<tr>
+<td>P&L=0 après fermeture</td>
+<td><span class="badge badge-orange">MOYEN</span></td>
+<td>P&L non comptabilisé dans <code>_close_all_positions()</code></td>
+<td>Ajout <code>time.sleep(0.3)</code> avant <code>history_deals_get</code></td>
+</tr>
+<tr>
+<td>Doublons alertes Telegram</td>
+<td><span class="badge badge-orange">MOYEN</span></td>
+<td>Chaque alerte envoyée 2 fois</td>
+<td>Dédup refaite avec contenu normalisé (sans <code>hash()</code>)</td>
+</tr>
+<tr>
+<td>Doublons handler</td>
+<td><span class="badge badge-orange">MOYEN</span></td>
+<td><code>clear()</code> brutal du set à 2000 entrées</td>
+<td><code>_seen_msg_ids</code>改为 dict avec TTL</td>
+</tr>
+</table>
+
+<h3>Code mort supprimé (-452 lignes)</h3>
+<table>
+<tr><th>Catégorie</th><th>Éléments supprimés</th></tr>
+<tr><td>Méthodes MT5Bridge</td><td><code>place_limit_order()</code>, <code>modify_pending_order()</code></td></tr>
+<tr><td>Méthodes TradeManager</td><td><code>update_pending_orders_sl()</code>, <code>_cancel_pending_orders_for_entry()</code>, <code>_get_tp_trigger()</code>, <code>_check_pending_only_expiry()</code>, <code>_resolve_order()</code></td></tr>
+<tr><td>Boucles mortes</td><td>Pending orders dans <code>_check_all()</code>, <code>check_conflict()</code>, <code>NewsManager._close_all()</code></td></tr>
+<tr><td>Config morte</td><td><code>SL_PRIX_UNIQUE</code>, <code>expiry</code>, <code>orders</code> dans entry dicts, <code>CACHE_TTL_SECONDS</code>, <code>ZN_PRICE_TOLERANCE</code></td></tr>
+<tr><td>bot_messages.py</td><td>17 fonctions mortes (LIMIT, TP_TRIGGER, EXPIRATION, TP-FIXED, merge LIMIT)</td></tr>
+</table>
+
+<h3>Déduplication refaite</h3>
+<table>
+<tr><th>Composant</th><th>Avant (v11)</th><th>Après (v12)</th></tr>
+<tr><td><code>_seen_msg_ids</code></td><td>set, <code>clear()</code> à 2000</td><td>dict (id→timestamp), eviction partielle des 1000 plus anciens</td></tr>
+<tr><td><code>_alert_dedup_cache</code></td><td><code>hash()</code> Python, TTL 10s</td><td>Contenu normalisé (sans "Canal:"), TTL 30s, FIFO borné</td></tr>
+<tr><td>Clé d'alerte</td><td>Inclut le nom du canal</td><td>Supprime "Canal: ..." → capte doublons canal+discussion group</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 3. STRUCTURE DES FICHIERS -->
+<!-- ============================================================ -->
+<section id="files">
+<h2>3. Structure des fichiers</h2>
+
+<table>
+<tr><th>Fichier</th><th>Lignes</th><th>Rôle</th></tr>
+<tr><td><code>telegram_listener_v12.py</code></td><td>2422</td><td>Cœur du bot — connexion TG, MT5, gestion des trades, BE, news</td></tr>
+<tr><td><code>signal_parser.py</code></td><td>743</td><td>Parse les signaux — détecte BUY/SELL, zones, prix, SL, TP</td></tr>
+<tr><td><code>bot_messages.py</code></td><td>171</td><td>Templates de logs et alertes (séparation texte/logique)</td></tr>
+<tr><td><code>.env</code></td><td>—</td><td>Configuration (canaux, MT5, paramètres de trading)</td></tr>
+<tr><td><code>CONTEXT.md</code></td><td>—</td><td>Changelog détaillé</td></tr>
+</table>
+
+<h3>Classes principales (telegram_listener_v12.py)</h3>
+<table>
+<tr><th>Classe</th><th>Rôle</th></tr>
+<tr><td><code>MT5Bridge</code></td><td>Interface avec MetaTrader 5 (ordres, prix, positions)</td></tr>
+<tr><td><code>TradeManager</code></td><td>Boucle de polling, gestion BE, P&L quotidien</td></tr>
+<tr><td><code>NewsManager</code></td><td>Filtre news (Fetch FF Calendar + vérification 30s)</td></tr>
+<tr><td><code>TimesFMValidator</code></td><td>Validation ML de la direction du signal</td></tr>
+<tr><td><code>PerformanceTracker</code></td><td>Suivi des trades (WIN/LOSS/BE)</td></tr>
+</table>
+
+<h3>Fonctions principales</h3>
+<table>
+<tr><th>Fonction</th><th>Rôle</th></tr>
+<tr><td><code>execute_signal()</code></td><td>Exécute un signal TRADE (zone ou prix unique)</td></tr>
+<tr><td><code>execute_quick_alert()</code></td><td>Exécute un Quick Alert (MARKET direct)</td></tr>
+<tr><td><code>merge_quick_alert()</code></td><td>Fusionne un QA avec un signal complet (SL/TP mis à jour)</td></tr>
+<tr><td><code>check_conflict()</code></td><td>Vérifie les conflits de position (même canal seulement)</td></tr>
+<tr><td><code>_close_previous_signal()</code></td><td>Ferme l'ancien signal d'un canal (1 signal par canal)</td></tr>
+<tr><td><code>send_alert_sync()</code></td><td>Envoie une alerte Telegram avec dédup</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 4. DÉMARRAGE -->
+<!-- ============================================================ -->
+<section id="startup">
+<h2>4. Démarrage du bot</h2>
+
+<div class="flow">
+<span class="cyan">main()</span>
+  ├── <span class="green">MT5Bridge.connect()</span>          → Connexion MetaTrader 5 (Exness)
+  ├── <span class="green">TradeManager.start()</span>         → Boucle polling toutes les <span class="yellow">0.3s</span>
+  ├── <span class="green">NewsManager.start()</span>          → Fetch news (<span class="yellow">30 min</span>) + vérif (<span class="yellow">30s</span>)
+  ├── <span class="green">TelegramClient.start()</span>       → Connexion Telegram (session persistante)
+  ├── <span class="cyan">Résolution des 18 canaux</span>     → get_entity() pour chaque TG_CHANNEL_X
+  ├── <span class="cyan">Enregistrement du handler</span>    → @client.on(events.NewMessage)
+  └── <span class="muted">client.run_until_disconnected()</span>  → Boucle infinie asyncio
+</div>
+
+<h3>Ordre d'initialisation</h3>
+<ol>
+<li>Chargement de la config (<code>.env</code>)</li>
+<li>Connexion MT5 (auto-initialize avec login/password/server)</li>
+<li>Récupération du P&L quotidien depuis l'historique MT5</li>
+<li>Démarrage de la boucle de polling TradeManager</li>
+<li>Démarrage du NewsManager (fetch + vérification)</li>
+<li>Connexion Telegram (session persistante <code>session_trading.session</code>)</li>
+<li>Résolution des canaux (get_entity pour chaque ID/username)</li>
+<li>Affichage du banner de configuration</li>
+<li>Entrée dans la boucle principale</li>
+</ol>
+
+<h3>Banner de démarrage</h3>
+<div class="log-box">
+<span class="header">=======================================================</span>
+<span class="info"> Mode: 🔲 DEMO</span>
+<span class="info"> Lot :  total : 0.02 | unique : 0.01</span>
+<span class="info"> Gain fixe par position : 10.0$</span>
+<span class="info"> BE déclenché à : 7.0$</span>
+<span class="info"> Objectif quotidien : 70.0$</span>
+<span class="info"> Filtre horaire : ON (2h-20h UTC)</span>
+<span class="info"> Filtre news : ON</span>
+<span class="info"> Max signaux actifs : 6</span>
+<span class="info"> TimesFM : DÉSACTIVÉ</span>
+<span class="header">=======================================================</span>
+</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 5. HANDLER TELEGRAM -->
+<!-- ============================================================ -->
+<section id="handler">
+<h2>5. Handler Telegram &amp; Déduplication</h2>
+
+<h3>Flux du handler</h3>
+<div class="flow">
+<span class="cyan">Telegram Server</span>
+  │
+  ▼
+<span class="cyan">Telethon</span> (WebSocket) ──event──► <span class="yellow">handler(event)</span>
+  │
+  │  ① <span class="green">DÉDUPLICATION</span> (synchronique, pas d'await)
+  │  ├── msg_id dans _seen_msg_ids ? → OUI → return
+  │  ├── dedup_key = (canal_name, hash(texte)) dans _seen_messages ? → OUI → return
+  │  ├── TTL 120s, eviction par âge (pas de clear brutal)
+  │  └── Max 5000 IDs (eviction des 1000 plus anciens)
+  │
+  │  ② <span class="orange">FILTRE SPAM</span>
+  │  └── is_spam(text) → mots-clés: "hit", "pips", "vip", "subscribe"...
+  │
+  │  ③ <span class="orange">FILTRE SIGNAL MESSAGE</span>
+  │  └── _is_signal_message(text) → nombre décimal ? BUY/SELL ? CLOSE ?
+  │
+  │  ④ <span class="yellow">PARSING</span>
+  │  └── parser.parse(text) → SignalParser
+  │
+  │  ⑤ <span class="cyan">ROUTAGE</span>
+  │  ├── CLOSE → bridge.close_all()
+  │  ├── SL_MOVE → bridge.update_sl_by_channel()
+  │  └── TRADE → filtres → exécution
+</div>
+
+<h3>Déduplication — Pourquoi 2 niveaux</h3>
+<table>
+<tr><th>Scénario</th><th>Niveau 1 (msg_id)</th><th>Niveau 2 (contenu)</th></tr>
+<tr><td>Même message, même ID (reconnexion)</td><td>✅ Capte</td><td>—</td></tr>
+<tr><td>Même message, ID différent (canal+groupe)</td><td>❌ Passe</td><td>✅ Capte</td></tr>
+<tr><td>Message édité (même ID, contenu différent)</td><td>✅ Capte (déjà vu)</td><td>—</td></tr>
+</table>
+
+<div class="highlight info">
+<strong>Pourquoi "synchronique, pas d'await" ?</strong><br>
+Pas d'entre la vérification et l'enregistrement du msg_id → atomique dans une coroutine asyncio. Si on faisait un <code>await</code> entre les deux, le event loop pourrait exécuter un 2e handler pour le même message.
+</div>
+
+<h3>Structures de déduplication</h3>
+<div class="signal-box">
+_seen_msg_ids: dict = {}     # message_id → timestamp
+_seen_messages: dict = {}    # (canal_name, hash(texte)) → timestamp
+_SEEN_TTL = 120.0            # secondes
+_SEEN_MAX_IDS = 5000         # max entrées
+</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 6. SIGNAL PARSER -->
+<!-- ============================================================ -->
+<section id="parser">
+<h2>6. Signal Parser</h2>
+
+<h3>Normalisation du texte</h3>
+<p>Le parser normalise le texte avant extraction :</p>
+<ol>
+<li>Supprime les caractères invisibles (zero-width, espaces insécables)</li>
+<li>Convertit les superscripts (¹→1, ²→2...)</li>
+<li>Supprime les astérisques (gras Telegram)</li>
+<li>Remplace les séparateurs par des espaces</li>
+<li>Supprime les emojis</li>
+<li>Normalise les paires (XAU/USD → XAUUSD)</li>
+<li>UPPERCASE + suppression des préfixes parasites</li>
+</ol>
+
+<h3>Extraction des composants</h3>
+<table>
+<tr><th>Composant</th><th>Fonction</th><th>Exemples</th></tr>
+<tr><td>Symbole</td><td><code>_extract_symbol()</code></td><td>XAUUSD, GOLD, EURUSD, BTCUSD</td></tr>
+<tr><td>Direction</td><td><code>_extract_action()</code></td><td>BUY, SELL, LONG→BUY, SHORT→SELL</td></tr>
+<tr><td>Zone/Prix</td><td><code>_extract_entry_and_zone()</code></td><td>4000-4010, @4005, BUY 4000</td></tr>
+<tr><td>TP</td><td><code>_extract_all_tps()</code></td><td>TP1 4050, TP2 4060, TP OPEN</td></tr>
+<tr><td>SL</td><td><code>_extract_sl()</code></td><td>SL 3990, STOP LOSS 3990</td></tr>
+</table>
+
+<h3>Types de signaux détectés</h3>
+<table>
+<tr><th>Type</th><th>Conditions</th><th>Champs clés</th></tr>
+<tr><td><span class="badge badge-green">TRADE</span></td><td>Direction + Zone/Prix</td><td>zone_low, zone_high, tps, sl</td></tr>
+<tr><td><span class="badge badge-purple">Quick Alert</span></td><td>Direction + Prix, pas de TP/SL complets</td><td>is_quick_alert=True</td></tr>
+<tr><td><span class="badge badge-cyan">Market Price</span></td><td>Direction seule (BUY NOW)</td><td>is_market_price=True</td></tr>
+<tr><td><span class="badge badge-orange">CLOSE</span></td><td>Mot-clé CLOSE</td><td>close_symbol</td></tr>
+<tr><td><span class="badge badge-yellow">SL_MOVE</span></td><td>SL MOVE / MOVE SL</td><td>new_sl</td></tr>
+</table>
+
+<h3>Génération automatique</h3>
+<ul>
+<li><strong>SL manquant + TP présents</strong> → SL = entry ± distance_moyenne_TPs × 1.5</li>
+<li><strong>TP manquant + SL présent</strong> → TP = entry ± (entry - SL) × RR_RATIO (1.5)</li>
+<li><strong>ni TP ni SL</strong> → Quick Alert avec SL_OFFSET (10$) et RR_RATIO (1.5)</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 7. FORMATS DE SIGNAUX -->
+<!-- ============================================================ -->
+<section id="signals">
+<h2>7. Formats de signaux acceptés</h2>
+
+<h3>Signaux Zone (2 prix)</h3>
+<div class="signal-box">XAUUSD BUY 4000 4010 SL 3990 TP 4050
+GOLD SELL 4060-4070 SL 4080 TP1 4040 TP2 4020
+XAUUSD BUY @4000-4010 SL 3990</div>
+<p>Le bot détecte la zone [4000, 4010]. Si le prix est dans la zone → ZN1. Si entre zone et SL → ZN2.</p>
+
+<h3>Signaux Prix Unique (1 prix)</h3>
+<div class="signal-box">XAUUSD BUY 4005 SL 3990 TP 4050
+GOLD SELL @4020 SL 4040 TP 4000</div>
+<p>Le bot exécute MARKET si le prix est dans la tolérance (±3$ par défaut).</p>
+
+<h3>Quick Alerts (SL/TP partiels)</h3>
+<div class="signal-box">XAUUSD BUY 4000
+GOLD SELL @4020
+BUY XAUUSD NOW</div>
+<p>SL et TP sont générés automatiquement. Exécution MARKET immédiate.</p>
+
+<h3>Raccourcis zone</h3>
+<div class="signal-box">4033/37 → zone [4033, 4037]
+4098/03 → zone [4098, 4103] (rollover)</div>
+
+<h3>Signaux CLOSE et SL_MOVE</h3>
+<div class="signal-box">CLOSE                    → Ferme tout
+CLOSE XAUUSD             → Ferme XAUUSD
+CLOSE ALL                → Ferme tout
+SL MOVE 3995             → Déplace SL à 3995
+NEW SL 4000              → Déplace SL à 4000</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 8. FILTRES -->
+<!-- ============================================================ -->
+<section id="filters">
+<h2>8. Filtres avant exécution</h2>
+
+<p>Chaque signal TRADE passe par une chaîne de filtres. Si un filtre échoue, le signal est rejeté.</p>
+
+<div class="flow">
+<span class="yellow">Signal TRADE reçu</span>
+  │
+  ├── ① <span class="orange">Filtre News</span>       → news_mgr.is_blocked() ? → REJET
+  ├── ② <span class="orange">Filtre Horaire</span>    → hors 2h-20h UTC ? → REJET
+  ├── ③ <span class="orange">Filtre P&L Quotidien</span> → daily_pnl >= 70$ ? → REJET
+  ├── ④ <span class="purple">Validation TimesFM</span> → direction prédite ≠ signal ? → REJET
+  ├── ⑤ <span class="red">Filtre Conflit</span>    → même canal + opposé ? → ferme l'ancien
+  ├── ⑥ <span class="red">Symbole MT5</span>       → introuvable ? → REJET
+  ├── ⑦ <span class="red">Prix indisponible</span> → tick None ? → REJET
+  ├── ⑧ <span class="red">SL invalide</span>       → BUY: SL >= entry ? → REJET
+  ├── ⑨ <span class="orange">Spread trop large</span> → > 50 points ? → REJET
+  ├── ⑩ <span class="orange">Max positions</span>     → >= 6 actifs ? → REJET
+  └── ✅ <span class="green">EXÉCUTION</span>
+</div>
+
+<h3>Filtre horaire</h3>
+<p>Bloque les signaux hors de la plage <code>TRADING_START_HOUR</code> (2h) à <code>TRADING_END_HOUR</code> (20h) UTC.</p>
+
+<h3>Filtre conflit</h3>
+<p>Scopé au <strong>même canal uniquement</strong> — deux canaux différents peuvent avoir des avis opposés sur le même symbole. Si conflit : ferme l'ancien + annule les pending orders.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- 9. EXÉCUTION -->
+<!-- ============================================================ -->
+<section id="execution">
+<h2>9. Cas d'exécution des ordres</h2>
+
+<h3>Signaux Zone → ZN1 ou ZN2</h3>
+<div class="flow">
+<span class="cyan">Signal: BUY 4000 4010 SL 3990 TP 4050</span>
+
+<span class="yellow">Cas 1 — ZN1 :</span> prix dans [4000, 4010]
+  → <span class="green">MARKET BUY</span> @prix_actuel, lot=0.01, TP=4050, SL=3990
+  → Commentaire MT5: <span class="cyan">CH{N}-ZN1</span>
+
+<span class="yellow">Cas 2 — ZN2 :</span> prix entre zone et SL (meilleur prix)
+  → Prix 3995 (entre SL 3990 et zone 4000) → <span class="green">MARKET BUY</span>
+  → Commentaire MT5: <span class="cyan">CH{N}-ZN2</span>
+
+<span class="red">Cas 3 — Rejet :</span> prix hors zone
+  → Prix 4020 (au-dessus de la zone) → <span class="red">ANNULÉ</span>
+</div>
+
+<h3>Signaux Prix Unique → PU1 ou PU2</h3>
+<div class="flow">
+<span class="cyan">Signal: BUY 4005 SL 3990 TP 4050</span>
+
+<span class="yellow">PU1 :</span> prix entre entry et SL (meilleur prix)
+  → Prix 3998 → <span class="green">MARKET BUY</span>
+  → Commentaire MT5: <span class="cyan">CH{N}-PU1</span>
+
+<span class="yellow">PU2 :</span> prix dans [entry, entry + tolérance]
+  → Prix 4007 (entry 4005 + 2$ < 3$ tolerance) → <span class="green">MARKET BUY</span>
+  → Commentaire MT5: <span class="cyan">CH{N}-PU2</span>
+
+<span class="red">Rejet :</span> prix > entry + tolérance
+  → Prix 4010 > 4005 + 3$ → <span class="red">ANNULÉ</span>
+</div>
+
+<h3>Tolérance directionnelle (v11+)</h3>
+<table>
+<tr><th>Signal</th><th>Prix actuel</th><th>Résultat</th><th>Raison</th></tr>
+<tr><td>BUY 4000</td><td>3990</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (moins cher)</td></tr>
+<tr><td>BUY 4000</td><td>4000</td><td><span class="badge badge-green">MARKET</span></td><td>Prix exact</td></tr>
+<tr><td>BUY 4000</td><td>4002</td><td><span class="badge badge-green">MARKET</span></td><td>Dans tolérance</td></tr>
+<tr><td>BUY 4000</td><td>4004</td><td><span class="badge badge-red">ANNULÉ</span></td><td>&gt; 3$ défavorable</td></tr>
+<tr><td>SELL 4000</td><td>4010</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (plus cher)</td></tr>
+<tr><td>SELL 4000</td><td>3997</td><td><span class="badge badge-red">ANNULÉ</span></td><td>&gt; 3$ défavorable</td></tr>
+</table>
+
+<h3>1 signal par canal</h3>
+<p>Quand un nouveau signal arrive d'un canal qui a déjà un signal actif, l'ancien est fermé automatiquement avant d'exécuter le nouveau.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- 10. QUICK ALERT -->
+<!-- ============================================================ -->
+<section id="quick-alert">
+<h2>10. Quick Alert (QA)</h2>
+
+<h3>Déclenchement</h3>
+<p>Un signal est considéré comme Quick Alert quand :</p>
+<ul>
+<li>Direction + prix, mais pas de TP/SL complets</li>
+<li><code>is_quick_alert=True</code> (défini par le parser)</li>
+</ul>
+
+<h3>Exécution</h3>
+<div class="flow">
+<span class="yellow">Quick Alert reçue</span>
+  │
+  ├── Filtres standards (news, horaire, P&L, max positions)
+  ├── Résolution MARKET PRICE (si is_market_price)
+  ├── 1 signal par canal (ferme l'ancien)
+  ├── Vérification tolérance prix (±3$)
+  ├── Filtre distance TP (≥30% restant)
+  ├── Vérification QA existante (mise à jour SL/TP si existe)
+  └── <span class="green">MARKET ORDER</span> → enregistrement + alerte
+</div>
+
+<h3>MARKET PRICE</h3>
+<p>Si le signal est <code>BUY NOW</code> ou <code>SELL NOW</code> sans prix :</p>
+<ul>
+<li>Entry = prix actuel</li>
+<li>SL = entry ± QUICK_ALERT_SL_OFFSET (10$)</li>
+<li>TP = entry ± SL_OFFSET × RR_RATIO (1.5)</li>
+</ul>
+
+<h3>QA existante</h3>
+<p>Si une QA existe déjà pour le même canal+symbole+direction :</p>
+<ul>
+<li>Position active → mise à jour SL/TP</li>
+<li>Position fermée → nouvelle alerte</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 11. FUSION -->
+<!-- ============================================================ -->
+<section id="fusion">
+<h2>11. Fusion QA + Signal complet</h2>
+
+<h3>Principe</h3>
+<p>Quand un signal complet arrive et qu'un Quick Alert existe déjà pour le même canal+symbole+direction :</p>
+
+<div class="flow">
+<span class="yellow">Signal complet: BUY 4000-4010 SL 3990 TP 4050</span>
+<span class="cyan">QA existante: BUY @4002 ticket #12345</span>
+  │
+  ├── <span class="green">Dans tolérance (±3$)</span> → merge_quick_alert()
+  │   └── SL/TP du QA mis à jour avec ceux du signal complet
+  │
+  └── <span class="orange">Hors tolérance</span> → mise à jour SL/TP quand même
+      └── Pas de fermeture, pas de 2ème position
+</div>
+
+<h3>Fusion dans tolérance</h3>
+<ul>
+<li>Le prix du QA est dans [zone_low - 3$, zone_high + 3$]</li>
+<li>SL et TP du QA sont mis à jour avec ceux du signal complet</li>
+<li>Pas de nouvelle position créée</li>
+</ul>
+
+<h3>Fusion hors tolérance</h3>
+<ul>
+<li>Le prix du QA est hors de la zone de tolérance</li>
+<li>SL et TP sont quand même mis à jour (pas de fermeture)</li>
+<li>Le signal complet est "absorbé" par le QA</li>
+</ul>
+
+<h3>QA déjà fermé</h3>
+<p>Si le QA a été fermé (SL ou TP touché) avant l'arrivée du signal complet :</p>
+<ul>
+<li>Le signal complet est ignoré</li>
+<li>Une alerte est envoyée avec le P&L du QA</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 12. BE + GAIN FIXE -->
+<!-- ============================================================ -->
+<section id="be-tpfixed">
+<h2>12. Gestion BE + Gain fixe</h2>
+
+<h3>Déclenchement du BE</h3>
+<div class="flow">
+<span class="yellow">Chaque 0.3s — TradeManager._check_all()</span>
+  │
+  ├── Pour chaque entry active
+  │   ├── Vérifier si <span class="cyan">_be_activated</span> est False
+  │   ├── <span class="cyan">_check_pnl_trigger()</span> → min_profit >= <span class="yellow">PNL_TRIGGER_USD</span> (7$) ?
+  │   │   └── Vérifie whitelist: market_single, quick_market seulement
+  │   └── Si oui → <span class="green">_apply_be_on_open_positions()</span>
+</div>
+
+<h3>Application du BE</h3>
+<table>
+<tr><th>Paramètre</th><th>BUY</th><th>SELL</th></tr>
+<tr><td>SL (BE_USD=3)</td><td>entry - 3$</td><td>entry + 3$</td></tr>
+<tr><td>TP (TP_FIXED_GAIN_USD=10)</td><td>entry + 10$</td><td>entry - 10$</td></tr>
+</table>
+
+<div class="highlight success">
+<strong>Après le BE :</strong> MT5 ferme automatiquement la position quand le prix atteint le TP. Le bot ne fait plus de fermeture manuelle.
+</div>
+
+<h3>Exemple concret</h3>
+<div class="signal-box">Signal: BUY XAUUSD @4000
+Lot: 0.01
+
+1. Prix monte à 4008 → profit = 8$ ≥ PNL_TRIGGER_USD (7$)
+2. BE activé:
+   - SL → 3997 (entry 4000 - BE_USD 3)
+   - TP → 4010 (entry 4000 + TP_FIXED_GAIN_USD 10)
+3. MT5 ferme à 4010 → profit = 10$
+
+Si le prix redescend à 3997 avant d'atteindre 4010:
+   - SL touché → perte = -3$ (protégé par BE_USD)
+</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 13. TRADE MANAGER -->
+<!-- ============================================================ -->
+<section id="trade-manager">
+<h2>13. Trade Manager (boucle de polling)</h2>
+
+<h3>Boucle principale</h3>
+<div class="flow">
+<span class="cyan">TradeManager._check_all()</span> — toutes les <span class="yellow">0.3s</span>
+  │
+  ├── <span class="green">_refresh_pos_cache()</span> → mt5.positions_get()
+  │
+  ├── <span class="orange">_check_daily_pnl_limit()</span>
+  │   └── Si atteint → _shutdown_for_daily_limit()
+  │
+  └── Pour CHAQUE entry dans self.active:
+      │
+      │  A. <span class="cyan">DÉTECTION FERMETURE</span>
+      │  ├── _get_pos(ticket) → None si fermé
+      │  ├── _get_last_pnl() → somme deals OUT
+      │  ├── _get_close_reason() → TP / SL / OTHER
+      │  ├── _update_daily_pnl(pnl)
+      │  └── Alerte "🎯 TP" ou "🛑 SL"
+      │
+      │  B. <span class="green">NETTOYAGE</span>
+      │  ├── Plus de tickets actifs + tous _reported ?
+      │  │   └── Supprime de self.active
+      │  └── Race condition: exige TOUS _reported
+      │
+      │  C. <span class="yellow">GESTION BE</span>
+      │  ├── TP_FIXED_ENABLED ? et pas _be_activated ?
+      │  ├── _check_pnl_trigger() → min_profit >= 7$ ?
+      │  └── _apply_be_on_open_positions()
+      │
+      └── Continue le cycle
+</div>
+
+<h3>Position cache</h3>
+<p>Le cache <code>_pos_cache</code> est rafraîchi une fois par cycle (pas à chaque appel). Réduit le nombre d'appels MT5 de 5-10x par cycle.</p>
+
+<h3>Race condition P&L</h3>
+<p>Un ticket peut se fermer entre la détection et la re-vérification. Le bot exige que TOUS les tickets soient <code>_reported</code> avant de retirer une entry de <code>self.active</code>.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- 14. P&L QUOTIDIEN -->
+<!-- ============================================================ -->
+<section id="daily-pnl">
+<h2>14. P&amp;L Quotidien</h2>
+
+<h3>Calcul</h3>
+<div class="flow">
+<span class="cyan">P&L Quotidien</span> = <span class="green">P&L réalisé</span> + <span class="yellow">P&L flottant</span>
+
+<span class="green">P&L réalisé</span> = somme des deals OUT depuis TRADING_START_HOUR (2h UTC)
+<span class="yellow">P&L flottant</span> = somme des profit des positions ouvertes (magic=MAGIC_NUMBER)
+</div>
+
+<h3>Récupération au démarrage</h3>
+<p><code>_recover_daily_pnl()</code> récupère le P&L depuis l'historique MT5 (3 derniers jours). Indexe le magic à l'OUVERTURE (pas à la clôture) pour couvrir les fermetures manuelles.</p>
+
+<h3>Reset quotidien</h3>
+<p>Le P&L est reset à <code>TRADING_START_HOUR</code> (2h UTC) chaque jour. La comparaison utilise <code>start.day</code> (datetime aware).</p>
+
+<h3>Limite quotidienne</h3>
+<p>Quand <code>daily_pnl + floating >= DAILY_PROFIT_LIMIT</code> (70$) :</p>
+<ul>
+<li>Toutes les positions sont fermées</li>
+<li>Tous les pending orders sont annulés (safety net)</li>
+<li>Le trading est arrêté pour la journée</li>
+<li>Une alerte est envoyée</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 15. NEWS -->
+<!-- ============================================================ -->
+<section id="news">
+<h2>15. Filtre News</h2>
+
+<h3>Fonctionnement</h3>
+<div class="flow">
+<span class="cyan">NewsManager</span>
+  │
+  ├── <span class="green">Fetch</span> (toutes les 30 min)
+  │   ├── GET https://nfs.faireconomy.media/ff_calendar_thisweek.json
+  │   ├── Filtre: impact >= high + pays USD/XAU
+  │   └── Classifie par tier: NFP/CPI, FOMC, Spike, High
+  │
+  └── <span class="yellow">Check</span> (toutes les 30s)
+      ├── Pour chaque news:
+      │   ├── diff_minutes = (news_time - now) / 60
+      │   ├── -after_min <= diff <= close_min → <span class="red">CLOSE positions + BLOCK</span>
+      │   ├── close_min < diff <= block_min → <span class="orange">BLOCK seulement</span>
+      │   └── Sinon → <span class="green">UNBLOCK</span>
+      └── _close_all() si should_close
+</div>
+
+<h3>Fenêtres par tier</h3>
+<table>
+<tr><th>Tier</th><th>Mots-clés</th><th>Block</th><th>Close</th><th>After</th></tr>
+<tr><td><span class="badge badge-red">NFP/CPI</span></td><td>non-farm payrolls, cpi</td><td>20 min</td><td>10 min</td><td>30 min</td></tr>
+<tr><td><span class="badge badge-red">FOMC</span></td><td>fomc, powell, federal reserve</td><td>20 min</td><td>15 min</td><td>45 min</td></tr>
+<tr><td><span class="badge badge-orange">Spike</span></td><td>pce, ppi, gdp, adp, ism, retail sales</td><td>20 min</td><td>10 min</td><td>20 min</td></tr>
+<tr><td><span class="badge badge-yellow">High</span></td><td>Autres high impact</td><td>15 min</td><td>5 min</td><td>15 min</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 16. TIMESFM -->
+<!-- ============================================================ -->
+<section id="timesfm">
+<h2>16. Validation TimesFM</h2>
+
+<h3>Principe</h3>
+<p>TimesFM 2.5 (200M paramètres, Google) prédit la direction du prix sur les 12 prochaines bougies M5. Si la prédiction contredit le signal, celui-ci est rejeté.</p>
+
+<h3>Critères de validation</h3>
+<table>
+<tr><th>Critère</th><th>Condition</th><th>Défaut</th></tr>
+<tr><td>Direction</td><td>Prédiction = direction du signal</td><td>Obligatoire</td></tr>
+<tr><td>Amplitude</td><td>Move ≥ 5 pips</td><td>TIMESFM_MIN_MOVE_PIPS</td></tr>
+<tr><td>Confiance</td><td>Confiance ≥ 0.35</td><td>TIMESFM_MIN_CONFIDENCE</td></tr>
+</table>
+
+<h3>Chargement</h3>
+<p>Le modèle est chargé en arrière-plan (thread daemon) pour ne pas bloquer le démarrage. Si le modèle n'est pas prêt, les signaux passent sans validation.</p>
+
+<h3>Configuration</h3>
+<div class="signal-box">TIMESFM_ENABLED=false         # Désactivé par défaut
+TIMESFM_TIMEFRAME=M5          # Bougies M5
+TIMESFM_CONTEXT_BARS=256      # Historique
+TIMESFM_HORIZON=12            # Prédiction
+TIMESFM_MIN_MOVE_PIPS=5.0     # Seuil amplitude
+TIMESFM_MIN_CONFIDENCE=0.35   # Seuil confiance
+TIMESFM_SYMBOL=XAUUSDm        # Symbole MT5 exact
+</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 17. ALERTES -->
+<!-- ============================================================ -->
+<section id="alerts">
+<h2>17. Système d'alertes Telegram</h2>
+
+<h3>Canal d'alerte</h3>
+<p>Les alertes sont envoyées sur <code>@TrdReport</code> (configurable via <code>TG_ALERT_CHANNEL</code>).</p>
+
+<h3>Déduplication des alertes</h3>
+<div class="signal-box">
+_clé = contenu normalisé (sans "Canal: ...")
+TTL = 30 secondes
+Max = 500 entrées (FIFO)
+</div>
+
+<p>La ligne "Canal: ..." est supprimée de la clé pour capter les doublons canal+discussion group.</p>
+
+<h3>Types d'alertes</h3>
+<table>
+<tr><th>Emoji</th><th>Type</th><th>Trigger</th></tr>
+<tr><td>🟢</td><td>Ouverture MARKET</td><td>Signal ZN1/ZN2/PU1/PU2 exécuté</td></tr>
+<tr><td>⚡</td><td>Quick Alert</td><td>QA AL-MP exécuté</td></tr>
+<tr><td>🎯</td><td>TP touché</td><td>Position fermée par Take Profit</td></tr>
+<tr><td>🛑</td><td>SL touché</td><td>Position fermée par Stop Loss</td></tr>
+<tr><td>🔒</td><td>BE activé</td><td>Break-Even déclenché</td></tr>
+<tr><td>✏️</td><td>Fusion SL/TP</td><td>QA + signal complet → SL/TP mis à jour</td></tr>
+<tr><td>❌</td><td>Signal rejeté</td><td>Prix défavorable, TimesFM, etc.</td></tr>
+<tr><td>🚫</td><td>TimesFM rejet</td><td>Direction prédite ≠ signal</td></tr>
+<tr><td>🚨</td><td>Limite quotidienne</td><td>P&L quotidien atteint</td></tr>
+<tr><td>💥</td><td>Crash</td><td>Exception non rattrapée</td></tr>
+</table>
+
+<h3>Retry automatique</h3>
+<ul>
+<li>1er essai : timeout 8s</li>
+<li>Si échec : vérifie si le message a été livré (get_messages limit=5)</li>
+<li>Si pas livré : 1 retry après 2s</li>
+<li>Ne bloque jamais la boucle de trading plus de 10s total</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 18. CONFIGURATION -->
+<!-- ============================================================ -->
+<section id="config">
+<h2>18. Configuration (.env)</h2>
+
+<h3>Canaux Telegram</h3>
+<div class="signal-box">TG_CHANNEL_1=@fxGzl                    # Username
+TG_CHANNEL_2=-1001506646047            # ID numérique
+...
+TG_CHANNEL_18=-1001951939988
+TG_ALERT_CHANNEL=@TrdReport            # Canal d'alertes
+</div>
+
+<h3>MetaTrader 5</h3>
+<div class="signal-box">MT5_LOGIN=262342460
+MT5_PASSWORD=***
+MT5_SERVER=Exness-MT5Trial16
+MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
+</div>
+
+<h3>Lots</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>LOT_TOTAL</code></td><td>0.02</td><td>Lot total (non utilisé en v12)</td></tr>
+<tr><td><code>LOT_UNIQUE_TRADE</code></td><td>0.01</td><td>Lot par position MARKET</td></tr>
+</table>
+
+<h3>Gestion du risque</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>MAX_POSITIONS</code></td><td>6</td><td>Nombre max de positions simultanées</td></tr>
+<tr><td><code>MAX_SPREAD_POINTS</code></td><td>50</td><td>Spread max pour exécuter</td></tr>
+<tr><td><code>DAILY_PROFIT_LIMIT</code></td><td>70$</td><td>Objectif quotidien (arrêt si atteint)</td></tr>
+</table>
+
+<h3>Gain fixe &amp; BE</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>TP_FIXED_ENABLED</code></td><td>true</td><td>Active le gain fixe</td></tr>
+<tr><td><code>TP_FIXED_GAIN_USD</code></td><td>10$</td><td>Gain cible par position</td></tr>
+<tr><td><code>PNL_TRIGGER_USD</code></td><td>7$</td><td>Seuil de déclenchement du BE</td></tr>
+<tr><td><code>BE_USD</code></td><td>3$</td><td>Marge de sécurité SL (côté défavorable)</td></tr>
+</table>
+
+<h3>Tolérances de prix</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>PU_PRICE_TOLERANCE</code></td><td>3$</td><td>Tolérance pour signaux prix unique</td></tr>
+<tr><td><code>QA_PRICE_TOLERANCE</code></td><td>3$</td><td>Tolérance pour Quick Alerts</td></tr>
+<tr><td><code>TP_DISTANCE_MIN_RATIO</code></td><td>0.3</td><td>Distance min restante vers TP (30%)</td></tr>
+<tr><td><code>FUSION_TOLERANCE</code></td><td>3$</td><td>Tolérance pour matcher QA + signal complet</td></tr>
+</table>
+
+<h3>Filtres</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>TIME_FILTER_ENABLED</code></td><td>true</td><td>Active le filtre horaire</td></tr>
+<tr><td><code>TRADING_START_HOUR</code></td><td>2</td><td>Heure de début (UTC)</td></tr>
+<tr><td><code>TRADING_END_HOUR</code></td><td>20</td><td>Heure de fin (UTC)</td></tr>
+<tr><td><code>NEWS_FILTER_ENABLED</code></td><td>true</td><td>Active le filtre news</td></tr>
+<tr><td><code>NEWS_MIN_IMPACT</code></td><td>high</td><td>Impact minimum pour filtrer</td></tr>
+<tr><td><code>CONFLIT_FILTER_ENABLED</code></td><td>true</td><td>Active le filtre de conflit</td></tr>
+</table>
+
+<h3>Quick Alert</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>QUICK_ALERT_SL_OFFSET</code></td><td>10$</td><td>Offset SL pour les QA sans SL</td></tr>
+<tr><td><code>RR_RATIO_DEFAULT</code></td><td>1.5</td><td>Ratio Risk/Reward pour TP auto</td></tr>
+</table>
+
+<h3>TimesFM</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>TIMESFM_ENABLED</code></td><td>false</td><td>Active la validation TimesFM</td></tr>
+<tr><td><code>TIMESFM_TIMEFRAME</code></td><td>M5</td><td>Timeframe des bougies</td></tr>
+<tr><td><code>TIMESFM_CONTEXT_BARS</code></td><td>256</td><td>Historique pour le modèle</td></tr>
+<tr><td><code>TIMESFM_HORIZON</code></td><td>12</td><td>Nombre de bougies prédites</td></tr>
+<tr><td><code>TIMESFM_MIN_MOVE_PIPS</code></td><td>5.0</td><td>Seuil d'amplitude minimum</td></tr>
+<tr><td><code>TIMESFM_MIN_CONFIDENCE</code></td><td>0.35</td><td>Seuil de confiance minimum</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 19. COMMENTAIRES MT5 -->
+<!-- ============================================================ -->
+<section id="mt5-comment">
+<h2>19. Commentaires MT5</h2>
+
+<p>Chaque ordre a un commentaire qui identifie son origine :</p>
+
+<table>
+<tr><th>Format</th><th>Signification</th></tr>
+<tr><td><code>CH{N}-ZN1</code></td><td>Canal N — Zone, prix dans la zone</td></tr>
+<tr><td><code>CH{N}-ZN2</code></td><td>Canal N — Zone, prix entre zone et SL</td></tr>
+<tr><td><code>CH{N}-PU1</code></td><td>Canal N — Prix Unique, prix entre entry et SL</td></tr>
+<tr><td><code>CH{N}-PU2</code></td><td>Canal N — Prix Unique, prix dans tolérance</td></tr>
+<tr><td><code>CH{N}-AL-MP</code></td><td>Canal N — Quick Alert MARKET</td></tr>
+<tr><td><code>CH{N}-UNK</code></td><td>Canal N — Inconnu (fallback)</td></tr>
+<tr><td><code>DAILY-LIMIT-CLOSE</code></td><td>Fermeture par limite quotidienne</td></tr>
+<tr><td><code>NEW-SIGNAL</code></td><td>Fermeture par nouveau signal du même canal</td></tr>
+<tr><td><code>close-all</code></td><td>Fermeture manuelle (news, etc.)</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 20. CHANGELOG -->
+<!-- ============================================================ -->
+<section id="changelog">
+<h2>20. Changelog complet</h2>
+
+<h3>V12.0.0 (2026-07-29)</h3>
+<h4>Bugs corrigés</h4>
+<ul>
+<li><span class="badge badge-red">CRITIQUE</span> <code>NameError: orders</code> dans <code>execute_signal()</code> — crash au premier PU failed</li>
+<li><span class="badge badge-red">CRITIQUE</span> <code>TypeError: entry_price=None</code> dans filtre distance TP (Quick Alert)</li>
+<li><span class="badge badge-orange">MOYEN</span> P&L=0 dans <code>_close_all_positions()</code> — manque délai MT5</li>
+<li><span class="badge badge-orange">MOYEN</span> Doublons alertes Telegram — dédup refaite avec contenu normalisé</li>
+<li><span class="badge badge-orange">MOYEN</span> Doublons handler — <code>_seen_msg_ids</code>改为 dict avec TTL</li>
+</ul>
+
+<h4>Code mort supprimé (-452 lignes)</h4>
+<ul>
+<li>Méthodes: <code>place_limit_order</code>, <code>modify_pending_order</code>, <code>update_pending_orders_sl</code>, <code>_cancel_pending_orders_for_entry</code>, <code>_get_tp_trigger</code>, <code>_check_pending_only_expiry</code>, <code>_resolve_order</code></li>
+<li>Boucles mortes: pending orders dans <code>_check_all()</code>, <code>check_conflict()</code>, <code>NewsManager._close_all()</code></li>
+<li>Config morte: <code>SL_PRIX_UNIQUE</code>, <code>expiry</code>, <code>orders</code> dans entry dicts</li>
+<li>bot_messages.py: 17 fonctions mortes supprimées</li>
+</ul>
+
+<h4>Déduplication refaite</h4>
+<ul>
+<li><code>_seen_msg_ids</code>: dict avec TTL au lieu de set avec <code>clear()</code></li>
+<li><code>_alert_dedup_cache</code>: contenu normalisé (sans "Canal:") au lieu de <code>hash()</code></li>
+<li>TTL augmenté de 10s → 30s, eviction FIFO bornée</li>
+</ul>
+
+<h3>V11.1.1 (2026-07-28)</h3>
+<ul>
+<li>Fix: Messages Telegram dupliqués (dedup par message_id)</li>
+<li>Fix: Fusion — SL/TP mis à jour au lieu d'annuler</li>
+<li>Fix: Signaux Zone — Suppression du midian</li>
+<li>Fix: QA avec prix — Tolérance directionnelle</li>
+</ul>
+
+<h3>V11.0.0</h3>
+<ul>
+<li>SINGLE_POSITION_MODE — un seul MARKET par signal</li>
+<li>Signaux zone → ZN1/ZN2</li>
+<li>Prix Unique → PU1/PU2</li>
+<li>Quick Alert → AL-MP uniquement</li>
+<li>Fusion → SL/TP mis à jour (pas de 2ème position)</li>
+<li>BE → SL @ entry ± BE_USD + TP @ entry ± TP_FIXED_GAIN_USD</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- FOOTER -->
+<!-- ============================================================ -->
+<footer>
+<p>GZL TradingBot V12.0.0 — Documentation générée le 2026-07-29</p>
+<p>Telegram → MetaTrader 5 | Copy Trading Bot</p>
+</footer>
+
+</div>
+</body>
+</html>
