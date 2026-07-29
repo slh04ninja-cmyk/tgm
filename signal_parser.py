@@ -224,6 +224,9 @@ def normalize_text(text: str) -> str:
     text = re.sub(r'[-]{2,}', ' ', text)
     text = re.sub(r'[/]{2,}', ' ', text)
 
+    # 10b. Nettoyer les points devant les nombres (.4040 → 4040)
+    text = re.sub(r'\.(\d{4,6})', r' \1', text)
+
     # 11. Normalisation spécifique : remplacer XAU/USD par XAUUSD
     text = text.replace('XAU/USD', 'XAUUSD')
     text = text.replace('X AUUSD', 'XAUUSD')
@@ -440,6 +443,37 @@ def _extract_all_tps(normalized_text: str) -> List[float]:
 
     return [tps[k] for k in sorted(tps.keys())]
 
+
+def _extract_orphan_tps(normalized_text: str, zone_low: float, zone_high: float, sl: float, action: str) -> List[float]:
+    """Détecte les TP sans mot-clé (TP, TARGET, etc.).
+    Cherche les nombres entre la zone et le SL qui sont dans la direction du trade.
+    Ex: BUY ENTRY 4028-4022 4030 4040 SL 4002 → TPs = [4030, 4040]"""
+    sl_match = re.search(r'SL\s*\d{4,6}', normalized_text)
+    search_text = normalized_text[:sl_match.start()] if sl_match else normalized_text
+
+    zone_match = re.search(r'(?:ENTRY|@|ZONE)\s*:?\s*\d{4,6}[^\d]*\d{4,6}', search_text)
+    if zone_match:
+        search_text = search_text[zone_match.end():]
+
+    nums = re.findall(r'\b(\d{4,6}(?:\.\d+)?)\b', search_text)
+    zone_mid = (zone_low + zone_high) / 2
+    tps = []
+    for n in nums:
+        val = float(n)
+        # Exclure zone boundaries, SL, et toute valeur dans [zone_low, zone_high]
+        if val == sl:
+            continue
+        if zone_low <= val <= zone_high:
+            continue
+        if not (1000 <= val <= 99999):
+            continue
+        if action == "BUY" and val > zone_mid:
+            tps.append(val)
+        elif action == "SELL" and val < zone_mid:
+            tps.append(val)
+    return sorted(tps) if action == "BUY" else sorted(tps, reverse=True)
+
+
 def _extract_sl(normalized_text: str) -> Optional[float]:
     m = re.search(r'STOP\s+LOSS.*?(\d{4,6}(?:\.\d+)?)', normalized_text)
     if m:
@@ -617,6 +651,13 @@ class SignalParser:
         tps = _extract_all_tps(normalized_text)
         sl = _extract_sl(normalized_text)
         merge_price = _extract_merge_price(normalized_text)
+
+        # ★ FIX : TP sans mot-clé — chercher les nombres entre zone et SL
+        if not tps and sl is not None:
+            orphan_tps = _extract_orphan_tps(normalized_text, zone_low, zone_high, sl, action)
+            if orphan_tps:
+                tps = orphan_tps
+                log.info(f"TP détectés sans mot-clé: {tps}")
 
         # Génération auto SL si TPs présents mais pas de SL
         if tps and sl is None:
