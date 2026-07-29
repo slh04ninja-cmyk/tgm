@@ -652,6 +652,14 @@ class SignalParser:
         sl = _extract_sl(normalized_text)
         merge_price = _extract_merge_price(normalized_text)
 
+        # ★ FIX : MORE SELL/BUY → convertir en zone si prix unique
+        # Ex: SELL 4045 MORE SELL 4050 → zone [4045, 4050]
+        if is_single and merge_price is not None:
+            zone_low = min(zone_low, merge_price)
+            zone_high = max(zone_high, merge_price)
+            is_single = False
+            log.info(f"MORE détecté → zone [{zone_low}, {zone_high}]")
+
         # ★ FIX : TP sans mot-clé — chercher les nombres entre zone et SL
         if not tps and sl is not None:
             orphan_tps = _extract_orphan_tps(normalized_text, zone_low, zone_high, sl, action)
