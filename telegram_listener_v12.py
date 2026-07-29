@@ -1285,7 +1285,7 @@ class TradeManager:
             entry["_target_gain"] = target_gain
             entry["_be_activated"] = True
             log.info(msg.log_be_combined(mt5_comment, 1, be_price))
-            send_alert_sync(msg.alert_be_activated(action, signal['symbol'], 1, be_price, target_gain, canal, 0))
+            send_alert_sync(msg.alert_be_activated(action, signal['symbol'], 1, be_price, target_gain, mt5_comment, 0))
 
     # =============================================================
     # MÉTHODES UTILITAIRES
@@ -1402,7 +1402,7 @@ class TradeManager:
                     log.info(msg.log_close_combined(mt5_comment, label, idx, total, t['ticket'], pnl))
                     log.info(msg.log_daily_pnl_final(daily_pnl_now))
 
-                    send_alert_sync(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, canal))
+                    send_alert_sync(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, mt5_comment))
 
             active_tickets = []
             for t in entry.get("tickets", []):
@@ -1667,9 +1667,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
             })
             log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final}")
             send_alert_sync(
-                f"🟢 {action} {symbol} | {mt5_comment_zn}\n"
+                f"🟢 {symbol} | {action} | {mt5_comment_zn}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"MARKET: @{current} | Lot: {unique_lot}\n"
+                f"MARKET: {current:.2f} | Lot: {unique_lot}\n"
                 f"TICKET: {t}\n"
                 f"TP: {tp_final} | SL: {sl}\n"
                 f"Canal: {canal}"
@@ -1737,9 +1737,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
             })
             log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final}")
             send_alert_sync(
-                f"🟢 {action} {symbol} | {mt5_comment_pu}\n"
+                f"🟢 {symbol} | {action} | {mt5_comment_pu}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"MARKET: @{current} | Lot: {unique_lot}\n"
+                f"MARKET: {current:.2f} | Lot: {unique_lot}\n"
                 f"TICKET: {t}\n"
                 f"TP: {tp_final} | SL: {sl}\n"
                 f"Canal: {canal}"
@@ -1881,13 +1881,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         if is_unfavorable:
             log.info(f"Quick Alert annulée — prix défavorable | "
                      f"prix={current} entry={entry_price} écart>défavorable de {QA_PRICE_TOLERANCE}")
-            send_alert_sync(
-                f"❌ QA ANNULÉE | {action} {symbol}\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"Prix: {current} | Entry signal: {entry_price}\n"
-                f"Prix défavorable (>{QA_PRICE_TOLERANCE}$ contre signal)\n"
-                f"Canal: {canal}"
-            )
+            send_alert_sync(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
             return
 
     # ★ GARDE : entry_price requis pour les filtres suivants
@@ -1954,10 +1948,10 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         log.info(msg.log_order_placed(mt5_comment_qa, "MKT", t, current, sl))
         log.debug(f"✓ QUICK MARKET #{t}")
         send_alert_sync(
-            f"⚡ {action} {symbol} | AL-MP\n"
+            f"⚡ {symbol} | {action} | {mt5_comment_qa}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"MARKET : @{current} | Lot: {LOT_UNIQUE_TRADE}\n"
-            f"Ticket : #{t}\n"
+            f"MARKET: {current:.2f} | Lot: {LOT_UNIQUE_TRADE}\n"
+            f"TICKET: {t}\n"
             f"TP: {default_tp} | SL: {sl}\n"
             f"Canal: {canal}"
         )
@@ -2017,16 +2011,8 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                         elif deal.reason == mt5.DEAL_REASON_TP:
                             close_reason = "TP"
                         break
-        emoji = "\u274c" if close_reason == "SL" else "\u2705"
-        log.info(f"QA #{qa_ticket} d\u00e9j\u00e0 ferm\u00e9 ({close_reason}) \u2192 signal complet ignor\u00e9")
-        send_alert_sync(
-            f"{emoji} QA {close_reason} | {full_signal['action']} {full_signal['symbol']}\n"
-            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-            f"QA : #{qa_ticket}\n"
-            f"P&L : {deal_pnl:+.2f} $\n"
-            f"Signal complet ignor\u00e9\n"
-            f"Canal: {canal}"
-        )
+        ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+        send_alert_sync(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
         # QA actif -> mettre a jour SL et TP avec ceux du signal complet
         log.info(f"Fusion: mise a jour SL/TP du QA #{qa_ticket}")
@@ -2039,13 +2025,8 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 break
         entry["signal"]          = full_signal
         entry["_is_quick_alert"] = False
-        send_alert_sync(
-            f"\u2705 FUSION SL/TP mis \u00e0 jour\n"
-            f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n"
-            f"QA : #{qa_ticket}\n"
-            f"Nouveau SL: {real_sl} | Nouveau TP: {tp_final}\n"
-            f"Canal: {canal}"
-        )
+        ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+        send_alert_sync(msg.alert_fusion(full_signal['action'], ch_num_fusion, qa_ticket, real_sl, tp_final))
 
     # Nettoyer quick_alerts
     if key in quick_alerts and qa in quick_alerts[key]:
@@ -2288,16 +2269,14 @@ async def main():
                             f"Conf={tfm_result['confidence']} "
                             f"({tfm_result['reason']})"
                         )
-                        send_alert_sync(
-                            f"🚫 SIGNAL REJETÉ PAR TIMESFM\n"
-                            f"━━━━━━━━━━━━━━━━━━\n"
-                            f"{sig_dict['action']} {sig_dict['symbol']}\n"
-                            f"Prédit: {tfm_result['predicted_direction']} "
-                            f"({tfm_result['predicted_move_pips']} pips)\n"
-                            f"Confiance: {tfm_result['confidence']}\n"
-                            f"Raison: {tfm_result['reason']}\n"
-                            f"Canal: {canal_name}"
-                        )
+                        send_alert_sync(msg.alert_timesfm_rejected(
+                            sig_dict['action'], sig_dict['symbol'],
+                            tfm_result['predicted_direction'],
+                            tfm_result['predicted_move_pips'],
+                            tfm_result['confidence'],
+                            tfm_result['reason'],
+                            canal_name
+                        ))
                         return
                     else:
                         log.info(
@@ -2352,13 +2331,7 @@ async def main():
                                     entry_qa["_is_quick_alert"] = False
                                 updated_qa = True
                                 log.info(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
-                                send_alert_sync(
-                                    f"✏️ FUSION SL/TP mis à jour (hors tolérance)\n"
-                                    f"━━━━━━━━━━━━━━━━━━\n"
-                                    f"QA : #{ticket}\n"
-                                    f"Nouveau SL: {real_sl} | Nouveau TP: {tp_final_fusion}\n"
-                                    f"Canal: {canal_name}"
-                                )
+                                send_alert_sync(msg.alert_fusion_oot(action, ch_num, ticket, real_sl, tp_final_fusion))
                                 break
                             else:
                                 # QA déjà fermé → ignorer le signal complet

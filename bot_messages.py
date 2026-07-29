@@ -1,18 +1,21 @@
 """
 =============================================================
  BOT_MESSAGES.PY — Textes des logs et alertes Telegram
- Version v12.0.0 — SINGLE_POSITION_MODE (MARKET only)
+ Version v12.1.0 — Formats d'alertes mis à jour
 =============================================================
 Centralise tous les textes affichés (console + Telegram) pour pouvoir
 les modifier facilement SANS toucher à la logique de trading.
 
-v12.0.0 :
-- Suppression de log_order_placed_dual (jamais appelée en v11+)
-- Nettoyage complet des fonctions mortes
+v12.1.0 :
+- Formats d'alertes harmonisés: SYMBOL | ACTION | COMMENT
+- Prix sans @
+- Clôtures: ACTION | COMMENT | LABEL
+- BE: ACTION | COMMENT | BE
+- Fusion: ACTION | CANAL_NUM | FUSION
 
 Organisation :
   1. Logs et alertes de CLÔTURE (TP / SL / CLOSE)
-  2. Logs et alertes de BE (Break-Even) — SL @ entry ± BE_USD + TP @ entry ± TP_FIXED_GAIN_USD
+  2. Logs et alertes de BE (Break-Even)
   3. Logs et alertes de signal (ZN1/ZN2, PU1/PU2, AL-MP)
   4. Logs de REJET de signal
   5. Logs du P&L quotidien
@@ -35,8 +38,9 @@ def log_daily_pnl_final(daily_pnl_now: float) -> str:
 
 
 def alert_close(label: str, action: str, symbol: str, pnl: float, idx: int, total: int,
-                 ticket: int, daily_pnl_now: float, canal: str) -> str:
-    """Alerte Telegram à la clôture d'un ticket (TP, SL, CLOSE)."""
+                 ticket: int, daily_pnl_now: float, mt5_comment: str) -> str:
+    """Alerte Telegram à la clôture d'un ticket (TP, SL, CLOSE).
+    Format: {emoji} {action} | {mt5_comment} | {label}"""
     if label == "TP":
         emoji = "🎯"
     elif label == "SL":
@@ -44,32 +48,33 @@ def alert_close(label: str, action: str, symbol: str, pnl: float, idx: int, tota
     else:
         emoji = "⚪"
     return (
-        f"{emoji} {action} {symbol} | {label}\n"
+        f"{emoji} {action} | {mt5_comment} | {label}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"P&L: {pnl:+.2f}$\n"
-        f"Ticket: #{ticket}\n"
+        f"Ticket: {ticket}\n"
         f"P&L QT: {daily_pnl_now:.2f}$\n"
-        f"Canal: {canal}"
+        f"Canal: {mt5_comment.split('-')[0] if '-' in mt5_comment else ''}"
     )
 
 
 # =============================================================
-# 2. BREAK-EVEN (BE) — SL @ entry ± BE_USD + TP @ entry ± TP_FIXED_GAIN_USD
+# 2. BREAK-EVEN (BE)
 # =============================================================
 def log_be_combined(mt5_comment: str, nb_pos: int, sl_price: float) -> str:
     return f">>> | {mt5_comment} | BE | SL @{sl_price:.2f}"
 
 
 def alert_be_activated(action: str, symbol: str, nb_pos: int, sl_price: float, target_gain: float,
-                        canal: str, pending_annules: int = 0) -> str:
+                        mt5_comment: str, pending_annules: int = 0) -> str:
     """Alerte Telegram à l'activation du BE.
-    SL @ entry ± BE_USD + TP @ entry ± TP_FIXED_GAIN_USD. MT5 ferme automatiquement."""
+    Format: {emoji} {action} | {mt5_comment} | BE"""
+    tp_price = sl_price + target_gain if action == "BUY" else sl_price - target_gain
     return (
-        f"🔒 {action} {symbol} | BE ACTIVÉ\n"
+        f"🔒 {action} | {mt5_comment} | BE\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"SL → @{sl_price:.2f} (entry)\n"
-        f"TP → MT5 ferme auto à +{target_gain:.2f}$\n"
-        f"Canal: {canal}"
+        f"SL → {sl_price:.2f}\n"
+        f"TP → {tp_price:.2f} (+{target_gain:.1f}$)\n"
+        f"Canal: {mt5_comment.split('-')[0] if '-' in mt5_comment else ''}"
     )
 
 
@@ -82,6 +87,21 @@ def log_signal_detected(mt5_comment: str, action: str, entry_price) -> str:
 
 def log_order_placed(mt5_comment: str, order_type: str, ticket: int, price, sl) -> str:
     return f">>> | {mt5_comment} | {order_type} #{ticket} @{price} | SL: {sl}"
+
+
+def alert_market_opened(action: str, symbol: str, mt5_comment: str, price: float,
+                         lot: float, ticket: int, tp: float, sl: float, canal: str) -> str:
+    """Alerte Telegram à l'ouverture d'une position MARKET.
+    Format: {emoji} {symbol} | {action} | {mt5_comment}"""
+    emoji = "🟢" if "ZN" in mt5_comment or "PU" in mt5_comment else "⚡"
+    return (
+        f"{emoji} {symbol} | {action} | {mt5_comment}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"MARKET: {price:.2f} | Lot: {lot}\n"
+        f"TICKET: {ticket}\n"
+        f"TP: {tp} | SL: {sl}\n"
+        f"Canal: {canal}"
+    )
 
 
 # =============================================================
@@ -103,6 +123,75 @@ MOTIF_PRIX_HORS_ZONE = "PRIX HORS ZONE"
 MOTIF_PRIX_ATTEINT_TP3 = "PRIX ATTEINT TP3"
 MOTIF_ECHEC_PLACEMENT = "ÉCHEC PLACEMENT ORDRE"
 MOTIF_PROTECTION_NEWS = "PROTECTION NEWS"
+
+
+def alert_qa_cancelled(action: str, symbol: str, ch_num, current: float,
+                        entry_price: float, tolerance: float) -> str:
+    """Alerte Telegram quand une QA est annulée (prix défavorable).
+    Format: {emoji} {action} | {ch_num} | QA ANNULÉE"""
+    return (
+        f"❌ {action} | CH{ch_num} | QA ANNULÉE\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Prix: {current:.2f} | Entry: {entry_price:.2f}\n"
+        f"Prix défavorable (>{tolerance}$)\n"
+        f"Canal: CH{ch_num}"
+    )
+
+
+def alert_qa_already_closed(action: str, symbol: str, ch_num, qa_ticket: int,
+                              deal_pnl: float, close_reason: str) -> str:
+    """Alerte Telegram quand un QA est déjà fermé.
+    Format: {emoji} {action} | {ch_num} | QA déjà {reason}"""
+    emoji = "❌" if close_reason == "SL" else "✅"
+    return (
+        f"{emoji} {action} | CH{ch_num} | QA déjà {close_reason}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"QA : #{qa_ticket}\n"
+        f"P&L : {deal_pnl:+.2f} $\n"
+        f"FUSION IGNORÉ\n"
+        f"Canal: CH{ch_num}"
+    )
+
+
+def alert_fusion(action: str, ch_num, qa_ticket: int, new_sl: float, new_tp: float) -> str:
+    """Alerte Telegram quand un QA est fusionné avec un signal complet.
+    Format: {emoji} {action} | {ch_num} | FUSION"""
+    return (
+        f"✅ {action} | CH{ch_num} | FUSION\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"QA : #{qa_ticket}\n"
+        f"SL : {new_sl}\n"
+        f"TP : {new_tp}\n"
+        f"Canal: CH{ch_num}"
+    )
+
+
+def alert_fusion_oot(action: str, ch_num, qa_ticket: int, new_sl: float, new_tp: float) -> str:
+    """Alerte Telegram quand un QA est fusionné (hors tolérance).
+    Format: {emoji} {action} | {ch_num} | FUSION (hors tolérance)"""
+    return (
+        f"✏️ {action} | CH{ch_num} | FUSION (hors tolérance)\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"QA : #{qa_ticket}\n"
+        f"SL : {new_sl}\n"
+        f"TP : {new_tp}\n"
+        f"Canal: CH{ch_num}"
+    )
+
+
+def alert_timesfm_rejected(action: str, symbol: str, pred_dir: str, pred_move: float,
+                             confidence: float, reason: str, canal: str) -> str:
+    """Alerte Telegram quand un signal est rejeté par TimesFM.
+    Format: 🚫 SIGNAL REJETÉ PAR TIMESFM"""
+    return (
+        f"🚫 SIGNAL REJETÉ PAR TIMESFM\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"{action} {symbol}\n"
+        f"Prédit: {pred_dir} ({pred_move} pips)\n"
+        f"Confiance: {confidence}\n"
+        f"Raison: {reason}\n"
+        f"Canal: {canal}"
+    )
 
 
 # =============================================================
