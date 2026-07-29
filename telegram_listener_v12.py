@@ -1,15 +1,38 @@
 """
 =============================================================
  TELEGRAM → MT5 | Bot Trading
- Version 11.1.0 — Position unique (plus de cas à 2 positions)
- MODIFICATIONS v11.0.0 :
- - Un seul MARKET par signal, toujours (pas de LIMIT, pas de pending, pas de fusion 2 positions)
- - Signaux zone : ZN1 (prix dans zone) ou ZN2 (prix entre zone et SL) → MARKET
- - Prix Unique : PU1 (entry→SL) ou PU2 (tolérance) → MARKET
- - Quick Alert : AL-MP uniquement, tolérance prix QA_PRICE_TOLERANCE
- - Fusion : SL/TP mis à jour sur QA existant (pas de 2ème position)
- - BE : SL @ entry + TP @ entry ± TP_FIXED_GAIN_USD (MT5 ferme auto)
- - Plus de fermeture manuelle par le bot
+ Version 12.0.0 — Code cleanup & bug fixes
+=============================================================
+MODIFICATIONS v12.0.0 (depuis v11.1.1) :
+
+■ BUGS CORRIGÉS :
+- [CRITIQUE] NameError: variable `orders` non définie dans execute_signal()
+- Crash TypeError: entry_price=None dans le filtre distance TP (Quick Alert)
+- P&L=0 après fermeture dans _close_all_positions() (manque délai MT5)
+- Doublons alertes Telegram: dédup basée sur hash() Python non-deterministe
+- Doublons handler: clear() brutal du set _seen_msg_ids à 2000 entrées
+
+■ CODE MORT SUPPRIMÉ (-452 lignes) :
+- Méthodes: place_limit_order, modify_pending_order, update_pending_orders_sl,
+  _cancel_pending_orders_for_entry, _get_tp_trigger, _check_pending_only_expiry,
+  _resolve_order
+- Boucles mortes: pending orders dans _check_all(), check_conflict(),
+  NewsManager._close_all()
+- Config morte: SL_PRIX_UNIQUE, expiry, orders dans entry dicts
+- bot_messages.py: 17 fonctions mortes supprimées
+
+■ DÉDUPLICATION REFAITE :
+- _seen_msg_ids: dict avec TTL au lieu de set avec clear()
+- _alert_dedup_cache: contenu normalisé (sans 'Canal:') au lieu de hash()
+- TTL augmenté de 10s → 30s, eviction FIFO bornée
+
+■ ARCHITECTURE (inchangée depuis v11) :
+- Un seul MARKET par signal (SINGLE_POSITION_MODE)
+- Signaux zone : ZN1/ZN2 → MARKET
+- Prix Unique : PU1/PU2 → MARKET
+- Quick Alert : AL-MP uniquement
+- Fusion : SL/TP mis à jour sur QA existant
+- BE : SL @ entry ± BE_USD + TP @ entry ± TP_FIXED_GAIN_USD
 =============================================================
 """
 
