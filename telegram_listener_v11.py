@@ -163,6 +163,7 @@ TIMESFM_SYMBOL          = os.getenv("TIMESFM_SYMBOL", "XAUUSDm")  # symbole MT5 
 
 
 # === PARAMÈTRES SL (définis dans .env) ===
+SL_PRIX_UNIQUE = float(os.getenv("SL_PRIX_UNIQUE", "15.0"))
 FUSION_TOLERANCE = float(os.getenv("FUSION_TOLERANCE", "3"))
 CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == "true"
 # ★ MODE POSITION UNIQUE : convertit les signaux zone (2 positions) en MARKET seul,
@@ -288,51 +289,29 @@ _alert_client = None
 _main_loop = None
 
 # ★ DÉDUPLICATION DES ALERTES : éviter d'envoyer 2x le même message
-# Utilise un set borné (deque) au lieu d'un dict + clear() pour éviter les fuites
-from collections import deque
-_alert_dedup_cache: dict = {}  # content_key -> timestamp
-_alert_dedup_order: deque = deque()  # ordre FIFO des clés pour eviction
-_ALERT_DEDUP_TTL = 30.0  # secondes (augmenté de 10→30)
-_ALERT_DEDUP_MAX = 500
-
-def _make_alert_key(message: str) -> str:
-    """Clé de dédup basée sur le contenu normalisé (pas hash() Python).
-    Supprime le nom du canal pour capter les doublons canal+discussion group."""
-    # Supprime espaces superflus
-    normalized = ' '.join(message.split())
-    # Supprime la ligne 'Canal: ...' pour que le même signal venant du canal
-    # et du groupe de discussion ait la même clé
-    normalized = re.sub(r'\nCanal:.*$', '', normalized)
-    return normalized
+_alert_dedup_cache: dict = {}  # hash(message) -> timestamp
+_ALERT_DEDUP_TTL = 10.0  # secondes
 
 def send_alert_sync(message: str, _retries: int = 2):
     """Envoie non-bloquant avec retry automatique.
     - 1er essai : timeout 8s
     - Si échec : 1 retry après 2s (connexion Telegram instable)
     - Ne bloque JAMAIS la boucle de trading plus de 10s total
-    - Dédup: ignore les messages identiques envoyés dans les 30 dernières secondes"""
+    - Dédup: ignore les messages identiques envoyés dans les 10 dernières secondes"""
     if not TG_ALERT_CHANNEL or not _alert_client or not _main_loop:
         return
     # --- Déduplication envoi ---
     now_ts = time.time()
-    alert_key = _make_alert_key(message)
-    # Eviction des entrées expirées (FIFO borné, pas de clear() total)
-    while _alert_dedup_order:
-        oldest_key = _alert_dedup_order[0]
-        if now_ts - _alert_dedup_cache.get(oldest_key, 0) > _ALERT_DEDUP_TTL:
-            _alert_dedup_order.popleft()
-            _alert_dedup_cache.pop(oldest_key, None)
-        else:
-            break
-    # Eviction par taille max
-    while len(_alert_dedup_order) > _ALERT_DEDUP_MAX:
-        old_key = _alert_dedup_order.popleft()
-        _alert_dedup_cache.pop(old_key, None)
-    if alert_key in _alert_dedup_cache:
+    msg_hash = hash(message)
+    if len(_alert_dedup_cache) > 200:
+        cutoff = now_ts - _ALERT_DEDUP_TTL
+        stale = [k for k, v in _alert_dedup_cache.items() if v < cutoff]
+        for k in stale:
+            del _alert_dedup_cache[k]
+    if msg_hash in _alert_dedup_cache:
         log.debug(f"[ALERT-DEDUP] Message déjà envoyé récemment → ignoré")
         return
-    _alert_dedup_cache[alert_key] = now_ts
-    _alert_dedup_order.append(alert_key)
+    _alert_dedup_cache[msg_hash] = now_ts
     # --- Fin dédup ---
     for attempt in range(_retries):
         try:
@@ -778,6 +757,10 @@ class NewsManager:
 
     def _close_all(self):
         if self.manager:
+            for entry in list(self.manager.active):
+                for o in entry.get("orders", []):
+                    self.bridge.cancel_order(o["order"])
+                entry["orders"] = []
             # Capturer P&L avant fermeture
             positions_before = mt5.positions_get()
             tickets_before = {p.ticket: p for p in positions_before if p.magic == MAGIC_NUMBER} if positions_before else {}
@@ -928,6 +911,39 @@ class MT5Bridge:
                 return result.order
         return None
 
+    def place_limit_order(self, signal: dict, lot: float, price: float, tp: float, expiry: datetime, comment: str = "TG-limit") -> int | None:
+        sym = self._sym(signal["symbol"])
+        if not sym:
+            return None
+        lot = self._validate_volume(sym, lot)
+        action = signal["action"]
+        if tp:
+            if action == "BUY" and tp <= price:
+                return None
+            if action == "SELL" and tp >= price:
+                return None
+        otype = mt5.ORDER_TYPE_BUY_LIMIT if action == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
+        filling = self._get_filling(sym)
+        result = mt5.order_send({
+            "action": mt5.TRADE_ACTION_PENDING,
+            "symbol": sym.name,
+            "volume": lot,
+            "type": otype,
+            "price": round(price, sym.digits),
+            "sl": round(signal.get("sl", 0), sym.digits) if signal.get("sl", 0) else 0,
+            "tp": round(tp, sym.digits) if tp else 0,
+            "deviation": SLIPPAGE,
+            "magic": MAGIC_NUMBER,
+            "comment": comment,
+            "type_time": mt5.ORDER_TIME_SPECIFIED,
+            "expiration": int(expiry.timestamp()),
+            "type_filling": filling,
+        })
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            log.debug(f"LIMIT {action} {sym.name} lot={lot} @{price} TP={tp} order#{result.order}")
+            return result.order
+        return None
+
     def cancel_order(self, order_ticket: int) -> bool:
         result = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": order_ticket})
         ok = result and result.retcode == mt5.TRADE_RETCODE_DONE
@@ -981,6 +997,32 @@ class MT5Bridge:
         ok = result and result.retcode == mt5.TRADE_RETCODE_DONE
         if ok:
             log.debug(f"SL/TP modifiés #{ticket} → SL={new_sl} TP={new_tp} {label}")
+        return ok
+
+    def modify_pending_order(self, order_ticket: int, new_sl: float, new_tp: float, label: str = "") -> bool:
+        orders = mt5.orders_get(ticket=order_ticket)
+        if not orders:
+            log.warning(f"Ordre pending #{order_ticket} introuvable")
+            return False
+        order = orders[0]
+        sym = mt5.symbol_info(order.symbol)
+        if sym is None:
+            log.warning(f"Symbole introuvable pour l'ordre #{order_ticket}")
+            return False
+        result = mt5.order_send({
+            "action": mt5.TRADE_ACTION_MODIFY,
+            "order": order_ticket,
+            "price": order.price_open,
+            "sl": round(new_sl, sym.digits),
+            "tp": round(new_tp, sym.digits),
+            "type_time": order.type_time,
+            "expiration": order.time_expiration,
+        })
+        ok = result and result.retcode == mt5.TRADE_RETCODE_DONE
+        if ok:
+            log.debug(f"Ordre pending modifié #{order_ticket} → SL={new_sl} TP={new_tp} {label}")
+        else:
+            log.error(f"Échec modification ordre pending #{order_ticket}")
         return ok
 
     def update_sl_by_channel(self, new_sl: float, channel_num: int):
@@ -1116,6 +1158,30 @@ class TradeManager:
         return True
 
     # =============================================================
+    # SL MOVE — Mettre à jour le SL des pending orders
+    # =============================================================
+    def update_pending_orders_sl(self, channel_num: int, new_sl: float):
+        updated = 0
+        with self._lock:
+            for entry in self.active:
+                signal = entry.get("signal", {})
+                canal = signal.get("source_channel", "Inconnu")
+                ch = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), None))
+                if ch != channel_num:
+                    continue
+                # Mettre à jour le SL dans le signal dict
+                signal["sl"] = new_sl
+                # Modifier les ordres pending dans MT5
+                for o in entry.get("orders", []):
+                    order_ticket = o.get("order", 0)
+                    tp = o.get("tp_final", 0)
+                    if order_ticket and tp:
+                        if self.bridge.modify_pending_order(order_ticket, new_sl, tp, f"[SL-MOVE @{new_sl}]"):
+                            updated += 1
+        if updated:
+            log.info(f"<<<<< INFO >>>>> SL MOVE pending orders canal {channel_num} → {new_sl} sur {updated} ordres")
+
+    # =============================================================
     # ARRÊT QUOTIDIEN
     # =============================================================
     def _cancel_all_pending_orders(self) -> int:
@@ -1140,8 +1206,6 @@ class TradeManager:
             if pos.magic == MAGIC_NUMBER:
                 ticket = pos.ticket
                 if self.bridge.close_position(ticket, comment="DAILY-LIMIT-CLOSE"):
-                    # ★ FIX : attendre la propagation du deal dans MT5 history
-                    time.sleep(0.3)
                     deals = mt5.history_deals_get(position=ticket)
                     if deals:
                         # ★ FIX : sommer tous les deals OUT (couvre les clôtures partielles manuelles antérieures)
@@ -1160,6 +1224,7 @@ class TradeManager:
     def _clear_all_entries(self):
         with self._lock:
             for entry in self.active:
+                entry["orders"] = []
                 for t in entry.get("tickets", []):
                     t["_daily_limit_closed"] = True
             self.active.clear()
@@ -1189,9 +1254,89 @@ class TradeManager:
     # =============================================================
     # GESTION DU BE (avec whitelist)
     # =============================================================
+    def _cancel_pending_orders_for_entry(self, entry: dict):
+        # ★★★ FIX : vérifier si les ordres sont déjà remplis avant d'annuler ★★★
+        # Le délai MT5 history peut faire qu'un ordre rempli n'est pas encore détecté.
+        # On vérifie via mt5.orders_get() si l'ordre existe encore.
+        orders_to_cancel = []
+        already_filled = []
+        for o in entry.get("orders", []):
+            order_ticket = o.get("order", 0)
+            if not order_ticket:
+                continue
+            # Vérifier si l'ordre existe encore dans MT5
+            mt5_order = mt5.orders_get(ticket=order_ticket)
+            if mt5_order:
+                # L'ordre est toujours pending → on peut l'annuler
+                orders_to_cancel.append(order_ticket)
+            else:
+                # L'ordre n'existe plus → il a été rempli !
+                # Chercher la position correspondante
+                symbol = entry.get("signal", {}).get("symbol", "")
+                pos = self._resolve_order(order_ticket, symbol)
+                if pos:
+                    tk = {
+                        "ticket": pos.ticket, "lot": o["lot"], "role": o["role"],
+                        "entry_price": pos.price_open,
+                        "tp_index": o.get("tp_index", 0), "tp_target": o.get("tp_target", 0),
+                        "tp3": o.get("tp3", 0), "tp_final": o.get("tp_final", 0),
+                        "sl_step": 0, "trail_active": False, "be_active": False, "be_sl": 0,
+                    }
+                    entry["tickets"].append(tk)
+                    already_filled.append(order_ticket)
+                    log.info(f"[BE] Ordre #{order_ticket} déjà rempli → ticket #{pos.ticket} ajouté")
+
+        if already_filled:
+            log.info(f"[BE] {len(already_filled)} ordre(s) déjà rempli(s) → ajoutés aux tickets")
+
+        if not orders_to_cancel:
+            # ★ FIX : même si aucun ordre n'a eu besoin d'être annulé (tous déjà remplis),
+            # il faut quand même vider entry["orders"], sinon _check_pending_only_expiry
+            # re-déclenche le TP_TRIGGER à l'infini à chaque cycle de poll.
+            entry["orders"] = []
+            return
+
+        log.debug(f"Annulation de {len(orders_to_cancel)} ordre(s) pending")
+        symbol = entry.get("signal", {}).get("symbol", "")
+        for ticket in orders_to_cancel:
+            ok = self.bridge.cancel_order(ticket)
+            if not ok:
+                # ★★★ FIX : cancel échoué → l'ordre s'est rempli entre le check et le cancel ★★★
+                pos = self._resolve_order(ticket, symbol)
+                if pos:
+                    # Trouver l'order dict correspondant pour récupérer les métadonnées
+                    o_data = next((o for o in entry["orders"] if o.get("order") == ticket), None)
+                    if o_data:
+                        tk = {
+                            "ticket": pos.ticket, "lot": o_data["lot"], "role": o_data["role"],
+                            "entry_price": pos.price_open,
+                            "tp_index": o_data.get("tp_index", 0), "tp_target": o_data.get("tp_target", 0),
+                            "tp3": o_data.get("tp3", 0), "tp_final": o_data.get("tp_final", 0),
+                            "sl_step": 0, "trail_active": False, "be_active": False, "be_sl": 0,
+                        }
+                        entry["tickets"].append(tk)
+                        log.info(f"[BE] Race condition détectée : #{ticket} rempli pendant annulation → #{pos.ticket} ajouté")
+            else:
+                log.debug(f"Annulation ordre pending #{ticket}")
+        entry["orders"] = []
+
+    def _get_tp_trigger(self, entry: dict) -> float:
+        signal = entry.get("signal", {})
+        tps = signal.get("tps", [])
+        if len(tps) >= 3:
+            return tps[2]
+        elif len(tps) >= 2:
+            return tps[1]
+        elif len(tps) >= 1:
+            return tps[0]
+        return 0.0
+
     def _check_pnl_trigger(self, entry: dict) -> bool:
-        # Le BE se déclenche quand la position atteint le seuil PNL_TRIGGER_USD.
-        # v11 : toujours 1 seule position MARKET par signal.
+        # ★★★ FIX : utiliser min_profit (pire position) au lieu de best_profit ★★★
+        # Le BE se déclenche quand la PIRE position atteint le seuil.
+        # Pour BUY: market @ 2350 (pire entrée) doit atteindre 8$
+        # Pour BUY: limit @ 2340 (meilleure entrée) aura forcément plus de profit.
+        # → La market est protégée en premier.
         min_profit = float('inf')
         min_role = "?"
         has_active = False
@@ -1264,6 +1409,74 @@ class TradeManager:
             log.info(msg.log_be_combined(mt5_comment, 1, be_price))
             send_alert_sync(msg.alert_be_activated(action, signal['symbol'], 1, be_price, target_gain, canal, 0))
 
+    # ★★★ FIX : Appliquer BE aux nouveaux tickets (limit remplies après BE initial) ★★★
+
+    # =============================================================
+    # TP_TRIGGER PENDING UNIQUEMENT
+    # =============================================================
+    def _check_pending_only_expiry(self, entry: dict, symbol: str, action: str):
+        has_open_position = False
+        for t in entry.get("tickets", []):
+            if self._get_pos(t["ticket"]):
+                has_open_position = True
+                break
+        # ✅ MODIFIÉ : ne pas skip si position ouverte — le TP_TRIGGER doit quand même
+        # annuler les ordres pending restants (ex: CAS2-b, limit_1 rempli, limit_2 pending)
+        if not entry.get("orders"):
+            return
+        tp_trigger = self._get_tp_trigger(entry)
+        if tp_trigger == 0:
+            return
+        sym_info = self.bridge._sym(symbol)
+        if sym_info is None:
+            return
+        tick = mt5.symbol_info_tick(sym_info.name)
+        if tick is None:
+            return
+        current = tick.bid if action == "BUY" else tick.ask
+        triggered = False
+        if action == "BUY" and current >= tp_trigger:
+            triggered = True
+        elif action == "SELL" and current <= tp_trigger:
+            triggered = True
+        if triggered:
+            # ✅ Capturer les infos AVANT annulation
+            pending_count = len(entry.get("orders", []))
+            prices = [f"@{o['price']}" for o in entry.get("orders", []) if "price" in o]
+            prices_str = ", ".join(prices) if prices else "inconnu"
+
+            if has_open_position:
+                log.debug(f"TP_TRIGGER ({tp_trigger:.2f}) atteint avec position ouverte → annulation de {pending_count} ordre(s) pending")
+            else:
+                log.debug(f"TP_TRIGGER ({tp_trigger:.2f}) atteint sans position ouverte → annulation des ordres pending")
+
+            self._cancel_pending_orders_for_entry(entry)
+
+            signal = entry.get("signal", {})
+            canal = signal.get("source_channel", "Inconnu")
+            ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+            mt5_comment = entry.get("_mt5_comment", f"CH{ch_num}-UNK")
+
+            log.info(msg.log_tp_trigger(mt5_comment, prices_str, pending_count))
+
+            send_alert_sync(
+                f"⚠️ {action} {symbol} | TP_TRIGGER\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Ordres annulés : {pending_count}\n"
+                f"Prix : {prices_str}\n"
+                f"Position ouverte : {'Oui' if has_open_position else 'Non'}\n"
+                f"Canal: {canal}"
+            )
+
+            # ★★★ FIX : Nettoyer l'entry si aucune position ouverte restante ★★★
+            if not has_open_position:
+                remaining_tickets = [t for t in entry.get("tickets", []) if self._get_pos(t["ticket"])]
+                if not remaining_tickets and not entry.get("orders"):
+                    with self._lock:
+                        if entry in self.active:
+                            self.active.remove(entry)
+                    log.debug(f"[TP_TRIGGER] Entry supprimée de self.active (aucune position/order restant)")
+
     # =============================================================
     # MÉTHODES UTILITAIRES
     # =============================================================
@@ -1325,7 +1538,7 @@ class TradeManager:
         sig = entry["signal"]
         canal = sig.get("source_channel", "Inconnu")
         mode = "DEMO" if DEMO_MODE else "LIVE"
-        log.debug(f"TradeManager [{mode}]: {sig['action']} {sig['symbol']} Canal: {canal}")
+        log.debug(f"TradeManager [{mode}]: {sig['action']} {sig['symbol']} Canal: {canal} | {len(entry['orders'])} ordres")
 
     async def _loop_async(self):
         while not self._stop:
@@ -1355,6 +1568,111 @@ class TradeManager:
             action = signal.get("action", "")
             canal = signal.get("source_channel", "Inconnu")
             mt5_comment = entry.get("_mt5_comment", f"CH{CHANNEL_NUM_MAP.get(canal, '?')}-UNK")
+
+            still_pending = []
+            expired_orders = []
+            for o in entry.get("orders", []):
+                pos = self._resolve_order(o["order"], symbol)
+                if pos:
+                    # ★★★ FIX BE : un Quick Alert LIMIT rempli doit devenir "quick_limit_filled" ★★★
+                    # (comportement documenté §5.2 : "Alert 1 pos (limit)" → quick_limit_filled)
+                    # Sans ce renommage, le rôle reste "quick_limit" (exclu de la whitelist BE)
+                    # et le BE ne se déclenche jamais pour une Quick Alert LIMIT non fusionnée.
+                    resolved_role = o["role"]
+                    if resolved_role == "quick_limit":
+                        resolved_role = "quick_limit_filled"
+                    tk = {
+                        "ticket": pos.ticket,
+                        "lot": o["lot"],
+                        "role": resolved_role,
+                        "entry_price": pos.price_open,
+                        "tp_index": o.get("tp_index", 0),
+                        "tp_target": o.get("tp_target", 0),
+                        "tp3": o.get("tp3", 0),
+                        "tp_final": o.get("tp_final", 0),
+                        "sl_step": 0,
+                        "trail_active": False,
+                        "be_active": False,
+                        "be_sl": 0,
+                    }
+                    entry["tickets"].append(tk)
+                    log.debug(f"Ordre #{o['order']} rempli → ticket={pos.ticket} @{pos.price_open}")
+
+                    # Log LIMIT remplie
+                    log.info(msg.log_order_filled(mt5_comment, "LMT", pos.ticket))
+
+                    sl_price = signal.get("sl", 0)
+                    send_alert_sync(
+                        f"🔵 {action} {symbol} | LIMIT REMPLIE\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"{resolved_role}: @{pos.price_open} | Lot: {o['lot']}\n"
+                        f"TICKET: #{pos.ticket}\n"
+                        f"TP: {o.get('tp_final', 0)} | SL: {sl_price}\n"
+                        f"Canal: {canal}"
+                    )
+
+                elif now > entry.get("expiry", now):
+                    self.bridge.cancel_order(o["order"])
+                    expired_orders.append(o)
+                else:
+                    # --- Vérifier SL/TP provisoire sur les QA-LMT ---
+                    if entry.get("_is_quick_alert") and o.get("role") == "quick_limit":
+                        current_price = self.bridge.current_price(symbol, action)
+                        if current_price is not None:
+                            provisional_sl = signal.get("sl", 0)
+                            provisional_tp = signal.get("tps", [0])[0] if signal.get("tps") else 0
+                            sl_hit = False
+                            tp_hit = False
+                            if action == "BUY":
+                                if provisional_sl and current_price <= provisional_sl:
+                                    sl_hit = True
+                                elif provisional_tp and current_price >= provisional_tp:
+                                    tp_hit = True
+                            else:  # SELL
+                                if provisional_sl and current_price >= provisional_sl:
+                                    sl_hit = True
+                                elif provisional_tp and current_price <= provisional_tp:
+                                    tp_hit = True
+
+                            if sl_hit or tp_hit:
+                                self.bridge.cancel_order(o["order"])
+                                reason = "SL" if sl_hit else "TP"
+                                emoji = "❌" if sl_hit else "✅"
+                                log.info(f"[QA-LMT] #{o['order']} annulé — {reason} provisoire touché @{current_price}")
+                                send_alert_sync(
+                                    f"{emoji} QA-LMT {reason} TOUCHÉ | {action}\n"
+                                    f"━━━━━━━━━━━━━━━━━━\n"
+                                    f"QA-LMT : #{o['order']} annulé\n"
+                                    f"{reason} provisoire : @{provisional_sl if sl_hit else provisional_tp}\n"
+                                    f"Prix actuel : @{current_price}\n"
+                                    f"Canal: {canal}"
+                                )
+                                # Retirer le QA de _quick_alerts
+                                qa_key = _qa_key(symbol, action, canal)
+                                if qa_key in self._quick_alerts_ref:
+                                    self._quick_alerts_ref[qa_key] = [
+                                        qa for qa in self._quick_alerts_ref[qa_key]
+                                        if qa.get("ticket") != o["order"]
+                                    ]
+                                    if not self._quick_alerts_ref[qa_key]:
+                                        del self._quick_alerts_ref[qa_key]
+                                continue
+
+                    still_pending.append(o)
+
+            if expired_orders:
+                prices = [f"@{o['price']}" for o in expired_orders if "price" in o]
+                prices_str = ", ".join(prices) if prices else "inconnu"
+                log.info(msg.log_expiration(mt5_comment, prices_str, len(expired_orders)))
+                send_alert_sync(
+                    f"🕒 {action} {symbol} | EXPIRATION\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"Ordres annulés : {len(expired_orders)}\n"
+                    f"Prix : {prices_str}\n"
+                    f"Canal: {canal}"
+                )
+
+            entry["orders"] = still_pending
 
             for t in entry.get("tickets", []):
                 pos = self._get_pos(t["ticket"])
@@ -1395,7 +1713,7 @@ class TradeManager:
             # de considérer l'entrée comme terminée, pas seulement qu'aucun ne soit "actif".
             all_reported = all(t.get("_reported") for t in entry.get("tickets", []))
 
-            if not active_tickets and all_reported:
+            if not entry.get("orders") and not active_tickets and all_reported:
                 total_pnl = sum(t.get("_last_pnl", 0.0) for t in entry.get("tickets", []))
                 log.debug(f"Trade terminé ({symbol}) | Canal: {canal} | P&L total: {total_pnl:+.2f}")
                 if self.tracker:
@@ -1407,6 +1725,14 @@ class TradeManager:
                         self.active.remove(entry)
                 continue
 
+            if not entry.get("_be_activated") and not active_tickets and all_reported:
+                self._check_pending_only_expiry(entry, symbol, action)
+                if not entry.get("orders"):
+                    with self._lock:
+                        if entry in self.active:
+                            self.active.remove(entry)
+                    continue
+
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 3 : GESTION BE ★★★
             # ══════════════════════════════════════════════════════════════
@@ -1417,6 +1743,24 @@ class TradeManager:
                 if self._check_pnl_trigger(entry):
                     self._apply_be_on_open_positions(entry, action)
                     continue
+
+    # ★★★ FIX : Pas de cache pour les ordres pending ★★★
+    # Le cache de 1s + délai MT5 = la limit peut être invisible quand le BE se déclenche.
+    # On query MT5 directement à chaque cycle.
+    def _resolve_order(self, order_ticket: int, symbol: str):
+        since = datetime.now(timezone.utc) - timedelta(days=1)
+        now = datetime.now(timezone.utc)
+        deals = mt5.history_deals_get(since, now)
+        if deals is None or len(deals) == 0:
+            return None
+
+        for deal in reversed(deals):
+            if deal.order == order_ticket and deal.entry == mt5.DEAL_ENTRY_IN:
+                positions = mt5.positions_get(ticket=deal.position_id)
+                if positions:
+                    return positions[0]
+
+        return None
 
 # =============================================================
 # CONFLIT & EXÉCUTION (avec SL paramétrable)
@@ -1463,6 +1807,8 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
                 continue
             if entry["signal"].get("source_channel") != canal:
                 continue
+            for o in entry.get("orders", []):
+                bridge.cancel_order(o["order"])
             to_remove.append(entry)
     # Capturer P&L des positions avant fermeture
     positions_before = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
@@ -1552,6 +1898,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
     tp_final = all_tps[-1]
     tp3 = all_tps[tp_trigger_idx]
     sl = signal["sl"]
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=ORDER_EXPIRY_MIN)
 
     if check_conflict(signal, bridge, manager):
         log.info(msg.log_refuse(ch_num, "", msg.MOTIF_CONFLIT))
@@ -1590,7 +1937,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
         log.warning(f"Signal ignoré — max signaux atteint ({total_signals}/{MAX_POSITIONS}) | {symbol} {action}")
         return
 
-    tickets = []
+    orders, tickets = [], []
     is_single_price = signal.get("is_single_price", False)
 
     # ★ SIGNAUX ZONE : garder la zone intacte (pas de conversion en midian)
@@ -1657,7 +2004,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
 
         entry = {
             "signal": signal,
+            "orders": orders,
             "tickets": tickets,
+            "expiry": expiry,
             "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "_signal_id": f"{symbol}_{action}_{int(time.time())}",
             "_expected_positions": 1,
@@ -1724,14 +2073,16 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
         else:
             log.error("  ✗ MARKET échoué")
 
-        if not tickets:
+        if not orders and not tickets:
             log.info(msg.log_refuse(ch_num, f"-{prefix}", msg.MOTIF_ECHEC_PLACEMENT))
             log.error(f"Aucun ordre placé ({prefix}).")
             return
 
         entry = {
             "signal": signal,
+            "orders": orders,
             "tickets": tickets,
+            "expiry": expiry,
             "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "_signal_id": f"{symbol}_{action}_{int(time.time())}",
             "_expected_positions": 1,
@@ -1739,7 +2090,17 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
         }
         manager.register(entry)
         tracker.log_trade_open(entry)
-        log.info(msg.log_order_placed(mt5_comment_pu, "MKT", t, current, sl))
+
+        parts_data = []
+        for t in tickets:
+            parts_data.append(("MKT", t['ticket'], t['entry_price']))
+        for o in orders:
+            parts_data.append(("LIMIT", o['order'], o['price']))
+        if len(parts_data) == 1:
+            log.info(msg.log_order_placed(mt5_comment_pu, parts_data[0][0], parts_data[0][1], parts_data[0][2], sl))
+        elif len(parts_data) >= 2:
+            log.info(msg.log_order_placed_dual(mt5_comment_pu, parts_data[0][0], parts_data[0][1], parts_data[0][2],
+                                                parts_data[1][0], parts_data[1][1], parts_data[1][2], sl))
         return
 
     # ── Les signaux zone sont convertis en Prix Unique plus haut ──
@@ -1799,6 +2160,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     canal = signal.get("source_channel", "Inconnu")
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
     ch_num = CHANNEL_NUM_MAP.get(clean_canal, CHANNEL_NUM_MAP.get(clean_canal.lstrip("-"), "?"))
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=ORDER_EXPIRY_MIN)
 
     # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
     _close_previous_signal(canal, bridge, manager)
@@ -1867,11 +2229,6 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             )
             return
 
-    # ★ GARDE : entry_price requis pour les filtres suivants
-    if entry_price is None:
-        log.warning(f"Quick Alert ignorée — entry_price manquant | {symbol} {action}")
-        return
-
     # ★ FILTRE DISTANCE TP pour Quick Alert
     TP_DISTANCE_MIN_RATIO = float(os.getenv("TP_DISTANCE_MIN_RATIO", "0.3"))
     if action == "BUY":
@@ -1904,7 +2261,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     log.info(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
     log.debug(f"Quick Alert MARKET {action} {symbol} @{current} SL={sl}, TP={default_tp}")
 
+    orders = []
     tickets = []
+    order_ticket = None
 
     try:
         t = bridge.place_market_order(signal, LOT_UNIQUE_TRADE, tp=default_tp, sl=sl, comment=mt5_comment_qa)
@@ -1944,7 +2303,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
 
     entry = {
         "signal": signal,
+        "orders": orders,
         "tickets": tickets,
+        "expiry": expiry,
         "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "_is_quick_alert": True,
         "_signal_id": f"{symbol}_{action}_{int(time.time())}_QA",
@@ -1959,6 +2320,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         "entry": entry,
         "signal": signal,
         "ticket": order_ticket,
+        "is_limit": False,
         "entry_price": entry_price,
         "is_market_price": signal.get("is_market_price", False),
         "time": datetime.now(timezone.utc),
@@ -2128,9 +2490,8 @@ async def main():
         # Clé 2 = hash(contenu + canal) pour couvrir les messages identiques
         # livrés via des chats différents (canal vs discussion group).
         _seen_messages: dict = {}  # dedup_key -> timestamp
-        _seen_msg_ids: dict = {}   # message_id -> timestamp (dict au lieu de set pour TTL)
+        _seen_msg_ids: set = set()  # message_ids déjà traités
         _SEEN_TTL = 120.0
-        _SEEN_MAX_IDS = 5000
 
         @client.on(events.NewMessage(chats=chats))
         async def handler(event):
@@ -2141,14 +2502,13 @@ async def main():
             # --- Déduplication ---
             now_ts = time.time()
             msg_id = event.message.id
-            # Clé 1 : message_id (le plus fiable) — eviction TTL au lieu de clear()
+            # Clé 1 : message_id (le plus fiable)
             if msg_id in _seen_msg_ids:
                 log.debug(f"[DEDUP] message_id {msg_id} déjà traité → ignoré")
                 return
             # Clé 2 : contenu + canal (même texte du même canal → même clé)
             text_hash = hash(text.strip())
             dedup_key = (canal_name, text_hash)
-            # Eviction TTL bornée (pas de clear() total)
             if len(_seen_messages) > 500:
                 cutoff = now_ts - _SEEN_TTL
                 stale = [k for k, v in _seen_messages.items() if v < cutoff]
@@ -2157,13 +2517,10 @@ async def main():
             if dedup_key in _seen_messages:
                 log.debug(f"[DEDUP] message déjà traité pour {canal_name} → ignoré")
                 return
-            _seen_msg_ids[msg_id] = now_ts
-            # Eviction bornée par taille (garde les plus récents, pas de clear())
-            if len(_seen_msg_ids) > _SEEN_MAX_IDS:
-                # Supprime les 1000 plus anciens
-                sorted_ids = sorted(_seen_msg_ids.items(), key=lambda x: x[1])
-                for old_id, _ in sorted_ids[:1000]:
-                    del _seen_msg_ids[old_id]
+            _seen_msg_ids.add(msg_id)
+            if len(_seen_msg_ids) > 2000:
+                # Garder seulement les 1000 plus récents
+                _seen_msg_ids.clear()
             _seen_messages[dedup_key] = now_ts
             # --- Fin déduplication ---
 
@@ -2230,6 +2587,7 @@ async def main():
                 ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), None))
                 if ch_num is not None:
                     bridge.update_sl_by_channel(signal_data.new_sl, ch_num)
+                    manager.update_pending_orders_sl(ch_num, signal_data.new_sl)
                 else:
                     log.warning(f"SL MOVE ignoré : canal inconnu ({canal_name})")
                 return
@@ -2358,6 +2716,7 @@ async def main():
         log.info(f" Gain fixe par position : {TP_FIXED_GAIN_USD}$")
         log.info(f" BE déclenché à : {PNL_TRIGGER_USD}$")
         log.info(f" Objectif quotidien : {DAILY_PROFIT_LIMIT}$")
+        log.info(f" SL prix unique: {SL_PRIX_UNIQUE}$")
         log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC)")
         log.info(f" Filtre news : {'ON' if NEWS_ENABLED else 'OFF'}")
         if NEWS_ENABLED:
