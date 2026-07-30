@@ -328,11 +328,10 @@ def _make_alert_key(message: str) -> str:
     normalized = re.sub(r'\nCanal:.*$', '', normalized)
     return normalized
 
-def send_alert_sync(message: str, _retries: int = 2):
-    """Envoie non-bloquant avec retry automatique.
-    - 1er essai : timeout 8s
-    - Si échec : 1 retry après 2s (connexion Telegram instable)
-    - Ne bloque JAMAIS la boucle de trading plus de 10s total
+def send_alert_sync(message: str, _retries: int = 1):
+    """Envoie non-bloquant, PAS de retry.
+    - Timeout 15s (généreux pour éviter les faux timeouts)
+    - Pas de retry : un doublon est pire qu'une alerte perdue
     - Dédup: ignore les messages identiques envoyés dans les 30 dernières secondes"""
     if not TG_ALERT_CHANNEL or not _alert_client or not _main_loop:
         return
@@ -357,105 +356,18 @@ def send_alert_sync(message: str, _retries: int = 2):
     _alert_dedup_cache[alert_key] = now_ts
     _alert_dedup_order.append(alert_key)
     # --- Fin dédup ---
-    for attempt in range(_retries):
-        try:
-            coro = _alert_client.send_message(TG_ALERT_CHANNEL, message)
-            future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
-            future.result(timeout=8)
-            return  # ✅ succès
-        except TimeoutError:
-            if attempt < _retries - 1:
-                # ★ FIX doublon : le timeout est côté CLIENT — le message a pu être
-                # livré côté serveur malgré tout. On vérifie l'historique récent avant
-                # de retenter, sinon un retry aveugle envoie un vrai second message
-                # identique (Telegram n'a aucune notion d'idempotence côté serveur).
-                already_sent = False
-                try:
-                    check_coro = _alert_client.get_messages(TG_ALERT_CHANNEL, limit=5)
-                    check_future = asyncio.run_coroutine_threadsafe(check_coro, _main_loop)
-                    recent = check_future.result(timeout=5)
-                    already_sent = any((m.text or "") == message for m in recent)
-                except Exception:
-                    pass  # vérification impossible → on retente quand même (par sécurité)
-                if already_sent:
-                    log.info(f"[ALERT] Message déjà livré malgré le timeout → pas de retry")
-                    return
-                log.info(f"[ALERT] Timeout tentative {attempt+1}, retry dans 2s...")
-                time.sleep(2)
-            else:
-                log.warning(f"[ALERT] Timeout envoi alerte Telegram ({_retries} tentatives)")
-        except Exception as e:
-            log.warning(f"[ALERT] Erreur envoi alerte Telegram: {type(e).__name__}: {e}")
-            return  # erreur non-récupérable, pas de retry
+    try:
+        coro = _alert_client.send_message(TG_ALERT_CHANNEL, message)
+        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+        future.result(timeout=15)
+    except TimeoutError:
+        log.warning(f"[ALERT] Timeout envoi alerte Telegram (15s) — message possiblement livré")
+    except Exception as e:
+        log.warning(f"[ALERT] Erreur envoi alerte Telegram: {type(e).__name__}: {e}")
 
 # =============================================================
 # PERFORMANCE TRACKER
 # =============================================================
-class PerformanceTracker:
-    def __init__(self):
-        self._trades_cache = []
-        self._report_sent = False
-
-    def log_trade_open(self, entry):
-        sig = entry["signal"]
-        now = datetime.now(timezone.utc)
-        row = {
-            "canal": sig.get("source_channel", "Inconnu"),
-            "symbol": sig["symbol"],
-            "action": sig["action"],
-            "result": "OPEN",
-            "pnl": 0.0,
-            "duree_min": 0,
-            "_entry_time": now,
-            "_entry": entry,
-        }
-        self._trades_cache.append(row)
-
-    def log_trade_close(self, entry, total_pnl):
-        sig = entry["signal"]
-        canal = sig.get("source_channel", "Inconnu")
-        now = datetime.now(timezone.utc)
-        result = "WIN" if total_pnl > 0 else ("BE" if total_pnl == 0 else "LOSS")
-        for t in reversed(self._trades_cache):
-            if (t["canal"] == canal and
-                t["symbol"] == sig["symbol"] and
-                t["action"] == sig["action"] and
-                t["result"] == "OPEN"):
-                entry_time = t.get("_entry_time", now)
-                duree = (now - entry_time).total_seconds() / 60
-                t["result"] = result
-                t["pnl"] = round(total_pnl, 2)
-                t["duree_min"] = round(duree, 1)
-                break
-
-    def format_session_summary(self) -> str:
-        if not self._trades_cache:
-            return "📊 Aucun trade cette session."
-        wins = sum(1 for t in self._trades_cache if t["result"] == "WIN")
-        losses = sum(1 for t in self._trades_cache if t["result"] == "LOSS")
-        be = sum(1 for t in self._trades_cache if t["result"] == "BE")
-        still_open = sum(1 for t in self._trades_cache if t["result"] == "OPEN")
-        total_pnl = sum(t["pnl"] for t in self._trades_cache)
-        lines = [
-            "📊 RÉSUMÉ SESSION",
-            "━━━━━━━━━━━━━━━━━━",
-            f"✅ Wins : {wins}",
-            f"❌ Losses : {losses}",
-            f"⬜ Breakeven : {be}",
-            f"🔵 Ouverts : {still_open}",
-            f"💰 P&L session : {total_pnl:+.2f}$",
-        ]
-        return "\n".join(lines)
-
-    def print_final_report(self):
-        if self._report_sent:
-            return
-        self._report_sent = True
-        log.info("<<<<< INFO >>>>> Rapport final :")
-        summary = self.format_session_summary()
-        for line in summary.split("\n"):
-            log.info(f"<<<<< INFO >>>>> {line}")
-
 # =============================================================
 # TIMESFM VALIDATOR
 # =============================================================
@@ -1048,9 +960,8 @@ class MT5Bridge:
 # TRADE MANAGER (avec whitelist BE)
 # =============================================================
 class TradeManager:
-    def __init__(self, bridge: MT5Bridge, tracker=None, quick_alerts_ref=None):
+    def __init__(self, bridge: MT5Bridge, quick_alerts_ref=None):
         self.bridge = bridge
-        self.tracker = tracker
         self.active = []
         self._lock = threading.Lock()
         self._daily_lock = threading.Lock()
@@ -1421,8 +1332,6 @@ class TradeManager:
             if not active_tickets and all_reported:
                 total_pnl = sum(t.get("_last_pnl", 0.0) for t in entry.get("tickets", []))
                 log.debug(f"Trade terminé ({symbol}) | Canal: {canal} | P&L total: {total_pnl:+.2f}")
-                if self.tracker:
-                    self.tracker.log_trade_close(entry, total_pnl)
                 # Note : le P&L quotidien est déjà mis à jour par ticket (voir boucle ci-dessus),
                 # pas besoin de le ré-additionner ici (éviterait un double comptage).
                 with self._lock:
@@ -1532,7 +1441,7 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                 return True
     return False
 
-def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
+def execute_signal(signal: dict, bridge: MT5Bridge, manager):
     action = signal["action"]
     symbol = signal["symbol"]
     zone_low = signal["zone_low"]
@@ -1687,7 +1596,6 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
             "_mt5_comment": mt5_comment_zn,
         }
         manager.register(entry)
-        tracker.log_trade_open(entry)
         log.info(msg.log_order_placed(mt5_comment_zn, "MKT", t, current, sl))
         return
 
@@ -1761,7 +1669,6 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tracker):
             "_mt5_comment": mt5_comment_pu,
         }
         manager.register(entry)
-        tracker.log_trade_open(entry)
         log.info(msg.log_order_placed(mt5_comment_pu, "MKT", t, current, sl))
         return
 
@@ -1780,7 +1687,7 @@ def _qa_key(symbol: str, action: str, channel_name: str = "") -> str:
     return f"CH{ch_num}_{symbol}_{action}"
 
 def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
-                        tracker: PerformanceTracker, quick_alerts: dict):
+                        quick_alerts: dict):
     action = signal["action"]
     symbol = signal["symbol"]
     sl = signal.get("sl")
@@ -1984,7 +1891,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
 
 def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                       bridge: MT5Bridge, manager: TradeManager,
-                      tracker: PerformanceTracker, quick_alerts: dict):
+                      quick_alerts: dict):
     qa_ticket = qa["ticket"]
     entry     = qa["entry"]
     real_sl   = full_signal["sl"]
@@ -2054,7 +1961,6 @@ async def main():
     
     parser = SignalParser()
     bridge = MT5Bridge()
-    tracker = PerformanceTracker()
     manager = None
 
     try:
@@ -2063,7 +1969,7 @@ async def main():
             return
 
         _quick_alerts = {}
-        manager = TradeManager(bridge, tracker, quick_alerts_ref=_quick_alerts)
+        manager = TradeManager(bridge, quick_alerts_ref=_quick_alerts)
         acc_info = mt5.account_info()
         if acc_info:
             log.info(msg.log_balance_startup(acc_info.balance, manager._daily_pnl))
@@ -2287,7 +2193,7 @@ async def main():
                 # ============================================================
 
                 if signal_data.is_quick_alert:
-                    execute_quick_alert(sig_dict, bridge, manager, tracker, _quick_alerts)
+                    execute_quick_alert(sig_dict, bridge, manager, _quick_alerts)
                     return
 
                 key = _qa_key(sig_dict["symbol"], sig_dict["action"], canal_name)
@@ -2305,7 +2211,7 @@ async def main():
                         break
 
                 if found_qa is not None:
-                    merge_quick_alert(found_qa, key, sig_dict, bridge, manager, tracker, _quick_alerts)
+                    merge_quick_alert(found_qa, key, sig_dict, bridge, manager, _quick_alerts)
                 else:
                     # --- Hors tolérance de fusion : mettre à jour SL/TP du QA existant
                     # (pas de fermeture, pas de 2ème position) ---
@@ -2344,7 +2250,7 @@ async def main():
 
                     if not updated_qa:
                         # Aucun QA trouvé → exécuter le signal complet normalement
-                        execute_signal(sig_dict, bridge, manager, tracker)
+                        execute_signal(sig_dict, bridge, manager)
 
         # Banner
         mode = "🔲 DEMO" if DEMO_MODE else "💰 LIVE"
@@ -2388,7 +2294,6 @@ async def main():
         if news_mgr:
             news_mgr.stop()
         bridge.disconnect()
-        tracker.print_final_report()
         log.info("[SHUTDOWN] Bot arrêté proprement.")
 
 if __name__ == "__main__":
