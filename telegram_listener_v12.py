@@ -589,6 +589,7 @@ class NewsManager:
         self._blocked = False
         self._stop = False
         self._task = None
+        self._force_log = False
 
     def set_manager(self, manager):
         self.manager = manager
@@ -618,6 +619,7 @@ class NewsManager:
                 # ★ Re-fetch forcé quand le jour de trading change
                 if last_day is not None and current_day != last_day:
                     log.info("[NEWS] Nouveau jour de trading → re-fetch des news")
+                    self._force_log = True
                     await asyncio.to_thread(self._fetch_news)
                     last_fetch = now
                 last_day = current_day
@@ -658,8 +660,9 @@ class NewsManager:
             # ★ FIX #8 : log les news 1h avant l'ouverture NY (12:30 UTC)
             now_utc = datetime.now(timezone.utc)
             is_pre_ny = (now_utc.hour == 12 and 25 <= now_utc.minute <= 35)
-            if is_pre_ny or not hasattr(self, '_news_logged'):
+            if is_pre_ny or not hasattr(self, '_news_logged') or self._force_log:
                 self._news_logged = True
+                self._force_log = False
                 log.info(msg.log_news_loaded(len(self._news)))
                 if len(self._news) == 0 and len(data) > 0:
                     sample_keys = list(data[0].keys())
