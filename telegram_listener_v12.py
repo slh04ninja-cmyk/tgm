@@ -610,9 +610,17 @@ class NewsManager:
         FETCH_INTERVAL_SEC = 1800
         CHECK_INTERVAL_SEC = 30
         last_fetch = 0.0
+        last_day = None
         while not self._stop:
             try:
                 now = time.time()
+                current_day = get_trading_day_start().day
+                # ★ Re-fetch forcé quand le jour de trading change
+                if last_day is not None and current_day != last_day:
+                    log.info("[NEWS] Nouveau jour de trading → re-fetch des news")
+                    await asyncio.to_thread(self._fetch_news)
+                    last_fetch = now
+                last_day = current_day
                 if now - last_fetch >= FETCH_INTERVAL_SEC:
                     await asyncio.to_thread(self._fetch_news)
                     last_fetch = now
