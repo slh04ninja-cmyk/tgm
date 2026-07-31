@@ -536,15 +536,15 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <span class="cyan">Signal: BUY 4005 SL 3990 TP 4050</span>
 
 <span class="yellow">PU1 :</span> prix entre entry et SL (meilleur prix)
-  → Prix 3998 → <span class="green">MARKET BUY</span>
+  → Prix 3998 (SL=3990 &lt; 3998 &lt; 4005) → <span class="green">MARKET BUY</span>
   → Commentaire MT5: <span class="cyan">CH{N}-PU1</span>
 
 <span class="yellow">PU2 :</span> prix dans [entry, entry + tolérance]
-  → Prix 4007 (entry 4005 + 2$ &lt; 3$ tolerance) → <span class="green">MARKET BUY</span>
+  → Prix 4007 (4005 ≤ 4007 ≤ 4008) → <span class="green">MARKET BUY</span>
   → Commentaire MT5: <span class="cyan">CH{N}-PU2</span>
 
-<span class="red">Rejet :</span> prix > entry + tolérance
-  → Prix 4010 &gt; 4005 + 3$ → <span class="red">ANNULÉ</span>
+<span class="red">Rejet :</span> prix &gt; entry + tolérance
+  → Prix 4010 &gt; 4005 + 3 → <span class="red">ANNULÉ</span>
 </div>
 
 <h3>Tolérance directionnelle (v11+)</h3>
