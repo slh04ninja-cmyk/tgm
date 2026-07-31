@@ -2090,7 +2090,7 @@ async def main():
                         peers = filt.get('include_peers', []) if isinstance(filt, dict) else getattr(filt, 'include_peers', [])
                         all_peers.extend(peers)
                         found_folders.append(ftitle)
-                        log.info(f"  Dossier '{ftitle}' (id={fid})")
+                        log.debug(f"  Dossier '{ftitle}' (id={fid})")
                     else:
                         log.warning(f"  Dossier '{name}' introuvable")
 
@@ -2127,11 +2127,13 @@ async def main():
                         entity_to_name[entity.id] = title_clean
                         CHANNEL_NUM_MAP[title_clean] = ch_num
                         CHANNEL_NUM_MAP[str(entity.id)] = ch_num
-                        log.info(f"Canal_{ch_num} : {title_clean}")
+                        log.debug(f"Canal_{ch_num} : {title_clean}")
                     except Exception as e:
-                        log.warning(f"Impossible de résoudre un peer: {e}")
+                        log.debug(f"Impossible de résoudre un peer: {e}")
 
-                log.info(f"{ch_num} canaux chargés depuis {len(found_folders)} dossier(s): {', '.join(found_folders)}")
+                folders_str = " , ".join(found_folders)
+                log.info(f"Dossier Trouvé : '{folders_str}'")
+                log.info(f"Channels Telechargés : {ch_num}")
 
                 # Sauvegarder la liste des canaux dans Channel.txt
                 try:
