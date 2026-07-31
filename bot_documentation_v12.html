@@ -118,7 +118,7 @@ Canaux Dynamiques &bull; MARKET Only &bull; ZN1/ZN2 &bull; PU1/PU2 &bull; Quick 
 <div class="stat-row">
 <div class="stat-card"><div class="stat-value">N</div><div class="stat-label">Canaux (dynamique)</div></div>
 <div class="stat-card"><div class="stat-value">MARKET</div><div class="stat-label">Type d'ordre unique</div></div>
-<div class="stat-card"><div class="stat-value">1s</div><div class="stat-label">Polling interval</div></div>
+<div class="stat-card"><div class="stat-value">POLL_INTERVAL_SEC</div><div class="stat-label">Polling (défaut 1s)</div></div>
 <div class="stat-card"><div class="stat-value">30s</div><div class="stat-label">Alert dedup TTL</div></div>
 </div>
 
@@ -490,6 +490,7 @@ NEW SL 4000              → Déplace SL à 4000</div>
   ├── ② <span class="orange">Filtre Horaire</span>    → hors 2h-20h UTC ? → REJET
   ├── ③ <span class="orange">Filtre P&L Quotidien</span> → daily_pnl >= 70$ ? → REJET
   ├── ④ <span class="purple">Validation TimesFM</span> → direction prédite ≠ signal ? → REJET
+  │   └── (uniquement signaux TRADE complets, PAS les Quick Alerts)
   ├── ⑤ <span class="red">Filtre Conflit</span>    → même canal + opposé ? → ferme l'ancien
   ├── ⑥ <span class="red">Symbole MT5</span>       → introuvable ? → REJET
   ├── ⑦ <span class="red">Prix indisponible</span> → tick None ? → REJET
@@ -513,6 +514,8 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <h2>9. Cas d'exécution des ordres</h2>
 
 <h3>Signaux Zone → ZN1 ou ZN2</h3>
+<p>Si le signal zone n'a pas de TP (ex: <code>TP OPEN</code>), le bot génère automatiquement : TP = entry ± TP_FIXED_GAIN_USD (10$).</p>
+
 <div class="flow">
 <span class="cyan">Signal: BUY 4000 4010 SL 3990 TP 4050</span>
 
@@ -552,11 +555,11 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <tr><td>BUY 4000</td><td>4002</td><td><span class="badge badge-green">MARKET</span></td><td>Dans tolérance</td></tr>
 <tr><td>BUY 4000</td><td>4004</td><td><span class="badge badge-red">ANNULÉ</span></td><td>&gt; 3$ défavorable</td></tr>
 <tr><td>SELL 4000</td><td>4010</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (plus cher)</td></tr>
-<tr><td>SELL 4000</td><td>3997</td><td><span class="badge badge-red">ANNULÉ</span></td><td>&gt; 3$ défavorable</td></tr>
+<tr><td>SELL 4000</td><td>3997</td><td><span class="badge badge-green">MARKET</span></td><td>Code: current &lt; entry-3 = non → exécuté (voir bug §9)</td></tr>
 </table>
 
 <h3>1 signal par canal</h3>
-<p>Quand un nouveau signal arrive d'un canal qui a déjà un signal actif, l'ancien est fermé automatiquement avant d'exécuter le nouveau.</p>
+<p>Quand un nouveau signal arrive d'un canal qui a déjà un signal actif, l'ancien est fermé automatiquement avant d'exécuter le nouveau — <strong>même si la direction est identique</strong> (ex: BUY 4000 suivi de BUY 4020 → le premier BUY est fermé).</p>
 </section>
 
 <!-- ============================================================ -->
@@ -599,6 +602,12 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <li>Position active → mise à jour SL/TP</li>
 <li>Position fermée → nouvelle alerte</li>
 </ul>
+
+<div class="highlight danger">
+<strong>⚠️ Bug connu — Tolérance SELL inversée :</strong><br>
+Le code vérifie <code>current &lt; entry - tolerance</code> pour SELL, ce qui est la direction FAVORABLE (prix baisse = bien pour SELL). Résultat : un SELL dont le prix monte de +4$ (défavorable) passe quand même, tandis qu'un SELL dont le prix baisse de -4$ (favorable) est annulé.<br>
+<code>is_unfavorable = current &lt; entry_price - QA_PRICE_TOLERANCE</code> → devrait être <code>current &gt; entry_price + QA_PRICE_TOLERANCE</code>
+</div>
 </section>
 
 <!-- ============================================================ -->
@@ -628,12 +637,18 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <li>Pas de nouvelle position créée</li>
 </ul>
 
-<h3>Fusion hors tolérance</h3>
+<h3>Fusion hors tolérance (OOT)</h3>
 <ul>
-<li>Le prix du QA est hors de la zone de tolérance</li>
-<li>SL et TP sont quand même mis à jour (pas de fermeture)</li>
-<li>Le signal complet est "absorbé" par le QA</li>
+<li>Le prix du QA est hors de la zone de tolérance (±FUSION_TOLERANCE)</li>
+<li>SL et TP sont quand même mis à jour via <code>bridge.modify_sl_tp()</code></li>
+<li>Le signal complet est "absorbé" par le QA — pas de 2ème position</li>
+<li>Le <code>_is_quick_alert</code> du QA passe à False</li>
+<li>Une alerte <code>✏️ FUSION (hors tolérance)</code> est envoyée</li>
 </ul>
+
+<div class="highlight info">
+<strong>Si le QA est déjà fermé (SL/TP touché) :</strong> le signal complet est ignoré et une alerte <code>❌ QA déjà SL/TP</code> est envoyée avec le P&L du QA.
+</div>
 
 <h3>QA déjà fermé</h3>
 <p>Si le QA a été fermé (SL ou TP touché) avant l'arrivée du signal complet :</p>
