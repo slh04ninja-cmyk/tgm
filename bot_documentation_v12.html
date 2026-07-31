@@ -549,13 +549,22 @@ NEW SL 4000              → Déplace SL à 4000</div>
 
 <h3>Tolérance directionnelle (v11+)</h3>
 <table>
-<tr><th>Signal</th><th>Prix actuel</th><th>Résultat</th><th>Raison</th></tr>
-<tr><td>BUY 4000</td><td>3990</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (moins cher)</td></tr>
-<tr><td>BUY 4000</td><td>4000</td><td><span class="badge badge-green">MARKET</span></td><td>Prix exact</td></tr>
-<tr><td>BUY 4000</td><td>4002</td><td><span class="badge badge-green">MARKET</span></td><td>Dans tolérance</td></tr>
-<tr><td>BUY 4000</td><td>4004</td><td><span class="badge badge-red">ANNULÉ</span></td><td>&gt; 3$ défavorable</td></tr>
-<tr><td>SELL 4000</td><td>4010</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (plus cher)</td></tr>
-<tr><td>SELL 4000</td><td>3997</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (moins cher que entry+3)</td></tr>
+<tr><th colspan="4">BUY @4000 — Tolérance: entry à entry+3 — SL: 3990</th></tr>
+<tr><th>Prix</th><th>Résultat</th><th>Zone</th><th>Raison</th></tr>
+<tr><td>3988</td><td><span class="badge badge-red">ANNULÉ</span></td><td>Sous SL</td><td>Prix sous le stop loss</td></tr>
+<tr><td>3992</td><td><span class="badge badge-green">MARKET</span></td><td>Entre SL et entry</td><td>Prix favorable (achète moins cher)</td></tr>
+<tr><td>3998</td><td><span class="badge badge-green">MARKET</span></td><td>Dans tolérance</td><td>entry ≤ prix ≤ entry+3</td></tr>
+<tr><td>4000</td><td><span class="badge badge-green">MARKET</span></td><td>Prix exact</td><td>Prix = entry</td></tr>
+<tr><td>4003</td><td><span class="badge badge-green">MARKET</span></td><td>Limite tolérance</td><td>entry+3 (limite)</td></tr>
+<tr><td>4005</td><td><span class="badge badge-red">ANNULÉ</span></td><td>Hors tolérance</td><td>&gt; entry+3 défavorable</td></tr>
+<tr><th colspan="4">SELL @4000 — Tolérance: entry-3 à entry — SL: 4010</th></tr>
+<tr><th>Prix</th><th>Résultat</th><th>Zone</th><th>Raison</th></tr>
+<tr><td>4012</td><td><span class="badge badge-red">ANNULÉ</span></td><td>Au-dessus SL</td><td>Prix au-dessus du stop loss</td></tr>
+<tr><td>4008</td><td><span class="badge badge-green">MARKET</span></td><td>Entre entry et SL</td><td>Prix favorable (vend plus cher que entry)</td></tr>
+<tr><td>4002</td><td><span class="badge badge-green">MARKET</span></td><td>Entre entry et SL</td><td>Prix favorable (entry &lt; prix &lt; SL)</td></tr>
+<tr><td>4000</td><td><span class="badge badge-green">MARKET</span></td><td>Prix exact</td><td>Prix = entry</td></tr>
+<tr><td>3997</td><td><span class="badge badge-green">MARKET</span></td><td>Limite tolérance</td><td>entry-3 (limite basse)</td></tr>
+<tr><td>3995</td><td><span class="badge badge-red">ANNULÉ</span></td><td>Hors tolérance</td><td>&lt; entry-3 (trop bas)</td></tr>
 </table>
 
 <h3>1 signal par canal</h3>
