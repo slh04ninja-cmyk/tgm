@@ -106,39 +106,38 @@ load_dotenv()
 # ------------------------------------------------------------------
 API_ID = int(os.getenv("TG_API_ID", "0"))
 API_HASH = os.getenv("TG_API_HASH", "")
-CHANNEL_NAME = os.getenv("TG_CHANNEL_1", os.getenv("TG_CHANNEL", ""))
-CHANNEL_NAME_2 = os.getenv("TG_CHANNEL_2", "")
-CHANNEL_NAME_3 = os.getenv("TG_CHANNEL_3", "")
-CHANNEL_NAME_4 = os.getenv("TG_CHANNEL_4", "")
-CHANNEL_NAME_5 = os.getenv("TG_CHANNEL_5", "")
-CHANNEL_NAME_6 = os.getenv("TG_CHANNEL_6", "")
-CHANNEL_NAME_7 = os.getenv("TG_CHANNEL_7", "")
-CHANNEL_NAME_8 = os.getenv("TG_CHANNEL_8", "")
-CHANNEL_NAME_9 = os.getenv("TG_CHANNEL_9", "")
-CHANNEL_NAME_10 = os.getenv("TG_CHANNEL_10", "")
-CHANNEL_NAME_11 = os.getenv("TG_CHANNEL_11", "")
-CHANNEL_NAME_12 = os.getenv("TG_CHANNEL_12", "")
-CHANNEL_NAME_13 = os.getenv("TG_CHANNEL_13", "")
-CHANNEL_NAME_14 = os.getenv("TG_CHANNEL_14", "")
-CHANNEL_NAME_15 = os.getenv("TG_CHANNEL_15", "")
-CHANNEL_NAME_16 = os.getenv("TG_CHANNEL_16", "")
-CHANNEL_NAME_17 = os.getenv("TG_CHANNEL_17", "")
-CHANNEL_NAME_18 = os.getenv("TG_CHANNEL_18", "")
-CHANNEL_NAME_19 = os.getenv("TG_CHANNEL_19", "")
 
-# Mapping canal → numéro (TOUS les canaux 1-19)
+# =============================================================
+# CHARGEMENT DYNAMIQUE DES CANAUX TELEGRAM
+# =============================================================
+# Scan l'env pour TOUS les TG_CHANNEL_* (sans limite de nombre).
+# TG_CHANNEL ou TG_CHANNEL_1 = canal 1, TG_CHANNEL_2 = canal 2, etc.
+# Pour ajouter un canal : ajouter TG_CHANNEL_N=<id> dans .env, c'est tout.
+# =============================================================
+def _load_channels_from_env():
+    channels = []
+    tg_base = os.getenv("TG_CHANNEL", "")
+    if tg_base:
+        channels.append(("TG_CHANNEL_1", tg_base))
+    for key, val in sorted(os.environ.items()):
+        if key == "TG_CHANNEL":
+            continue
+        if key.startswith("TG_CHANNEL_") and key[11:].isdigit():
+            num = int(key[11:])
+            if val and (num != 1 or not tg_base):
+                channels.append((key, val))
+    channels.sort(key=lambda x: int(x[0].replace("TG_CHANNEL_", "")))
+    return channels
+
+_CHANNELS_LIST = _load_channels_from_env()
+CHANNEL_NAME = _CHANNELS_LIST[0][1] if _CHANNELS_LIST else ""
+
 CHANNEL_NUM_MAP = {}
-_ALL_CHANNEL_NAMES = [
-    CHANNEL_NAME, CHANNEL_NAME_2, CHANNEL_NAME_3, CHANNEL_NAME_4, CHANNEL_NAME_5,
-    CHANNEL_NAME_6, CHANNEL_NAME_7, CHANNEL_NAME_8, CHANNEL_NAME_9, CHANNEL_NAME_10,
-    CHANNEL_NAME_11, CHANNEL_NAME_12, CHANNEL_NAME_13, CHANNEL_NAME_14, CHANNEL_NAME_15,
-    CHANNEL_NAME_16, CHANNEL_NAME_17, CHANNEL_NAME_18, CHANNEL_NAME_19,
-]
-for _i, _name in enumerate(_ALL_CHANNEL_NAMES, 1):
-    if _name:
-        CHANNEL_NUM_MAP[_name] = _i
-        if _name.lstrip("-").isdigit():
-            CHANNEL_NUM_MAP[_name.lstrip("-")] = _i
+for _env_name, _val in _CHANNELS_LIST:
+    _num = int(_env_name.replace("TG_CHANNEL_", ""))
+    CHANNEL_NUM_MAP[_val] = _num
+    if _val.lstrip("-").isdigit():
+        CHANNEL_NUM_MAP[_val.lstrip("-")] = _num
 
 MT5_LOGIN    = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
@@ -2018,32 +2017,11 @@ async def main():
         log.info("Telegram connecté.")
 
         chats = []
-        channel_names = [
-            ("TG_CHANNEL_1", CHANNEL_NAME),
-            ("TG_CHANNEL_2", CHANNEL_NAME_2),
-            ("TG_CHANNEL_3", CHANNEL_NAME_3),
-            ("TG_CHANNEL_4", CHANNEL_NAME_4),
-            ("TG_CHANNEL_5", CHANNEL_NAME_5),
-            ("TG_CHANNEL_6", CHANNEL_NAME_6),
-            ("TG_CHANNEL_7", CHANNEL_NAME_7),
-            ("TG_CHANNEL_8", CHANNEL_NAME_8),
-            ("TG_CHANNEL_9", CHANNEL_NAME_9),
-            ("TG_CHANNEL_10", CHANNEL_NAME_10),
-            ("TG_CHANNEL_11", CHANNEL_NAME_11),
-            ("TG_CHANNEL_12", CHANNEL_NAME_12),
-            ("TG_CHANNEL_13", CHANNEL_NAME_13),
-            ("TG_CHANNEL_14", CHANNEL_NAME_14),
-            ("TG_CHANNEL_15", CHANNEL_NAME_15),
-            ("TG_CHANNEL_16", CHANNEL_NAME_16),
-            ("TG_CHANNEL_17", CHANNEL_NAME_17),
-            ("TG_CHANNEL_18", CHANNEL_NAME_18),
-            ("TG_CHANNEL_19", CHANNEL_NAME_19),
-        ]
         entity_to_name = {}
-        active_channels = [(e, v) for e, v in channel_names if v]
+        active_channels = [(e, v) for e, v in _CHANNELS_LIST if v]
         log.info(f"Canaux surveillés : {len(active_channels)}")
 
-        for env_name, ch_value in channel_names:
+        for env_name, ch_value in _CHANNELS_LIST:
             if not ch_value:
                 continue
             try:
