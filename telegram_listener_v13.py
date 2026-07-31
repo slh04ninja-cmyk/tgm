@@ -2141,7 +2141,7 @@ async def main():
                         entity_to_name[entity.id] = title_clean
                         CHANNEL_NUM_MAP[title_clean] = ch_num
                         CHANNEL_NUM_MAP[str(entity.id)] = ch_num
-                        log.info(f"Canal_{ch_num} : {title_clean} (id={entity.id})")
+                        log.info(f"Canal_{ch_num} : {title_clean}")
                     except Exception as e:
                         log.warning(f"Impossible de résoudre un peer dans le dossier: {e}")
 
