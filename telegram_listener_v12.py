@@ -1814,9 +1814,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             # Défavorable: prix > entry + tolerance
             is_unfavorable = current > entry_price + QA_PRICE_TOLERANCE
         else:  # SELL
-            # Favorable: prix >= entry (on vend plus cher)
-            # Défavorable: prix < entry - tolerance
-            is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
+            # Favorable: prix <= entry (on vend plus cher que le marché actuel)
+            # Défavorable: prix > entry + tolerance (le prix monte contre le SELL)
+            is_unfavorable = current > entry_price + QA_PRICE_TOLERANCE
         if is_unfavorable:
             log.info(f"Quick Alert annulée — prix défavorable | "
                      f"prix={current} entry={entry_price} écart>défavorable de {QA_PRICE_TOLERANCE}")

@@ -555,7 +555,7 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <tr><td>BUY 4000</td><td>4002</td><td><span class="badge badge-green">MARKET</span></td><td>Dans tolérance</td></tr>
 <tr><td>BUY 4000</td><td>4004</td><td><span class="badge badge-red">ANNULÉ</span></td><td>&gt; 3$ défavorable</td></tr>
 <tr><td>SELL 4000</td><td>4010</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (plus cher)</td></tr>
-<tr><td>SELL 4000</td><td>3997</td><td><span class="badge badge-green">MARKET</span></td><td>Code: current &lt; entry-3 = non → exécuté (voir bug §9)</td></tr>
+<tr><td>SELL 4000</td><td>3997</td><td><span class="badge badge-green">MARKET</span></td><td>Prix favorable (moins cher que entry+3)</td></tr>
 </table>
 
 <h3>1 signal par canal</h3>
@@ -603,10 +603,9 @@ NEW SL 4000              → Déplace SL à 4000</div>
 <li>Position fermée → nouvelle alerte</li>
 </ul>
 
-<div class="highlight danger">
-<strong>⚠️ Bug connu — Tolérance SELL inversée :</strong><br>
-Le code vérifie <code>current &lt; entry - tolerance</code> pour SELL, ce qui est la direction FAVORABLE (prix baisse = bien pour SELL). Résultat : un SELL dont le prix monte de +4$ (défavorable) passe quand même, tandis qu'un SELL dont le prix baisse de -4$ (favorable) est annulé.<br>
-<code>is_unfavorable = current &lt; entry_price - QA_PRICE_TOLERANCE</code> → devrait être <code>current &gt; entry_price + QA_PRICE_TOLERANCE</code>
+<div class="highlight success">
+<strong>✅ Fix V12.0.1 — Tolérance SELL corrigée :</strong><br>
+La condition était inversée pour SELL : <code>current &lt; entry - tolerance</code> (favorable) au lieu de <code>current &gt; entry + tolerance</code> (défavorable). Maintenant corrigée.
 </div>
 </section>
 
