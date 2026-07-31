@@ -2041,7 +2041,21 @@ async def main():
             log.info(f"Recherche du dossier Telegram '{TG_FOLDER}'...")
             try:
                 from telethon import functions
-                result = await client(functions.messages.GetDialogFilters())
+                # GetDialogFilters peut s'appeler différemment selon la version de Telethon
+                # Essaie plusieurs variantes
+                result = None
+                for fn_name in ['GetDialogFilters', 'GetDialogFiltersRequest', 'getDialogFilters']:
+                    try:
+                        fn = getattr(functions.messages, fn_name)
+                        result = await client(fn())
+                        log.debug(f"Fonction trouvée: messages.{fn_name}")
+                        break
+                    except AttributeError:
+                        continue
+                if result is None:
+                    log.error("Impossible de trouver GetDialogFilters dans Telethon.")
+                    log.info(f"Version Telethon: {__import__('telethon').__version__}")
+                    return
                 folder_id = None
                 folder_title = TG_FOLDER
 
