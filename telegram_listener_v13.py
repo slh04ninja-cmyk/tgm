@@ -2056,25 +2056,53 @@ async def main():
                     log.error("Impossible de trouver GetDialogFilters dans Telethon.")
                     log.info(f"Version Telethon: {__import__('telethon').__version__}")
                     return
+
+                # Le résultat est un objet DialogFilters, pas une liste.
+                # Extraire la liste des filtres selon la structure disponible.
+                filters = []
+                if hasattr(result, 'filters'):
+                    filters = result.filters
+                elif hasattr(result, 'dialogs'):
+                    filters = result.dialogs
+                elif hasattr(result, 'to_dict'):
+                    d = result.to_dict()
+                    for key in ['filters', 'dialogs', 'items']:
+                        if key in d:
+                            filters = d[key]
+                            break
+                if not filters:
+                    log.error(f"Aucun filtre trouvé dans la réponse. Type: {type(result).__name__}")
+                    log.info(f"Attributs: {[a for a in dir(result) if not a.startswith('_')]}")
+                    return
+                # Extraire les noms de dossiers disponibles
                 folder_id = None
                 folder_title = TG_FOLDER
+                available_folders = []
 
-                # Chercher le dossier par nom ou par ID
-                for f in result:
-                    fid = getattr(f, 'id', None)
-                    ftitle = getattr(f, 'title', '')
+                for f in filters:
+                    # Gérer les objets TL et les dicts
+                    if isinstance(f, dict):
+                        fid = f.get('id')
+                        ftitle = f.get('title', '')
+                        if isinstance(ftitle, dict):
+                            ftitle = ftitle.get('text', str(ftitle))
+                    else:
+                        fid = getattr(f, 'id', None)
+                        ftitle_obj = getattr(f, 'title', '')
+                        if hasattr(ftitle_obj, 'text'):
+                            ftitle = ftitle_obj.text
+                        else:
+                            ftitle = str(ftitle_obj)
+                    available_folders.append((fid, ftitle))
                     log.debug(f"  Dossier trouvé: id={fid} title='{ftitle}'")
                     if str(fid) == str(TG_FOLDER) or ftitle.lower() == TG_FOLDER.lower():
                         folder_id = fid
                         folder_title = ftitle
-                        break
 
                 if folder_id is None:
                     log.error(f"Dossier '{TG_FOLDER}' introuvable.")
                     log.info("Dossiers disponibles:")
-                    for f in result:
-                        fid = getattr(f, 'id', None)
-                        ftitle = getattr(f, 'title', '')
+                    for fid, ftitle in available_folders:
                         log.info(f"  - {ftitle} (id={fid})")
                     return
 
@@ -2082,10 +2110,15 @@ async def main():
 
                 # Récupérer les include_peers du dossier
                 include_peers = []
-                for f in result:
-                    if getattr(f, 'id', None) == folder_id:
-                        include_peers = getattr(f, 'include_peers', [])
-                        break
+                for f in filters:
+                    if isinstance(f, dict):
+                        if f.get('id') == folder_id:
+                            include_peers = f.get('include_peers', [])
+                            break
+                    else:
+                        if getattr(f, 'id', None) == folder_id:
+                            include_peers = getattr(f, 'include_peers', [])
+                            break
 
                 if not include_peers:
                     log.error(f"Le dossier '{folder_title}' ne contient aucun canal.")
