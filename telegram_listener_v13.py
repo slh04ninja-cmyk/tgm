@@ -123,6 +123,11 @@ for _env_name, _val in _CHANNELS_LIST:
     if _val.lstrip("-").isdigit():
         CHANNEL_NUM_MAP[_val.lstrip("-")] = _num
 
+# ★ DOSSIER TELEGRAM : si TG_FOLDER est défini, le bot charge les canaux
+# depuis ce dossier Telegram au lieu de TG_CHANNEL_*
+# Ex: TG_FOLDER=2 → lit le dossier #2 de Telegram
+TG_FOLDER = os.getenv("TG_FOLDER", "")
+
 MT5_LOGIN    = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER   = os.getenv("MT5_SERVER", "")
@@ -2028,30 +2033,71 @@ async def main():
 
         chats = []
         entity_to_name = {}
-        active_channels = [(e, v) for e, v in _CHANNELS_LIST if v]
-        log.info(f"Canaux surveillés : {len(active_channels)}")
 
-        for env_name, ch_value in _CHANNELS_LIST:
-            if not ch_value:
-                continue
+        if TG_FOLDER:
+            # ★ CHARGEMENT DEPUIS DOSSIER TELEGRAM
+            folder_num = int(TG_FOLDER)
+            log.info(f"Chargement des canaux depuis le dossier Telegram #{folder_num}...")
             try:
-                ch_resolved = int(ch_value) if ch_value.lstrip("-").isdigit() else ch_value
-                entity = await client.get_entity(ch_resolved)
-                title = getattr(entity, "title", ch_value)
-                title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
-                # ★ Normalisation Unicode : convertit les caractères stylisés (gras/italique
-                # mathématiques, ex: 𝗘𝗔𝗚𝗟𝗘) vers leur équivalent ASCII standard,
-                # pour un affichage correct dans la console Windows.
-                title_clean = unicodedata.normalize('NFKC', title_clean)
-                if title_clean.strip() == "":
-                    title_clean = ch_value
-                chats.append(entity)
-                entity_to_name[entity.id] = title_clean
-                ch_num = int(env_name.replace("TG_CHANNEL_", ""))
-                CHANNEL_NUM_MAP[title_clean] = ch_num
-                log.info(f"Canal_{ch_num} : {title_clean}")
+                dialogs = await client.get_dialogs(folder=folder_num)
+                ch_num = 0
+                for dialog in dialogs:
+                    entity = dialog.entity
+                    # Filtrer : uniquement les canaux/supergroups (pas les chats privés)
+                    if not hasattr(entity, 'title'):
+                        continue
+                    if hasattr(entity, 'broadcast') and entity.broadcast:
+                        pass  # canal → OK
+                    elif hasattr(entity, 'megagroup') and entity.megagroup:
+                        pass  # supergroupe → OK
+                    elif hasattr(entity, 'gigagroup') and entity.gigagroup:
+                        pass  # gigagroupe → OK
+                    else:
+                        continue  # chat privé, bot, etc. → ignorer
+
+                    ch_num += 1
+                    title = entity.title
+                    title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
+                    title_clean = unicodedata.normalize('NFKC', title_clean)
+                    if title_clean.strip() == "":
+                        title_clean = str(entity.id)
+
+                    chats.append(entity)
+                    entity_to_name[entity.id] = title_clean
+                    # Enregistrer dans CHANNEL_NUM_MAP avec l'ID comme clé
+                    id_str = str(entity.id)
+                    CHANNEL_NUM_MAP[title_clean] = ch_num
+                    CHANNEL_NUM_MAP[id_str] = ch_num
+                    log.info(f"Canal_{ch_num} : {title_clean} (id={entity.id})")
+
+                log.info(f"{ch_num} canaux chargés depuis le dossier #{folder_num}")
             except Exception as e:
-                log.warning(f"Canal introuvable ({env_name}={ch_value}) : {e}")
+                log.error(f"Erreur lecture dossier Telegram #{folder_num}: {e}")
+                log.error("Vérifiez que le dossier existe et contient des canaux.")
+                return
+        else:
+            # ★ CHARGEMENT DEPUIS .ENV (TG_CHANNEL_*)
+            active_channels = [(e, v) for e, v in _CHANNELS_LIST if v]
+            log.info(f"Canaux depuis .env : {len(active_channels)}")
+
+            for env_name, ch_value in _CHANNELS_LIST:
+                if not ch_value:
+                    continue
+                try:
+                    ch_resolved = int(ch_value) if ch_value.lstrip("-").isdigit() else ch_value
+                    entity = await client.get_entity(ch_resolved)
+                    title = getattr(entity, "title", ch_value)
+                    title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
+                    title_clean = unicodedata.normalize('NFKC', title_clean)
+                    if title_clean.strip() == "":
+                        title_clean = ch_value
+                    chats.append(entity)
+                    entity_to_name[entity.id] = title_clean
+                    ch_num = int(env_name.replace("TG_CHANNEL_", ""))
+                    CHANNEL_NUM_MAP[title_clean] = ch_num
+                    log.info(f"Canal_{ch_num} : {title_clean}")
+                except Exception as e:
+                    log.warning(f"Canal introuvable ({env_name}={ch_value}) : {e}")
 
         # ★ DÉDUPLICATION : éviter le double traitement du même message
         # (ex: canal + groupe de discussion lié → Telegram livre 2x le même msg)
