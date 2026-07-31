@@ -64,7 +64,7 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <span class="version">V12.0.0</span>
 <span class="version-new">Code Cleanup &amp; Bug Fixes</span>
 <p style="margin-top:1rem;color:var(--text-muted);font-size:0.9rem">
-18 Canaux &bull; MARKET Only &bull; ZN1/ZN2 &bull; PU1/PU2 &bull; Quick Alert &bull; Fusion SL/TP &bull; BE Auto &bull; TimesFM &bull; News Filter &bull; Déduplication Robuste &bull; P&amp;L Quotidien
+Canaux Dynamiques &bull; MARKET Only &bull; ZN1/ZN2 &bull; PU1/PU2 &bull; Quick Alert &bull; Fusion SL/TP &bull; BE Auto &bull; TimesFM &bull; News Filter (Jour) &bull; Déduplication Robuste &bull; P&amp;L Quotidien
 </p>
 </div>
 
@@ -105,22 +105,32 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 
 <h3>Architecture générale</h3>
 <div class="flow">
-<span class="cyan">Telegram</span> (18 canaux) → <span class="yellow">Signal Parser</span> → <span class="green">MT5 Bridge</span> → <span class="purple">MetaTrader 5</span> (Exness)
-    ↑                                        ↓
- <span class="orange">TimesFM Validator</span>                 <span class="cyan">Alertes Telegram</span> (@TrdReport)
-    ↑                                        ↓
- <span class="orange">News Manager</span>                    <span class="muted">Performance Tracker</span>
+<span class="cyan">Telegram</span> (N canaux, dynamique) → <span class="yellow">Signal Parser</span> → <span class="green">MT5 Bridge</span> → <span class="purple">MetaTrader 5</span> (Exness)
+    ↑                                            ↓
+ <span class="orange">TimesFM Validator</span>                     <span class="cyan">Alertes Telegram</span> (@TrdReport)
+    ↑                                            ↓
+ <span class="orange">News Manager</span>                        <span class="muted">P&amp;L Quotidien</span>
 </div>
 
 <h3>Principe de fonctionnement</h3>
-<p>Le bot écoute 18 canaux Telegram, parse les signaux de trading (BUY/SELL), et exécute des ordres MARKET sur MetaTrader 5. En v12, le mode est <strong>MARKET uniquement</strong> — pas de LIMIT, pas de pending orders.</p>
+<p>Le bot écoute dynamiquement tous les canaux Telegram configurés dans <code>.env</code> (via <code>TG_CHANNEL_*</code>), parse les signaux de trading (BUY/SELL), et exécute des ordres MARKET sur MetaTrader 5. En v12, le mode est <strong>MARKET uniquement</strong> — pas de LIMIT, pas de pending orders.</p>
 
 <div class="stat-row">
-<div class="stat-card"><div class="stat-value">18</div><div class="stat-label">Canaux Telegram</div></div>
+<div class="stat-card"><div class="stat-value">N</div><div class="stat-label">Canaux (dynamique)</div></div>
 <div class="stat-card"><div class="stat-value">MARKET</div><div class="stat-label">Type d'ordre unique</div></div>
-<div class="stat-card"><div class="stat-value">0.3s</div><div class="stat-label">Polling interval</div></div>
+<div class="stat-card"><div class="stat-value">1s</div><div class="stat-label">Polling interval</div></div>
 <div class="stat-card"><div class="stat-value">30s</div><div class="stat-label">Alert dedup TTL</div></div>
 </div>
+
+<h3>Chargement dynamique des canaux</h3>
+<p>Le bot scanne automatiquement toutes les variables d'environnement <code>TG_CHANNEL_*</code> au démarrage. Pour ajouter un canal, il suffit d'ajouter <code>TG_CHANNEL_N=&lt;id&gt;</code> dans <code>.env</code> — <strong>sans modifier le code</strong>.</p>
+
+<div class="signal-box">.env:
+TG_CHANNEL=-1001111111111        → canal 1 (auto)
+TG_CHANNEL_2=-1002222222222      → canal 2 (auto)
+TG_CHANNEL_5=-1005555555555      → canal 5 (auto)
+TG_CHANNEL_20=-1002020202020     → canal 20 (auto)
+# Le bot trouve automatiquement 4 canaux</div>
 
 <h3>Types de signaux</h3>
 <table>
@@ -174,6 +184,26 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 </tr>
 </table>
 
+<h3>Améliorations</h3>
+<table>
+<tr><th>Amélioration</th><th>Avant</th><th>Après</th></tr>
+<tr>
+<td>Canaux Telegram</td>
+<td>19 variables hardcodées (<code>TG_CHANNEL_1</code> à <code>TG_CHANNEL_19</code>)</td>
+<td>Chargement dynamique via scan de <code>TG_CHANNEL_*</code> — sans limite</td>
+</tr>
+<tr>
+<td>Filtre News</td>
+<td>Chargeait toutes les news de la semaine (<code>ff_calendar_thisweek.json</code>)</td>
+<td>Filtre par jour de trading — ne garde que les news du jour</td>
+</tr>
+<tr>
+<td>Format des logs</td>
+<td><code>&lt;&lt;&lt;&lt;&lt; INFO &gt;&gt;&gt;&gt;&gt; Reset journalier à 2h UTC</code></td>
+<td><code>RESET JOURNALIER A 2H UTC</code></td>
+</tr>
+</table>
+
 <h3>Code mort supprimé (-452 lignes)</h3>
 <table>
 <tr><th>Catégorie</th><th>Éléments supprimés</th></tr>
@@ -201,9 +231,9 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 
 <table>
 <tr><th>Fichier</th><th>Lignes</th><th>Rôle</th></tr>
-<tr><td><code>telegram_listener_v12.py</code></td><td>2422</td><td>Cœur du bot — connexion TG, MT5, gestion des trades, BE, news</td></tr>
-<tr><td><code>signal_parser.py</code></td><td>743</td><td>Parse les signaux — détecte BUY/SELL, zones, prix, SL, TP</td></tr>
-<tr><td><code>bot_messages.py</code></td><td>171</td><td>Templates de logs et alertes (séparation texte/logique)</td></tr>
+<tr><td><code>telegram_listener_v12.py</code></td><td>~2400</td><td>Cœur du bot — connexion TG, MT5, gestion des trades, BE, news</td></tr>
+<tr><td><code>signal_parser.py</code></td><td>~750</td><td>Parse les signaux — détecte BUY/SELL, zones, prix, SL, TP</td></tr>
+<tr><td><code>bot_messages.py</code></td><td>~170</td><td>Templates de logs et alertes (séparation texte/logique)</td></tr>
 <tr><td><code>.env</code></td><td>—</td><td>Configuration (canaux, MT5, paramètres de trading)</td></tr>
 <tr><td><code>CONTEXT.md</code></td><td>—</td><td>Changelog détaillé</td></tr>
 </table>
@@ -215,12 +245,12 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <tr><td><code>TradeManager</code></td><td>Boucle de polling, gestion BE, P&L quotidien</td></tr>
 <tr><td><code>NewsManager</code></td><td>Filtre news (Fetch FF Calendar + vérification 30s)</td></tr>
 <tr><td><code>TimesFMValidator</code></td><td>Validation ML de la direction du signal</td></tr>
-<tr><td><code>PerformanceTracker</code></td><td>Suivi des trades (WIN/LOSS/BE)</td></tr>
 </table>
 
 <h3>Fonctions principales</h3>
 <table>
 <tr><th>Fonction</th><th>Rôle</th></tr>
+<tr><td><code>_load_channels_from_env()</code></td><td>Charge dynamiquement tous les <code>TG_CHANNEL_*</code> de l'environnement</td></tr>
 <tr><td><code>execute_signal()</code></td><td>Exécute un signal TRADE (zone ou prix unique)</td></tr>
 <tr><td><code>execute_quick_alert()</code></td><td>Exécute un Quick Alert (MARKET direct)</td></tr>
 <tr><td><code>merge_quick_alert()</code></td><td>Fusionne un QA avec un signal complet (SL/TP mis à jour)</td></tr>
@@ -239,10 +269,11 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <div class="flow">
 <span class="cyan">main()</span>
   ├── <span class="green">MT5Bridge.connect()</span>          → Connexion MetaTrader 5 (Exness)
-  ├── <span class="green">TradeManager.start()</span>         → Boucle polling toutes les <span class="yellow">0.3s</span>
+  ├── <span class="green">TradeManager.start()</span>         → Boucle polling toutes les <span class="yellow">1s</span>
   ├── <span class="green">NewsManager.start()</span>          → Fetch news (<span class="yellow">30 min</span>) + vérif (<span class="yellow">30s</span>)
   ├── <span class="green">TelegramClient.start()</span>       → Connexion Telegram (session persistante)
-  ├── <span class="cyan">Résolution des 18 canaux</span>     → get_entity() pour chaque TG_CHANNEL_X
+  ├── <span class="cyan">Résolution des canaux</span>        → <span class="yellow">_CHANNELS_LIST</span> (dynamique depuis .env)
+  │   └── get_entity() pour chaque TG_CHANNEL_*
   ├── <span class="cyan">Enregistrement du handler</span>    → @client.on(events.NewMessage)
   └── <span class="muted">client.run_until_disconnected()</span>  → Boucle infinie asyncio
 </div>
@@ -250,6 +281,7 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <h3>Ordre d'initialisation</h3>
 <ol>
 <li>Chargement de la config (<code>.env</code>)</li>
+<li><strong>Scan dynamique des canaux</strong> (<code>_load_channels_from_env()</code>)</li>
 <li>Connexion MT5 (auto-initialize avec login/password/server)</li>
 <li>Récupération du P&L quotidien depuis l'historique MT5</li>
 <li>Démarrage de la boucle de polling TradeManager</li>
@@ -346,6 +378,7 @@ _SEEN_MAX_IDS = 5000         # max entrées
 <li>Supprime les astérisques (gras Telegram)</li>
 <li>Remplace les séparateurs par des espaces</li>
 <li>Supprime les emojis</li>
+<li>Nettoie les points devant les nombres (.4040 → 4040)</li>
 <li>Normalise les paires (XAU/USD → XAUUSD)</li>
 <li>UPPERCASE + suppression des préfixes parasites</li>
 </ol>
@@ -355,9 +388,10 @@ _SEEN_MAX_IDS = 5000         # max entrées
 <tr><th>Composant</th><th>Fonction</th><th>Exemples</th></tr>
 <tr><td>Symbole</td><td><code>_extract_symbol()</code></td><td>XAUUSD, GOLD, EURUSD, BTCUSD</td></tr>
 <tr><td>Direction</td><td><code>_extract_action()</code></td><td>BUY, SELL, LONG→BUY, SHORT→SELL</td></tr>
-<tr><td>Zone/Prix</td><td><code>_extract_entry_and_zone()</code></td><td>4000-4010, @4005, BUY 4000</td></tr>
-<tr><td>TP</td><td><code>_extract_all_tps()</code></td><td>TP1 4050, TP2 4060, TP OPEN</td></tr>
+<tr><td>Zone/Prix</td><td><code>_extract_entry_and_zone()</code></td><td>4000-4010, @4005, BUY 4000, 4033/37</td></tr>
+<tr><td>TP</td><td><code>_extract_all_tps()</code></td><td>TP1 4050, TP2 4060, TP OPEN, ✔️4030</td></tr>
 <tr><td>SL</td><td><code>_extract_sl()</code></td><td>SL 3990, STOP LOSS 3990</td></tr>
+<tr><td>Merge</td><td><code>_extract_merge_price()</code></td><td>BUY MORE 3880, MORE SELL 4010</td></tr>
 </table>
 
 <h3>Types de signaux détectés</h3>
@@ -369,6 +403,15 @@ _SEEN_MAX_IDS = 5000         # max entrées
 <tr><td><span class="badge badge-orange">CLOSE</span></td><td>Mot-clé CLOSE</td><td>close_symbol</td></tr>
 <tr><td><span class="badge badge-yellow">SL_MOVE</span></td><td>SL MOVE / MOVE SL</td><td>new_sl</td></tr>
 </table>
+
+<h3>Fix V12 — MORE SELL/BUY → Zone</h3>
+<p><code>SELL 4045 MORE SELL 4050</code> est maintenant détecté comme zone [4045, 4050] (avant : prix unique avec merge_price).</p>
+
+<h3>Fix V12 — TP sans mot-clé</h3>
+<p><code>✔️4030</code>, <code>✔️.4040</code> sont détectés comme TP via <code>_extract_orphan_tps()</code> (cherche les nombres entre zone et SL dans la direction du trade).</p>
+
+<h3>Fix V12 — Nombres avec point devant</h3>
+<p><code>.4040</code> est nettoyé en <code>4040</code> dans <code>normalize_text()</code>.</p>
 
 <h3>Génération automatique</h3>
 <ul>
@@ -387,7 +430,8 @@ _SEEN_MAX_IDS = 5000         # max entrées
 <h3>Signaux Zone (2 prix)</h3>
 <div class="signal-box">XAUUSD BUY 4000 4010 SL 3990 TP 4050
 GOLD SELL 4060-4070 SL 4080 TP1 4040 TP2 4020
-XAUUSD BUY @4000-4010 SL 3990</div>
+XAUUSD BUY @4000-4010 SL 3990
+GOLD BUY @4067-4060 SL BREAKOUT 4057 TP OPEN</div>
 <p>Le bot détecte la zone [4000, 4010]. Si le prix est dans la zone → ZN1. Si entre zone et SL → ZN2.</p>
 
 <h3>Signaux Prix Unique (1 prix)</h3>
@@ -395,11 +439,19 @@ XAUUSD BUY @4000-4010 SL 3990</div>
 GOLD SELL @4020 SL 4040 TP 4000</div>
 <p>Le bot exécute MARKET si le prix est dans la tolérance (±3$ par défaut).</p>
 
+<h3>Signaux avec MORE</h3>
+<div class="signal-box">XAUUSD SELL 4045 MORE SELL 4050 TP 4042 TP 4035 SL 4060
+→ zone [4045, 4050], TPs [4042, 4035]</div>
+
 <h3>Quick Alerts (SL/TP partiels)</h3>
 <div class="signal-box">XAUUSD BUY 4000
 GOLD SELL @4020
 BUY XAUUSD NOW</div>
 <p>SL et TP sont générés automatiquement. Exécution MARKET immédiate.</p>
+
+<h3>TP sans mot-clé</h3>
+<div class="signal-box">GOLD BUY Entry: 4028-4022 ✔️4030 ✔️.4040 🛑 SL 4002
+→ zone [4022, 4028], TPs [4030, 4040]</div>
 
 <h3>Raccourcis zone</h3>
 <div class="signal-box">4033/37 → zone [4033, 4037]
@@ -411,6 +463,16 @@ CLOSE XAUUSD             → Ferme XAUUSD
 CLOSE ALL                → Ferme tout
 SL MOVE 3995             → Déplace SL à 3995
 NEW SL 4000              → Déplace SL à 4000</div>
+
+<h3>Signaux testés et validés</h3>
+<table>
+<tr><th>Signal</th><th>Parsing</th><th>Exécution</th></tr>
+<tr><td><code>GOLD BUY @4067-4060 SL BREAKOUT 4057 TP OPEN</code></td><td>✅ zone [4060, 4067], TP auto</td><td>✅ ZN1/ZN2</td></tr>
+<tr><td><code>GOLD BUY Entry: 4028-4022 ✔️4030 ✔️.4040 🛑 SL 4002</code></td><td>✅ zone [4022, 4028], TPs [4030, 4040]</td><td>✅ ZN1/ZN2</td></tr>
+<tr><td><code>XAUUSD SELL 4052/4057 TP1-TP7 SL 4072</code></td><td>✅ zone [4052, 4057], 7 TPs</td><td>✅ ZN1/ZN2</td></tr>
+<tr><td><code>XAUUSD SELL NOW 4079/83 TARGET1-8 SL 4095</code></td><td>✅ zone [4079, 4083], 8 TPs</td><td>✅ ZN1/ZN2</td></tr>
+<tr><td><code>XAUUSD SELL 4045 MORE SELL 4050 TP 4042 TP 4035 SL 4060</code></td><td>✅ zone [4045, 4050], TPs [4042, 4035]</td><td>✅ ZN1/ZN2</td></tr>
+</table>
 </section>
 
 <!-- ============================================================ -->
@@ -475,11 +537,11 @@ NEW SL 4000              → Déplace SL à 4000</div>
   → Commentaire MT5: <span class="cyan">CH{N}-PU1</span>
 
 <span class="yellow">PU2 :</span> prix dans [entry, entry + tolérance]
-  → Prix 4007 (entry 4005 + 2$ < 3$ tolerance) → <span class="green">MARKET BUY</span>
+  → Prix 4007 (entry 4005 + 2$ &lt; 3$ tolerance) → <span class="green">MARKET BUY</span>
   → Commentaire MT5: <span class="cyan">CH{N}-PU2</span>
 
 <span class="red">Rejet :</span> prix > entry + tolérance
-  → Prix 4010 > 4005 + 3$ → <span class="red">ANNULÉ</span>
+  → Prix 4010 &gt; 4005 + 3$ → <span class="red">ANNULÉ</span>
 </div>
 
 <h3>Tolérance directionnelle (v11+)</h3>
@@ -589,7 +651,7 @@ NEW SL 4000              → Déplace SL à 4000</div>
 
 <h3>Déclenchement du BE</h3>
 <div class="flow">
-<span class="yellow">Chaque 0.3s — TradeManager._check_all()</span>
+<span class="yellow">Chaque 1s — TradeManager._check_all()</span>
   │
   ├── Pour chaque entry active
   │   ├── Vérifier si <span class="cyan">_be_activated</span> est False
@@ -632,7 +694,7 @@ Si le prix redescend à 3997 avant d'atteindre 4010:
 
 <h3>Boucle principale</h3>
 <div class="flow">
-<span class="cyan">TradeManager._check_all()</span> — toutes les <span class="yellow">0.3s</span>
+<span class="cyan">TradeManager._check_all()</span> — toutes les <span class="yellow">1s</span>
   │
   ├── <span class="green">_refresh_pos_cache()</span> → mt5.positions_get()
   │
@@ -686,7 +748,7 @@ Si le prix redescend à 3997 avant d'atteindre 4010:
 <p><code>_recover_daily_pnl()</code> récupère le P&L depuis l'historique MT5 (3 derniers jours). Indexe le magic à l'OUVERTURE (pas à la clôture) pour couvrir les fermetures manuelles.</p>
 
 <h3>Reset quotidien</h3>
-<p>Le P&L est reset à <code>TRADING_START_HOUR</code> (2h UTC) chaque jour. La comparaison utilise <code>start.day</code> (datetime aware).</p>
+<p>Le P&L est reset à <code>TRADING_START_HOUR</code> (2h UTC) chaque jour. Log : <code>RESET JOURNALIER A 2H UTC</code></p>
 
 <h3>Limite quotidienne</h3>
 <p>Quand <code>daily_pnl + floating >= DAILY_PROFIT_LIMIT</code> (70$) :</p>
@@ -708,18 +770,38 @@ Si le prix redescend à 3997 avant d'atteindre 4010:
 <div class="flow">
 <span class="cyan">NewsManager</span>
   │
-  ├── <span class="green">Fetch</span> (toutes les 30 min)
+  ├── <span class="green">Fetch</span> (toutes les 30 min, ou au changement de jour)
   │   ├── GET https://nfs.faireconomy.media/ff_calendar_thisweek.json
   │   ├── Filtre: impact >= high + pays USD/XAU
+  │   ├── ★ Filtre par JOUR DE TRADING (pas la semaine entière)
   │   └── Classifie par tier: NFP/CPI, FOMC, Spike, High
   │
   └── <span class="yellow">Check</span> (toutes les 30s)
-      ├── Pour chaque news:
+      ├── Pour chaque news DU JOUR:
       │   ├── diff_minutes = (news_time - now) / 60
-      │   ├── -after_min <= diff <= close_min → <span class="red">CLOSE positions + BLOCK</span>
-      │   ├── close_min < diff <= block_min → <span class="orange">BLOCK seulement</span>
+      │   ├── -after_min &lt;= diff &lt;= close_min → <span class="red">CLOSE positions + BLOCK</span>
+      │   ├── close_min &lt; diff &lt;= block_min → <span class="orange">BLOCK seulement</span>
       │   └── Sinon → <span class="green">UNBLOCK</span>
       └── _close_all() si should_close
+</div>
+
+<h3>Filtrage par jour de trading</h3>
+<p>Depuis v12, le bot ne garde que les news du <strong>jour de trading en cours</strong> (basé sur <code>get_trading_day_start()</code>). L'API <code>ff_calendar_thisweek.json</code> retourne toute la semaine — le bot filtre par date pour éviter les fausses alertes avec des news de jours précédents.</p>
+
+<div class="highlight success">
+<strong>Exemple :</strong> Le 31 juillet, les news du 29-30 juillet (FOMC, GDP) ne sont plus affichées ni utilisées pour le filtrage.
+</div>
+
+<h3>Format des logs</h3>
+<div class="log-box">
+<span class="info">RESET JOURNALIER A 2H UTC</span>
+<span class="info">0 NEWS HIGH IMPACT (2026-07-31)</span>
+
+<span class="green">ou si des news existent:</span>
+
+<span class="info">2 NEWS HIGH IMPACT (2026-07-31)</span>
+<span class="info">NEWS: Federal Funds Rate @ 2026-07-31 | 14:00:00-04:00 (USD)</span>
+<span class="info">NEWS: Core PCE Price Index m/m @ 2026-07-31 | 08:30:00-04:00 (USD)</span>
 </div>
 
 <h3>Fenêtres par tier</h3>
@@ -781,7 +863,7 @@ Max = 500 entrées (FIFO)
 
 <p>La ligne "Canal: ..." est supprimée de la clé pour capter les doublons canal+discussion group.</p>
 
-<h3>Formats d'alertes (v12.1.0)</h3>
+<h3>Formats d'alertes</h3>
 
 <h4>🟢 Ouvertures de position (ZN1/ZN2/PU1/PU2)</h4>
 <div class="signal-box">🟢 XAUUSD | SELL | CH6-ZN1
@@ -790,12 +872,6 @@ MARKET: 4028.56 | Lot: 0.01
 TICKET: 1591670605
 TP: 4021.0 | SL: 4036.0
 Canal: FX VIP SERVICE</div>
-<div class="signal-box">🟢 XAUUSD | BUY | CH3-ZN2
-━━━━━━━━━━━━━━━━━━
-MARKET: 4026.00 | Lot: 0.01
-TICKET: 1591794427
-TP: 4004.0 | SL: 4039.0
-Canal: EAGLE FOREX PESEARCH</div>
 
 <h4>⚡ Quick Alert (AL-MP)</h4>
 <div class="signal-box">⚡ XAUUSD | SELL | CH5-AL-MP
@@ -812,12 +888,6 @@ P&L: +10.00$
 Ticket: 1591670605
 P&L QT: 45.50$
 Canal: FX VIP SERVICE</div>
-<div class="signal-box">🛑 BUY | CH3-ZN2 | SL
-━━━━━━━━━━━━━━━━━━
-P&L: -7.20$
-Ticket: 1591794427
-P&L QT: -7.20$
-Canal: EAGLE FOREX PESEARCH</div>
 
 <h4>🔒 Break-Even</h4>
 <div class="signal-box">🔒 BUY | CH15-AL-MP | BE
@@ -833,33 +903,14 @@ QA : #1592437254
 SL : 4060.0
 TP : 4035.0
 Canal: AMELIA GOLD TRADER</div>
-<div class="signal-box">✏️ SELL | CH6 | FUSION (hors tolérance)
-━━━━━━━━━━━━━━━━━━
-QA : #1592437254
-SL : 4060.0
-TP : 4035.0
-Canal: FX VIP SERVICE</div>
 
-<h4>❌ QA déjà fermé</h4>
+<h4>❌ QA déjà fermé / annulée</h4>
 <div class="signal-box">❌ BUY | CH15 | QA déjà SL
 ━━━━━━━━━━━━━━━━━━
 QA : #1592437254
 P&L : -7.20 $
 FUSION IGNORÉ
 Canal: GOLD BASICS ACADEMY</div>
-<div class="signal-box">✅ SELL | CH5 | QA déjà TP
-━━━━━━━━━━━━━━━━━━
-QA : #1592437254
-P&L : +10.00 $
-FUSION IGNORÉ
-Canal: AMELIA GOLD TRADER</div>
-
-<h4>❌ QA annulée (prix défavorable)</h4>
-<div class="signal-box">❌ SELL | CH6 | QA ANNULÉE
-━━━━━━━━━━━━━━━━━━
-Prix: 4010.00 | Entry: 4045.00
-Prix défavorable (>3.0$)
-Canal: FX VIP SERVICE</div>
 
 <h4>🚫 TimesFM rejet</h4>
 <div class="signal-box">🚫 SIGNAL REJETÉ PAR TIMESFM
@@ -876,10 +927,6 @@ Canal: EAGLE FOREX PESEARCH</div>
 P&L total: 72.30$ / Limite: 70.0$
 Positions fermées : 3
 ⏸️ Trading arrêté pour aujourd'hui</div>
-<div class="signal-box">💥 BOT CRASH !
-━━━━━━━━━━━━━━━━━━
-Erreur: ConnectionError: MT5 timeout
-⏰ 2026-07-29 14:30:00 UTC</div>
 
 <h3>Tableau récapitulatif</h3>
 <table>
@@ -896,14 +943,6 @@ Erreur: ConnectionError: MT5 timeout
 <tr><td>🚨</td><td>Limite quotidienne</td><td><code>OBJECTIF QUOTIDIEN ATTEINT</code></td><td>P&L quotidien atteint</td></tr>
 <tr><td>💥</td><td>Crash</td><td><code>BOT CRASH !</code></td><td>Exception non rattrapée</td></tr>
 </table>
-
-<h3>Retry automatique</h3>
-<ul>
-<li>1er essai : timeout 8s</li>
-<li>Si échec : vérifie si le message a été livré (get_messages limit=5)</li>
-<li>Si pas livré : 1 retry après 2s</li>
-<li>Ne bloque jamais la boucle de trading plus de 10s total</li>
-</ul>
 </section>
 
 <!-- ============================================================ -->
@@ -913,10 +952,14 @@ Erreur: ConnectionError: MT5 timeout
 <h2>18. Configuration (.env)</h2>
 
 <h3>Canaux Telegram</h3>
-<div class="signal-box">TG_CHANNEL_1=@fxGzl                    # Username
-TG_CHANNEL_2=-1001506646047            # ID numérique
+<div class="signal-box"># Chargement dynamique — ajouter/en retirer sans toucher au code
+TG_CHANNEL=@fxGzl                      # Canal 1 (username)
+TG_CHANNEL_2=-1001506646047            # Canal 2 (ID numérique)
+TG_CHANNEL_3=-1002369513498            # Canal 3
 ...
-TG_CHANNEL_18=-1001951939988
+# Ajouter un canal: TG_CHANNEL_N=&lt;id&gt;
+# Pas de limite de nombre
+
 TG_ALERT_CHANNEL=@TrdReport            # Canal d'alertes
 </div>
 
@@ -971,6 +1014,23 @@ MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
 <tr><td><code>CONFLIT_FILTER_ENABLED</code></td><td>true</td><td>Active le filtre de conflit</td></tr>
 </table>
 
+<h3>Fenêtres News (minutes)</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_BLOCK</code></td><td>15</td><td>Blocage avant news (tier High)</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_CLOSE</code></td><td>5</td><td>Fermeture avant news (tier High)</td></tr>
+<tr><td><code>NEWS_WINDOW_AFTER</code></td><td>15</td><td>Blocage après news (tier High)</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_BLOCK_NFPCPI</code></td><td>20</td><td>Blocage avant NFP/CPI</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_CLOSE_NFPCPI</code></td><td>10</td><td>Fermeture avant NFP/CPI</td></tr>
+<tr><td><code>NEWS_WINDOW_AFTER_NFPCPI</code></td><td>30</td><td>Blocage après NFP/CPI</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_BLOCK_FOMC</code></td><td>20</td><td>Blocage avant FOMC</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_CLOSE_FOMC</code></td><td>15</td><td>Fermeture avant FOMC</td></tr>
+<tr><td><code>NEWS_WINDOW_AFTER_FOMC</code></td><td>45</td><td>Blocage après FOMC</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_BLOCK_SPIKE</code></td><td>20</td><td>Blocage avant Spike</td></tr>
+<tr><td><code>NEWS_WINDOW_BEFORE_CLOSE_SPIKE</code></td><td>10</td><td>Fermeture avant Spike</td></tr>
+<tr><td><code>NEWS_WINDOW_AFTER_SPIKE</code></td><td>20</td><td>Blocage après Spike</td></tr>
+</table>
+
 <h3>Quick Alert</h3>
 <table>
 <tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
@@ -1018,6 +1078,14 @@ MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
 <section id="changelog">
 <h2>20. Changelog complet</h2>
 
+<h3>V12.0.1 (2026-07-31)</h3>
+<h4>Améliorations</h4>
+<ul>
+<li><span class="badge badge-green">NEW</span> Chargement dynamique des canaux Telegram — scan auto de <code>TG_CHANNEL_*</code>, sans limite</li>
+<li><span class="badge badge-green">FIX</span> News filtrées par jour de trading — ne garde plus les news de la semaine entière</li>
+<li><span class="badge badge-green">FIX</span> Format des logs — <code>RESET JOURNALIER A 2H UTC</code>, <code>N NEWS HIGH IMPACT (date)</code></li>
+</ul>
+
 <h3>V12.0.0 (2026-07-29)</h3>
 <h4>Bugs corrigés</h4>
 <ul>
@@ -1026,6 +1094,13 @@ MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
 <li><span class="badge badge-orange">MOYEN</span> P&L=0 dans <code>_close_all_positions()</code> — manque délai MT5</li>
 <li><span class="badge badge-orange">MOYEN</span> Doublons alertes Telegram — dédup refaite avec contenu normalisé</li>
 <li><span class="badge badge-orange">MOYEN</span> Doublons handler — <code>_seen_msg_ids</code>改为 dict avec TTL</li>
+</ul>
+
+<h4>Parser fixes</h4>
+<ul>
+<li>TP sans mot-clé : <code>✔️4030</code>, <code>✔️.4040</code> détectés via <code>_extract_orphan_tps()</code></li>
+<li>Nombres avec point devant : <code>.4040</code> → <code>4040</code></li>
+<li>MORE SELL/BUY : converti en zone (ex: <code>SELL 4045 MORE SELL 4050</code> → zone [4045, 4050])</li>
 </ul>
 
 <h4>Code mort supprimé (-452 lignes)</h4>
@@ -1066,7 +1141,7 @@ MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
 <!-- FOOTER -->
 <!-- ============================================================ -->
 <footer>
-<p>GZL TradingBot V12.0.0 — Documentation générée le 2026-07-29</p>
+<p>GZL TradingBot V12.0.0 — Documentation mise à jour le 2026-07-31</p>
 <p>Telegram → MetaTrader 5 | Copy Trading Bot</p>
 </footer>
 
