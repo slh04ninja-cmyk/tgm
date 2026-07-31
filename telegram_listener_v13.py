@@ -2134,6 +2134,8 @@ async def main():
                 folders_str = " , ".join(found_folders)
                 log.info(f"Dossier Trouvé : '{folders_str}'")
                 log.info(f"Channels Telechargés : {ch_num}")
+                if TG_ALERT_CHANNEL:
+                    log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
 
                 # Sauvegarder la liste des canaux dans Channel.txt
                 try:
