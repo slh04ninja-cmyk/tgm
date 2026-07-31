@@ -2035,35 +2035,26 @@ async def main():
         entity_to_name = {}
 
         if TG_FOLDER:
-            # ★ CHARGEMENT DEPUIS DOSSIER TELEGRAM
-            # Les dossiers Telegram utilisent des IDs spécifiques (pas 0,1,2...).
-            # On utilise GetDialogFilters pour récupérer la liste des dossiers.
-            log.info(f"Recherche du dossier Telegram '{TG_FOLDER}'...")
+            # ★ CHARGEMENT DEPUIS DOSSIERS TELEGRAM (multiples séparés par virgules)
+            folder_names = [f.strip() for f in TG_FOLDER.split(',') if f.strip()]
+            log.info(f"Recherche de {len(folder_names)} dossier(s): {', '.join(folder_names)}...")
             try:
                 from telethon import functions
-                # GetDialogFilters peut s'appeler différemment selon la version de Telethon
-                # Essaie plusieurs variantes
                 result = None
                 for fn_name in ['GetDialogFilters', 'GetDialogFiltersRequest', 'getDialogFilters']:
                     try:
                         fn = getattr(functions.messages, fn_name)
                         result = await client(fn())
-                        log.debug(f"Fonction trouvée: messages.{fn_name}")
                         break
                     except AttributeError:
                         continue
                 if result is None:
                     log.error("Impossible de trouver GetDialogFilters dans Telethon.")
-                    log.info(f"Version Telethon: {__import__('telethon').__version__}")
                     return
 
-                # Le résultat est un objet DialogFilters, pas une liste.
-                # Extraire la liste des filtres selon la structure disponible.
                 filters = []
                 if hasattr(result, 'filters'):
                     filters = result.filters
-                elif hasattr(result, 'dialogs'):
-                    filters = result.dialogs
                 elif hasattr(result, 'to_dict'):
                     d = result.to_dict()
                     for key in ['filters', 'dialogs', 'items']:
@@ -2071,16 +2062,12 @@ async def main():
                             filters = d[key]
                             break
                 if not filters:
-                    log.error(f"Aucun filtre trouvé dans la réponse. Type: {type(result).__name__}")
-                    log.info(f"Attributs: {[a for a in dir(result) if not a.startswith('_')]}")
+                    log.error(f"Aucun filtre trouvé. Type: {type(result).__name__}")
                     return
-                # Extraire les noms de dossiers disponibles
-                folder_id = None
-                folder_title = TG_FOLDER
-                available_folders = []
 
+                # Map des dossiers disponibles
+                folder_map = {}
                 for f in filters:
-                    # Gérer les objets TL et les dicts
                     if isinstance(f, dict):
                         fid = f.get('id')
                         ftitle = f.get('title', '')
@@ -2089,44 +2076,43 @@ async def main():
                     else:
                         fid = getattr(f, 'id', None)
                         ftitle_obj = getattr(f, 'title', '')
-                        if hasattr(ftitle_obj, 'text'):
-                            ftitle = ftitle_obj.text
-                        else:
-                            ftitle = str(ftitle_obj)
-                    available_folders.append((fid, ftitle))
-                    log.debug(f"  Dossier trouvé: id={fid} title='{ftitle}'")
-                    if str(fid) == str(TG_FOLDER) or ftitle.lower() == TG_FOLDER.lower():
-                        folder_id = fid
-                        folder_title = ftitle
+                        ftitle = ftitle_obj.text if hasattr(ftitle_obj, 'text') else str(ftitle_obj)
+                    folder_map[ftitle.lower()] = (fid, ftitle, f)
+                    folder_map[str(fid)] = (fid, ftitle, f)
 
-                if folder_id is None:
-                    log.error(f"Dossier '{TG_FOLDER}' introuvable.")
-                    log.info("Dossiers disponibles:")
-                    for fid, ftitle in available_folders:
-                        log.info(f"  - {ftitle} (id={fid})")
-                    return
-
-                log.info(f"Dossier trouvé: '{folder_title}' (id={folder_id})")
-
-                # Récupérer les include_peers du dossier
-                include_peers = []
-                for f in filters:
-                    if isinstance(f, dict):
-                        if f.get('id') == folder_id:
-                            include_peers = f.get('include_peers', [])
-                            break
+                # Chercher chaque dossier
+                all_peers = []
+                found_folders = []
+                for name in folder_names:
+                    match = folder_map.get(name.lower()) or folder_map.get(name)
+                    if match:
+                        fid, ftitle, filt = match
+                        peers = filt.get('include_peers', []) if isinstance(filt, dict) else getattr(filt, 'include_peers', [])
+                        all_peers.extend(peers)
+                        found_folders.append(ftitle)
+                        log.info(f"  Dossier '{ftitle}' (id={fid})")
                     else:
-                        if getattr(f, 'id', None) == folder_id:
-                            include_peers = getattr(f, 'include_peers', [])
-                            break
+                        log.warning(f"  Dossier '{name}' introuvable")
 
-                if not include_peers:
-                    log.error(f"Le dossier '{folder_title}' ne contient aucun canal.")
+                if not found_folders:
+                    log.error("Aucun dossier trouvé.")
+                    log.info("Dossiers disponibles:")
+                    for k, (fid, ftitle, _) in sorted(folder_map.items(), key=lambda x: x[1][0] or 0):
+                        if k == ftitle.lower():
+                            log.info(f"  - {ftitle} (id={fid})")
                     return
 
-                # Résoudre les entités
+                # Dédupliquer les peers
+                seen_ids = set()
+                unique_peers = []
+                for peer in all_peers:
+                    pid = getattr(peer, 'user_id', None) or getattr(peer, 'channel_id', None) or getattr(peer, 'chat_id', None) or str(peer)
+                    if pid not in seen_ids:
+                        seen_ids.add(pid)
+                        unique_peers.append(peer)
+
                 ch_num = 0
-                for peer in include_peers:
+                for peer in unique_peers:
                     try:
                         entity = await client.get_entity(peer)
                         if not hasattr(entity, 'title'):
@@ -2143,14 +2129,14 @@ async def main():
                         CHANNEL_NUM_MAP[str(entity.id)] = ch_num
                         log.info(f"Canal_{ch_num} : {title_clean}")
                     except Exception as e:
-                        log.warning(f"Impossible de résoudre un peer dans le dossier: {e}")
+                        log.warning(f"Impossible de résoudre un peer: {e}")
 
-                log.info(f"{ch_num} canaux chargés depuis le dossier '{folder_title}'")
+                log.info(f"{ch_num} canaux chargés depuis {len(found_folders)} dossier(s): {', '.join(found_folders)}")
 
                 # Sauvegarder la liste des canaux dans Channel.txt
                 try:
                     with open("Channel.txt", "w", encoding="utf-8") as f:
-                        f.write(f"# Canaux chargés depuis le dossier Telegram '{folder_title}'\n")
+                        f.write(f"# Canaux chargés depuis les dossiers Telegram: {', '.join(found_folders)}\n")
                         f.write(f"# {ch_num} canaux — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
                         f.write("\n")
                         for i, (ent, name) in enumerate([(e, entity_to_name.get(e.id, '?')) for e in chats], 1):
