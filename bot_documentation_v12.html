@@ -139,7 +139,9 @@ TG_CHANNEL_20=-1002020202020     → canal 20 (auto)
 <tr><td><span class="badge badge-green">ZN2</span></td><td>CH{N}-ZN2</td><td>Signal zone — prix entre zone et SL (meilleur prix)</td></tr>
 <tr><td><span class="badge badge-cyan">PU1</span></td><td>CH{N}-PU1</td><td>Prix unique — prix entre entry et SL</td></tr>
 <tr><td><span class="badge badge-cyan">PU2</span></td><td>CH{N}-PU2</td><td>Prix unique — prix dans tolérance</td></tr>
-<tr><td><span class="badge badge-orange">AL-MP</span></td><td>CH{N}-AL-MP</td><td>Quick Alert — MARKET direct</td></tr>
+<tr><td><span class="badge badge-orange">MP</span></td><td>CH{N}-MP</td><td>Quick Alert sans prix — MARKET direct (BUY NOW)</td></tr>
+<tr><td><span class="badge badge-green">AL1</span></td><td>CH{N}-AL1</td><td>Quick Alert avec prix — entre entry et SL (favorable)</td></tr>
+<tr><td><span class="badge badge-yellow">AL2</span></td><td>CH{N}-AL2</td><td>Quick Alert avec prix — dans tolérance (entry ± 3$)</td></tr>
 </table>
 </section>
 
@@ -594,6 +596,12 @@ NEW SL 4000              → Déplace SL à 4000</div>
   ├── Vérification tolérance prix (±3$)
   ├── Filtre distance TP (≥30% restant)
   ├── Vérification QA existante (mise à jour SL/TP si existe)
+  │
+  ├── <span class="cyan">TYPE DE COMMENTAIRE</span>
+  │   ├── Sans prix (BUY NOW) → <span class="orange">CH{N}-MP</span>
+  │   ├── Prix entre entry et SL → <span class="green">CH{N}-AL1</span>
+  │   └── Prix dans tolérance → <span class="yellow">CH{N}-AL2</span>
+  │
   └── <span class="green">MARKET ORDER</span> → enregistrement + alerte
 </div>
 
@@ -896,12 +904,28 @@ TICKET: 1591670605
 TP: 4021.0 | SL: 4036.0
 Canal: FX VIP SERVICE</div>
 
-<h4>⚡ Quick Alert (AL-MP)</h4>
-<div class="signal-box">⚡ XAUUSD | SELL | CH5-AL-MP
+<h4>⚡ Quick Alert sans prix (MP)</h4>
+<div class="signal-box">⚡ XAUUSD | SELL | CH5-MP
 ━━━━━━━━━━━━━━━━━━
 MARKET: 4042.85 | Lot: 0.01
 TICKET: 1592437254
 TP: 4029.0 | SL: 4054.0
+Canal: AMELIA GOLD TRADER</div>
+
+<h4>🟢 Quick Alert avec prix — favorable (AL1)</h4>
+<div class="signal-box">🟢 XAUUSD | BUY | CH3-AL1
+━━━━━━━━━━━━━━━━━━
+MARKET: 4002.00 | Lot: 0.01
+TICKET: 1592437255
+TP: 4015.0 | SL: 3990.0
+Canal: EAGLE FOREX PESEARCH</div>
+
+<h4>🟡 Quick Alert avec prix — tolérance (AL2)</h4>
+<div class="signal-box">🟡 XAUUSD | BUY | CH5-AL2
+━━━━━━━━━━━━━━━━━━
+MARKET: 4003.50 | Lot: 0.01
+TICKET: 1592437256
+TP: 4015.0 | SL: 3990.0
 Canal: AMELIA GOLD TRADER</div>
 
 <h4>🎯 Clôtures (TP / SL / CLOSE)</h4>
@@ -955,7 +979,9 @@ Positions fermées : 3
 <table>
 <tr><th>Emoji</th><th>Type</th><th>Format</th><th>Trigger</th></tr>
 <tr><td>🟢</td><td>Ouverture MARKET</td><td><code>SYMBOL | ACTION | CH{N}-ZN1/PU1</code></td><td>Signal zone/prix unique exécuté</td></tr>
-<tr><td>⚡</td><td>Quick Alert</td><td><code>SYMBOL | ACTION | CH{N}-AL-MP</code></td><td>QA AL-MP exécuté</td></tr>
+<tr><td>⚡</td><td>QA sans prix (MP)</td><td><code>SYMBOL | ACTION | CH{N}-MP</code></td><td>QA sans prix exécuté (BUY NOW)</td></tr>
+<tr><td>🟢</td><td>QA avec prix (AL1)</td><td><code>SYMBOL | ACTION | CH{N}-AL1</code></td><td>QA prix entre entry et SL</td></tr>
+<tr><td>🟡</td><td>QA avec prix (AL2)</td><td><code>SYMBOL | ACTION | CH{N}-AL2</code></td><td>QA prix dans tolérance</td></tr>
 <tr><td>🎯</td><td>TP touché</td><td><code>ACTION | CH{N}-XXX | TP</code></td><td>Position fermée par Take Profit</td></tr>
 <tr><td>🛑</td><td>SL touché</td><td><code>ACTION | CH{N}-XXX | SL</code></td><td>Position fermée par Stop Loss</td></tr>
 <tr><td>🔒</td><td>BE activé</td><td><code>ACTION | CH{N}-XXX | BE</code></td><td>Break-Even déclenché</td></tr>
@@ -1087,7 +1113,9 @@ MT5_PATH=C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe
 <tr><td><code>CH{N}-ZN2</code></td><td>Canal N — Zone, prix entre zone et SL</td></tr>
 <tr><td><code>CH{N}-PU1</code></td><td>Canal N — Prix Unique, prix entre entry et SL</td></tr>
 <tr><td><code>CH{N}-PU2</code></td><td>Canal N — Prix Unique, prix dans tolérance</td></tr>
-<tr><td><code>CH{N}-AL-MP</code></td><td>Canal N — Quick Alert MARKET</td></tr>
+<tr><td><code>CH{N}-MP</code></td><td>Canal N — Quick Alert sans prix (MARKET direct)</td></tr>
+<tr><td><code>CH{N}-AL1</code></td><td>Canal N — Quick Alert avec prix, entre entry et SL (favorable)</td></tr>
+<tr><td><code>CH{N}-AL2</code></td><td>Canal N — Quick Alert avec prix, dans tolérance (entry ± 3$)</td></tr>
 <tr><td><code>CH{N}-UNK</code></td><td>Canal N — Inconnu (fallback)</td></tr>
 <tr><td><code>DAILY-LIMIT-CLOSE</code></td><td>Fermeture par limite quotidienne</td></tr>
 <tr><td><code>NEW-SIGNAL</code></td><td>Fermeture par nouveau signal du même canal</td></tr>

@@ -1855,8 +1855,27 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         else:
             log.debug("Quick Alert existante introuvable → nouvelle alerte")
 
-    # ★ EXÉCUTION MARKET (Type 1 et Type 2 dans tolérance)
-    mt5_comment_qa = f"CH{ch_num}-AL-MP"
+    # ★ DÉTERMINER LE TYPE DE COMMENTAIRE MT5
+    # MP  = Market Price (pas de prix dans le signal, ex: BUY NOW)
+    # AL1 = Alert avec prix — prix entre entry et SL ou prix exact
+    # AL2 = Alert avec prix — prix dans tolérance (entry ± tolerance)
+    if is_market_price:
+        mt5_comment_qa = f"CH{ch_num}-MP"
+    else:
+        # Vérifier si le prix est dans la zone tolérance ou entre entry et SL
+        in_tolerance = False
+        if action == "BUY":
+            # Tolérance: entry <= current <= entry + tolerance
+            in_tolerance = entry_price <= current <= entry_price + QA_PRICE_TOLERANCE
+        else:  # SELL
+            # Tolérance: entry - tolerance <= current <= entry
+            in_tolerance = entry_price - QA_PRICE_TOLERANCE <= current <= entry_price
+        
+        if in_tolerance:
+            mt5_comment_qa = f"CH{ch_num}-AL2"
+        else:
+            # Prix entre entry et SL (favorable) — pas dans tolérance
+            mt5_comment_qa = f"CH{ch_num}-AL1"
     log.info(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
     log.debug(f"Quick Alert MARKET {action} {symbol} @{current} SL={sl}, TP={default_tp}")
 
@@ -1886,8 +1905,15 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         order_ticket = t
         log.info(msg.log_order_placed(mt5_comment_qa, "MKT", t, current, sl))
         log.debug(f"✓ QUICK MARKET #{t}")
+        # Emoji selon le type: ⚡=MP, 🟢=AL1 (favorable), 🟡=AL2 (tolérance)
+        if "-MP" in mt5_comment_qa:
+            emoji = "⚡"
+        elif "-AL1" in mt5_comment_qa:
+            emoji = "🟢"
+        else:
+            emoji = "🟡"
         send_alert_sync(
-            f"⚡ {symbol} | {action} | {mt5_comment_qa}\n"
+            f"{emoji} {symbol} | {action} | {mt5_comment_qa}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"MARKET: {current:.2f} | Lot: {LOT_UNIQUE_TRADE}\n"
             f"TICKET: {t}\n"
