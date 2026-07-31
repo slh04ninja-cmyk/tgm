@@ -2146,6 +2146,18 @@ async def main():
                         log.warning(f"Impossible de résoudre un peer dans le dossier: {e}")
 
                 log.info(f"{ch_num} canaux chargés depuis le dossier '{folder_title}'")
+
+                # Sauvegarder la liste des canaux dans Channel.txt
+                try:
+                    with open("Channel.txt", "w", encoding="utf-8") as f:
+                        f.write(f"# Canaux chargés depuis le dossier Telegram '{folder_title}'\n")
+                        f.write(f"# {ch_num} canaux — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+                        f.write("\n")
+                        for i, (ent, name) in enumerate([(e, entity_to_name.get(e.id, '?')) for e in chats], 1):
+                            f.write(f"Canal_{i} : {name}\n")
+                    log.info(f"Liste sauvegardée dans Channel.txt")
+                except Exception as e:
+                    log.warning(f"Impossible de sauvegarder Channel.txt: {e}")
             except Exception as e:
                 log.error(f"Erreur lecture dossier Telegram '{TG_FOLDER}': {e}")
                 return
