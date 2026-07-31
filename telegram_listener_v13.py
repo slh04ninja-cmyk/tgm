@@ -2036,44 +2036,71 @@ async def main():
 
         if TG_FOLDER:
             # ★ CHARGEMENT DEPUIS DOSSIER TELEGRAM
-            folder_num = int(TG_FOLDER)
-            log.info(f"Chargement des canaux depuis le dossier Telegram #{folder_num}...")
+            # Les dossiers Telegram utilisent des IDs spécifiques (pas 0,1,2...).
+            # On utilise GetDialogFilters pour récupérer la liste des dossiers.
+            log.info(f"Recherche du dossier Telegram '{TG_FOLDER}'...")
             try:
-                dialogs = await client.get_dialogs(folder=folder_num)
+                from telethon import functions
+                result = await client(functions.messages.GetDialogFilters())
+                folder_id = None
+                folder_title = TG_FOLDER
+
+                # Chercher le dossier par nom ou par ID
+                for f in result:
+                    fid = getattr(f, 'id', None)
+                    ftitle = getattr(f, 'title', '')
+                    log.debug(f"  Dossier trouvé: id={fid} title='{ftitle}'")
+                    if str(fid) == str(TG_FOLDER) or ftitle.lower() == TG_FOLDER.lower():
+                        folder_id = fid
+                        folder_title = ftitle
+                        break
+
+                if folder_id is None:
+                    log.error(f"Dossier '{TG_FOLDER}' introuvable.")
+                    log.info("Dossiers disponibles:")
+                    for f in result:
+                        fid = getattr(f, 'id', None)
+                        ftitle = getattr(f, 'title', '')
+                        log.info(f"  - {ftitle} (id={fid})")
+                    return
+
+                log.info(f"Dossier trouvé: '{folder_title}' (id={folder_id})")
+
+                # Récupérer les include_peers du dossier
+                include_peers = []
+                for f in result:
+                    if getattr(f, 'id', None) == folder_id:
+                        include_peers = getattr(f, 'include_peers', [])
+                        break
+
+                if not include_peers:
+                    log.error(f"Le dossier '{folder_title}' ne contient aucun canal.")
+                    return
+
+                # Résoudre les entités
                 ch_num = 0
-                for dialog in dialogs:
-                    entity = dialog.entity
-                    # Filtrer : uniquement les canaux/supergroups (pas les chats privés)
-                    if not hasattr(entity, 'title'):
-                        continue
-                    if hasattr(entity, 'broadcast') and entity.broadcast:
-                        pass  # canal → OK
-                    elif hasattr(entity, 'megagroup') and entity.megagroup:
-                        pass  # supergroupe → OK
-                    elif hasattr(entity, 'gigagroup') and entity.gigagroup:
-                        pass  # gigagroupe → OK
-                    else:
-                        continue  # chat privé, bot, etc. → ignorer
+                for peer in include_peers:
+                    try:
+                        entity = await client.get_entity(peer)
+                        if not hasattr(entity, 'title'):
+                            continue
+                        ch_num += 1
+                        title = entity.title
+                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
+                        title_clean = unicodedata.normalize('NFKC', title_clean)
+                        if title_clean.strip() == "":
+                            title_clean = str(entity.id)
+                        chats.append(entity)
+                        entity_to_name[entity.id] = title_clean
+                        CHANNEL_NUM_MAP[title_clean] = ch_num
+                        CHANNEL_NUM_MAP[str(entity.id)] = ch_num
+                        log.info(f"Canal_{ch_num} : {title_clean} (id={entity.id})")
+                    except Exception as e:
+                        log.warning(f"Impossible de résoudre un peer dans le dossier: {e}")
 
-                    ch_num += 1
-                    title = entity.title
-                    title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
-                    title_clean = unicodedata.normalize('NFKC', title_clean)
-                    if title_clean.strip() == "":
-                        title_clean = str(entity.id)
-
-                    chats.append(entity)
-                    entity_to_name[entity.id] = title_clean
-                    # Enregistrer dans CHANNEL_NUM_MAP avec l'ID comme clé
-                    id_str = str(entity.id)
-                    CHANNEL_NUM_MAP[title_clean] = ch_num
-                    CHANNEL_NUM_MAP[id_str] = ch_num
-                    log.info(f"Canal_{ch_num} : {title_clean} (id={entity.id})")
-
-                log.info(f"{ch_num} canaux chargés depuis le dossier #{folder_num}")
+                log.info(f"{ch_num} canaux chargés depuis le dossier '{folder_title}'")
             except Exception as e:
-                log.error(f"Erreur lecture dossier Telegram #{folder_num}: {e}")
-                log.error("Vérifiez que le dossier existe et contient des canaux.")
+                log.error(f"Erreur lecture dossier Telegram '{TG_FOLDER}': {e}")
                 return
         else:
             # ★ CHARGEMENT DEPUIS .ENV (TG_CHANNEL_*)
