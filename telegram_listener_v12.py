@@ -652,24 +652,46 @@ class NewsManager:
             except ValueError:
                 _min_idx = _IMPACT_ORDER.index("high")  # valeur invalide → repli strict
             _impact_levels = _IMPACT_ORDER[_min_idx:]
-            self._news = [
+            # Filtrer par impact + devise
+            filtered = [
                 n for n in data
                 if n.get("impact", "").lower() in _impact_levels
                 and (n.get("country", "") in ("USD", "XAU") or n.get("currency", "") in ("USD", "XAU"))
             ]
+            # ★ FIX : ne garder que les news du JOUR DE TRADING en cours
+            # (ff_calendar_thisweek.json retourne toute la semaine)
+            trading_day = get_trading_day_start()
+            trading_day_date = trading_day.date()
+            self._news = []
+            for n in filtered:
+                try:
+                    news_dt = datetime.fromisoformat(n["date"].replace("Z", "+00:00"))
+                    if news_dt.date() == trading_day_date:
+                        self._news.append(n)
+                except Exception:
+                    # Si la date est invalide, on garde la news par sécurité
+                    self._news.append(n)
             # ★ FIX #8 : log les news 1h avant l'ouverture NY (12:30 UTC)
             now_utc = datetime.now(timezone.utc)
             is_pre_ny = (now_utc.hour == 12 and 25 <= now_utc.minute <= 35)
             if is_pre_ny or not hasattr(self, '_news_logged') or self._force_log:
                 self._news_logged = True
                 self._force_log = False
-                log.info(msg.log_news_loaded(len(self._news)))
+                log.info(f"{len(self._news)} NEWS HIGH IMPACT ({trading_day_date})")
                 if len(self._news) == 0 and len(data) > 0:
                     sample_keys = list(data[0].keys())
                     log.warning(msg.log_news_zero_debug(len(data), sample_keys))
                 elif len(self._news) > 0:
                     for n in self._news:
-                        log.info(f"  NEWS: {n.get('title', '?')} @ {n.get('date', '?')} ({n.get('country', '?')})")
+                        raw_date = n.get('date', '?')
+                        # Séparer date et heure : 2026-07-29T14:00:00-04:00 → 2026-07-29 | 14:00:00-04:00
+                        if 'T' in raw_date:
+                            date_part, time_part = raw_date.split('T', 1)
+                            formatted = f"{date_part} | {time_part}"
+                        else:
+                            formatted = raw_date
+                        country = n.get('country', '?')
+                        log.info(f"NEWS: {n.get('title', '?')} @ {formatted} ({country})")
         except Exception as e:
             log.error(msg.log_news_fetch_error(str(e)))
 
@@ -1042,7 +1064,7 @@ class TradeManager:
             if start.day != self._daily_pnl_day:
                 self._daily_pnl = 0.0
                 self._daily_pnl_day = start.day
-                log.info(f"<<<<< INFO >>>>> Reset journalier à {TRADING_START_HOUR}h UTC")
+                log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
             total = self._daily_pnl + self._get_floating_pnl()
         log.debug(msg.log_daily_pnl_periodic(self._daily_pnl, self._get_floating_pnl(), total))
@@ -1053,7 +1075,7 @@ class TradeManager:
             if start.day != self._daily_pnl_day:
                 self._daily_pnl = 0.0
                 self._daily_pnl_day = start.day
-                log.info(f"<<<<< INFO >>>>> Reset journalier à {TRADING_START_HOUR}h UTC")
+                log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
                 log.info(f"<<<<< INFO >>>>> Limite quotidienne atteinte : {total_pnl:.2f}$ / {DAILY_PROFIT_LIMIT}$")
