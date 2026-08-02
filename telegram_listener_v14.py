@@ -2053,68 +2053,34 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     log.info(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
     log.debug(f"Quick Alert MARKET {action} {symbol} @{current} SL={sl}, TP={default_tp}")
 
-    tickets = []
+    # ★ SL plafonné
+    entry_for_sl = entry_price if entry_price else current
+    sl = _cap_sl(action, entry_for_sl, sl, MAX_SL_USD)
 
-    try:
-        t = bridge.place_market_order(signal, LOT_UNIQUE_TRADE, tp=default_tp, sl=sl, comment=mt5_comment_qa)
-    except Exception as e:
-        log.error(f"Quick alert MARKET exception: {e}")
-        t = None
-
-    if t:
-        tickets.append({
-            "ticket": t,
-            "lot": LOT_UNIQUE_TRADE,
-            "role": "quick_market",
-            "entry_price": current,
-            "tp_index": 0,
-            "tp_target": default_tp,
-            "tp3": default_tp,
-            "tp_final": default_tp,
-            "sl_step": 0,
-            "trail_active": False,
-            "be_active": False,
-            "be_sl": 0,
-        })
-        order_ticket = t
-        log.info(msg.log_order_placed(mt5_comment_qa, "MKT", t, current, sl))
-        log.debug(f"✓ QUICK MARKET #{t}")
-        # Emoji selon le type: ⚡=MP, 🟢=AL1 (favorable), 🟡=AL2 (tolérance)
-        if "-MP" in mt5_comment_qa:
-            emoji = "⚡"
-        elif "-AL1" in mt5_comment_qa:
-            emoji = "🟢"
-        else:
-            emoji = "🟡"
-        send_alert_sync(
-            f"{emoji} {symbol} | {action} | {mt5_comment_qa}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"MARKET: {current:.2f} | Lot: {LOT_UNIQUE_TRADE}\n"
-            f"TICKET: {t}\n"
-            f"TP: {default_tp} | SL: {sl}\n"
-            f"Canal: {canal}"
-        )
-    else:
+    # ★ Multi-positions (A/B testing)
+    qa_prefix = mt5_comment_qa.split("-")[1] if "-" in mt5_comment_qa else "MP"
+    ok = _open_multi_positions(signal, bridge, manager,
+                               action, symbol, current, sl, default_tp,
+                               LOT_UNIQUE_TRADE, ch_num, canal, prefix=qa_prefix)
+    if not ok:
         log.error("✗ QUICK MARKET échoué")
         return
 
-    entry = {
-        "signal": signal,
-        "tickets": tickets,
-        "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-        "_is_quick_alert": True,
-        "_signal_id": f"{symbol}_{action}_{int(time.time())}_QA",
-        "_expected_positions": 1,
-        "_mt5_comment": mt5_comment_qa,
-    }
-    manager.register(entry)
+    # Récupérer l'entrée créée par _open_multi_positions
+    # (elle est déjà enregistrée dans manager.active)
+    with manager._lock:
+        entry = manager.active[-1] if manager.active else None
+    if not entry:
+        log.error("✗ Quick Alert — entrée non trouvée")
+        return
+    first_ticket = entry["tickets"][0]["ticket"] if entry.get("tickets") else 0
 
     if key not in quick_alerts:
         quick_alerts[key] = []
     quick_alerts[key].append({
         "entry": entry,
         "signal": signal,
-        "ticket": order_ticket,
+        "ticket": first_ticket,
         "entry_price": entry_price,
         "is_market_price": signal.get("is_market_price", False),
         "time": datetime.now(timezone.utc),
