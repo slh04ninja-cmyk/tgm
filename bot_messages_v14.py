@@ -198,7 +198,7 @@ def alert_timesfm_rejected(action: str, symbol: str, pred_dir: str, pred_move: f
 # 5. P&L QUOTIDIEN
 # =============================================================
 def log_daily_pnl_periodic(realise: float, flottant: float, total: float) -> str:
-    return f"<<<<< INFO >>>>> P&L quotidien : réalisé {realise:.2f}$ | flottant {flottant:.2f}$ | total {total:.2f}$"
+    return f" P&L quotidien : réalisé {realise:.2f}$ | flottant {flottant:.2f}$ | total {total:.2f}$"
 
 
 def log_balance_startup(balance: float, daily_pnl: float) -> str:
@@ -209,7 +209,7 @@ def log_balance_startup(balance: float, daily_pnl: float) -> str:
 # 6. NEWS
 # =============================================================
 def log_news_loaded(count: int) -> str:
-    return f"<<<<< INFO >>>>> {count} news HIGH impact chargées"
+    return f" {count} news HIGH impact chargées"
 
 
 def log_news_fetch_error(error: str) -> str:
@@ -217,26 +217,26 @@ def log_news_fetch_error(error: str) -> str:
 
 
 def log_news_zero_debug(nb_events_recus: int, sample_keys: list) -> str:
-    return f"[NEWS] 0 news filtrées sur {nb_events_recus} events reçus — clés JSON : {sample_keys}"
+    return f"[NEWS] 0 news filtrées sur {nb_events_recus} events reçus "
 
 
 def log_news_blocking_signals(title: str, minutes_restantes: float) -> str:
-    return f"<<<<< INFO >>>>> {title} dans {minutes_restantes:.0f} min → signaux bloqués"
+    return f" {title} dans {minutes_restantes:.0f} min → signaux bloqués"
 
 
 def log_news_closing_positions(title: str, minutes_restantes: float) -> str:
-    return f"<<<<< INFO >>>>> {title} dans {minutes_restantes:.0f} min → fermeture positions"
+    return f" {title} dans {minutes_restantes:.0f} min → fermeture positions"
 
 
 def log_news_resumed(title: str) -> str:
-    return f"<<<<< INFO >>>>> {title} terminé → reprise"
+    return f" {title} terminé → reprise de trading"
 
 
 # =============================================================
 # 7. LIMITE QUOTIDIENNE
 # =============================================================
 def log_daily_limit_header() -> str:
-    return "===== | DAILY-LIMIT | ====="
+    return "=== | DAILY LIMIT ATTEINT| ==="
 
 
 def log_daily_limit_detail(total: float, nb_positions: int, nb_annules: int) -> str:
