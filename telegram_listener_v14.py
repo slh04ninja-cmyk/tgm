@@ -1144,7 +1144,8 @@ class TradeManager:
         log.info(msg.log_daily_limit_header())
         log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
 
-        send_alert_sync(msg.alert_daily_limit(total, DAILY_PROFIT_LIMIT, nb_positions, cancelled))
+        if ALERT_DAILY_PERFORMANCE:
+            send_alert_sync(msg.alert_daily_limit(total, DAILY_PROFIT_LIMIT, nb_positions, cancelled))
 
     # =============================================================
     # GESTION DU BE (avec whitelist)
@@ -1244,8 +1245,10 @@ class TradeManager:
                 t["be_active"] = True
                 t["be_sl"] = be_price
                 t["tp_final"] = be_tp
-                log.info(msg.log_p1_be(t["ticket"], be_price, be_tp))
-                send_alert_sync(msg.alert_p1_be(t["ticket"], be_price, be_tp))
+                if LOG_TRADE_MANAGEMENT:
+                    log.info(msg.log_p1_be(t["ticket"], be_price, be_tp))
+                if ALERT_TRADE_MANAGEMENT:
+                    send_alert_sync(msg.alert_p1_be(t["ticket"], be_price, be_tp))
 
     def _manage_be_scale(self, t: dict, pos, entry: dict, action: str):
         """P2: BE Escaladé — SL progressif selon le profit
@@ -1266,8 +1269,10 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P2-SCALE L{i}]"):
                     t["be_scale_level"] = i
                     t["be_sl"] = new_sl
-                    log.info(msg.log_p2_be_scale(t["ticket"], i, new_sl, pos.profit))
-                    send_alert_sync(msg.alert_p2_be_scale(t["ticket"], i, new_sl))
+                    if LOG_TRADE_MANAGEMENT:
+                        log.info(msg.log_p2_be_scale(t["ticket"], i, new_sl, pos.profit))
+                    if ALERT_TRADE_MANAGEMENT:
+                        send_alert_sync(msg.alert_p2_be_scale(t["ticket"], i, new_sl))
 
     def _manage_trailing(self, t: dict, pos, entry: dict, action: str):
         """P3: Trailing Stop — pas de TP fixe, trailing TRAILING_STOP_USD$"""
@@ -1282,8 +1287,10 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P3-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.info(msg.log_p3_trail(t["ticket"], new_sl))
-                    send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
+                    if LOG_TRADE_MANAGEMENT:
+                        log.info(msg.log_p3_trail(t["ticket"], new_sl))
+                    if ALERT_TRADE_MANAGEMENT:
+                        send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
         else:
             new_sl = round(pos.price_current + TRAILING_STOP_USD, digits)
             current_sl = pos.sl
@@ -1291,16 +1298,20 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P3-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.info(msg.log_p3_trail(t["ticket"], new_sl))
-                    send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
+                    if LOG_TRADE_MANAGEMENT:
+                        log.info(msg.log_p3_trail(t["ticket"], new_sl))
+                    if ALERT_TRADE_MANAGEMENT:
+                        send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
 
     def _manage_partial_quick(self, t: dict, pos, entry: dict, action: str):
         """P4a: Partial Quick — fermeture rapide à +5$"""
         if pos.profit >= 5.0:
             if self.bridge.close_position(t["ticket"], "P4a-QUICK"):
                 t["be_active"] = True  # marquer comme géré
-                log.info(msg.log_p4a_close(t["ticket"], pos.profit))
-                send_alert_sync(msg.alert_p4a_close(t["ticket"], pos.profit))
+                if LOG_TRADE_MANAGEMENT:
+                    log.info(msg.log_p4a_close(t["ticket"], pos.profit))
+                if ALERT_TRADE_MANAGEMENT:
+                    send_alert_sync(msg.alert_p4a_close(t["ticket"], pos.profit))
 
     def _manage_partial_trail(self, t: dict, pos, entry: dict, action: str):
         """P4b: Partial Trail — trailing PARTIAL_TRAIL_USD$"""
@@ -1315,8 +1326,10 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P4b-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.info(msg.log_p4b_trail(t["ticket"], new_sl))
-                    send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
+                    if LOG_TRADE_MANAGEMENT:
+                        log.info(msg.log_p4b_trail(t["ticket"], new_sl))
+                    if ALERT_TRADE_MANAGEMENT:
+                        send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
         else:
             new_sl = round(pos.price_current + PARTIAL_TRAIL_USD, digits)
             current_sl = pos.sl
@@ -1324,8 +1337,10 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P4b-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.info(msg.log_p4b_trail(t["ticket"], new_sl))
-                    send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
+                    if LOG_TRADE_MANAGEMENT:
+                        log.info(msg.log_p4b_trail(t["ticket"], new_sl))
+                    if ALERT_TRADE_MANAGEMENT:
+                        send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
 
     # =============================================================
     # MÉTHODES UTILITAIRES
@@ -1622,6 +1637,11 @@ METHODS = [
 
 TRAILING_STOP_USD = float(os.getenv("TRAILING_STOP_USD", "5.0"))
 PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "3.0"))
+
+# === ALERTES & LOGS ===
+LOG_TRADE_MANAGEMENT = os.getenv("LOG_TRADE_MANAGEMENT", "true").lower() == "true"
+ALERT_TRADE_MANAGEMENT = os.getenv("ALERT_TRADE_MANAGEMENT", "true").lower() == "true"
+ALERT_DAILY_PERFORMANCE = os.getenv("ALERT_DAILY_PERFORMANCE", "true").lower() == "true"
 BE_SCALE_LEVELS = [
     {"trigger": 5.0,  "sl_offset": 0.0},   # +5$ → SL à entry
     {"trigger": 10.0, "sl_offset": 3.0},   # +10$ → SL à entry + 3$
