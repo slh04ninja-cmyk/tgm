@@ -349,3 +349,63 @@ def alert_p4b_trail(ticket: int, sl: float) -> str:
         f"━━━━━━━━━━━━━━━━━━\n"
         f"SL → {sl}"
     )
+
+
+# =============================================================
+# 10. RAPPORT JOURNALIER
+# =============================================================
+def report_daily_summary(date: str, pnl_realise: float, trades: int, wins: int, losses: int, winrate: float) -> str:
+    return (
+        f"📅 PERFORMANCE DU {date}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"P&L réalisé : {pnl_realise:+.2f}$\n"
+        f"Trades : {trades} | Wins : {wins} | Losses : {losses}\n"
+        f"Winrate : {winrate:.1f}%"
+    )
+
+
+def report_daily_by_method(methods: list) -> str:
+    """methods = [{name, trades, wins, pnl}]"""
+    lines = ["📊 PAR MÉTHODE", "━━━━━━━━━━━━━━━━━━"]
+    lines.append(f"{'Méthode':<14} | {'Trades':>6} | {'Winrate':>7} | {'P&L':>8} | {'P&L moy':>8}")
+    lines.append("-" * 58)
+    for m in methods:
+        avg = m['pnl'] / m['trades'] if m['trades'] > 0 else 0
+        wr = m['wins'] / m['trades'] * 100 if m['trades'] > 0 else 0
+        lines.append(f"{m['name']:<14} | {m['trades']:>6} | {wr:>6.1f}% | {m['pnl']:>+7.2f}$ | {avg:>+7.2f}$")
+    return '\n'.join(lines)
+
+
+def report_daily_by_channel(channels: list) -> str:
+    """channels = [{ch_num, trades, wins, pnl}]"""
+    lines = ["📊 PAR CANAL", "━━━━━━━━━━━━━━━━━━"]
+    lines.append(f"{'Canal':<10} | {'Trades':>6} | {'Winrate':>7} | {'P&L':>8}")
+    lines.append("-" * 42)
+    for c in sorted(channels, key=lambda x: x['pnl'], reverse=True):
+        wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
+        lines.append(f"{'CH' + str(c['ch_num']):<10} | {c['trades']:>6} | {wr:>6.1f}% | {c['pnl']:>+7.2f}$")
+    return '\n'.join(lines)
+
+
+def report_daily_closes(tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float) -> str:
+    return (
+        f"📋 CLÔTURES\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"TP : {tp_count} trades | {tp_pnl:+.2f}$\n"
+        f"SL : {sl_count} trades | {sl_pnl:+.2f}$"
+    )
+
+
+def report_daily_full(date: str, pnl_realise: float, trades: int, wins: int, losses: int,
+                      winrate: float, methods: list, channels: list,
+                      tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float) -> str:
+    parts = [
+        report_daily_summary(date, pnl_realise, trades, wins, losses, winrate),
+        "",
+        report_daily_by_method(methods),
+        "",
+        report_daily_by_channel(channels),
+        "",
+        report_daily_closes(tp_count, tp_pnl, sl_count, sl_pnl),
+    ]
+    return '\n'.join(parts)

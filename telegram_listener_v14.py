@@ -1151,25 +1151,24 @@ class TradeManager:
             send_alert_sync(msg.alert_daily_limit(total, DAILY_PROFIT_LIMIT, nb_positions, cancelled))
 
     def _shutdown_end_of_day(self):
-        """Ferme toutes les positions à TRADING_END_HOUR pour calculer la performance du jour."""
+        """Ferme toutes les positions à TRADING_END_HOUR et génère le rapport quotidien."""
         self._end_of_day_done = True
         log.info(f"<<<<< INFO >>>>> FIN DE JOURNÉE {TRADING_END_HOUR}H UTC — Fermeture de toutes les positions")
 
         positions = mt5.positions_get()
         nb_positions = len([p for p in positions if p.magic == MAGIC_NUMBER]) if positions else 0
 
-        if nb_positions == 0:
-            log.info("<<<<< INFO >>>>> Aucune position à fermer")
-            if ALERT_DAILY_PERFORMANCE:
-                send_alert_sync(
-                    f"🕐 FIN DE JOURNÉE {TRADING_END_HOUR}H UTC\n"
-                    f"━━━━━━━━━━━━━━━━━━\n"
-                    f"Aucune position ouverte"
-                )
-            return
+        # Fermer les positions et collecter les données AVANT clear
+        cancelled = 0
+        if nb_positions > 0:
+            cancelled = self._cancel_all_pending_orders()
+            total_pnl = self._close_all_positions()
+            time.sleep(0.5)
+        else:
+            total_pnl = 0.0
 
-        cancelled = self._cancel_all_pending_orders()
-        total_pnl = self._close_all_positions()
+        # ★ Collecter les données du rapport AVANT de vider les entrées
+        report_data = self._collect_daily_report_data()
 
         with self._daily_lock:
             self._update_daily_pnl(total_pnl)
@@ -1177,18 +1176,126 @@ class TradeManager:
 
         self._clear_all_entries()
 
-        log.info(msg.log_daily_limit_header())
-        log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
-
+        # Générer et envoyer le rapport
         if ALERT_DAILY_PERFORMANCE:
-            send_alert_sync(
-                f"🕐 FIN DE JOURNÉE {TRADING_END_HOUR}H UTC\n"
-                f"━━━━━━━━━━━━━━━━━━\n"
-                f"Positions fermées : {nb_positions}\n"
-                f"Ordres annulés : {cancelled}\n"
-                f"P&L réalisé : {self._daily_pnl:.2f}$\n"
-                f"P&L total : {total:.2f}$"
+            from datetime import date as date_cls
+            today = date_cls.today().isoformat()
+            report = msg.report_daily_full(
+                date=today,
+                pnl_realise=self._daily_pnl,
+                trades=report_data['trades'],
+                wins=report_data['wins'],
+                losses=report_data['losses'],
+                winrate=report_data['winrate'],
+                methods=report_data['methods'],
+                channels=report_data['channels'],
+                tp_count=report_data['tp_count'],
+                tp_pnl=report_data['tp_pnl'],
+                sl_count=report_data['sl_count'],
+                sl_pnl=report_data['sl_pnl'],
             )
+            send_alert_sync(report)
+            log.info(report)
+        else:
+            log.info(msg.log_daily_limit_header())
+            log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
+
+    def _collect_daily_report_data(self) -> dict:
+        """Collecte les données pour le rapport quotidien."""
+        # Structure: {method: {trades, wins, pnl}}, {ch_num: {trades, wins, pnl}}
+        methods = {}
+        channels = {}
+        tp_count = tp_pnl = sl_count = sl_pnl = 0
+        total_trades = total_wins = total_losses = 0
+
+        for entry in list(self.active):
+            mt5_comment = entry.get('_mt5_comment', '')
+            # Extraire le numéro de canal (CH1, CH2...)
+            ch_num = 0
+            for part in mt5_comment.split('-'):
+                if part.startswith('CH') and part[2:].isdigit():
+                    ch_num = int(part[2:])
+                    break
+
+            for t in entry.get('tickets', []):
+                pnl = t.get('_last_pnl', 0.0)
+                reported = t.get('_reported', False)
+                role = t.get('role', 'unknown')
+
+                if not reported:
+                    # Position encore ouverte — récupérer le P&L actuel
+                    pos = self._get_pos(t['ticket'])
+                    if pos:
+                        pnl = pos.profit
+                        close_reason = 'OPEN'
+                    else:
+                        continue
+                else:
+                    close_reason = self._get_close_reason(t['ticket'], entry.get('signal', {}).get('symbol', ''))
+
+                # Stats par méthode
+                if role not in methods:
+                    methods[role] = {'trades': 0, 'wins': 0, 'pnl': 0.0}
+                methods[role]['trades'] += 1
+                methods[role]['pnl'] += pnl
+                if pnl > 0:
+                    methods[role]['wins'] += 1
+
+                # Stats par canal
+                if ch_num not in channels:
+                    channels[ch_num] = {'trades': 0, 'wins': 0, 'pnl': 0.0}
+                channels[ch_num]['trades'] += 1
+                channels[ch_num]['pnl'] += pnl
+                if pnl > 0:
+                    channels[ch_num]['wins'] += 1
+
+                # Stats TP/SL
+                if close_reason == 'TP':
+                    tp_count += 1
+                    tp_pnl += pnl
+                elif close_reason == 'SL':
+                    sl_count += 1
+                    sl_pnl += pnl
+
+                # Total
+                total_trades += 1
+                if pnl > 0:
+                    total_wins += 1
+                else:
+                    total_losses += 1
+
+        winrate = total_wins / total_trades * 100 if total_trades > 0 else 0
+
+        # Formater les méthodes pour bot_messages
+        method_names = {
+            'tp_fixe': 'P1 TP Fixe',
+            'be_scale': 'P2 BE Scale',
+            'trailing': 'P3 Trailing',
+            'partial_quick': 'P4a Quick',
+            'partial_trail': 'P4b Trail',
+        }
+        methods_list = []
+        for role in ['tp_fixe', 'be_scale', 'trailing', 'partial_quick', 'partial_trail']:
+            if role in methods:
+                m = methods[role]
+                m['name'] = method_names.get(role, role)
+                methods_list.append(m)
+
+        # Formater les canaux
+        channels_list = [{'ch_num': ch, **stats} for ch, stats in channels.items()]
+
+        return {
+            'trades': total_trades,
+            'wins': total_wins,
+            'losses': total_losses,
+            'winrate': winrate,
+            'methods': methods_list,
+            'channels': channels_list,
+            'tp_count': tp_count,
+            'tp_pnl': tp_pnl,
+            'sl_count': sl_count,
+            'sl_pnl': sl_pnl,
+        }
 
     # =============================================================
     # GESTION DU BE (avec whitelist)
