@@ -1214,14 +1214,28 @@ class TradeManager:
         tp_count = tp_pnl = sl_count = sl_pnl = 0
         total_trades = total_wins = total_losses = 0
 
+        # Map ch_num → canal name
+        ch_name_map = {}
+        for _env_name, _val in _CHANNELS_LIST:
+            _num = int(_env_name.replace('TG_CHANNEL_', ''))
+            ch_name_map[_num] = _val
+
         for entry in list(self.active):
             mt5_comment = entry.get('_mt5_comment', '')
+            signal = entry.get('signal', {})
+            source_channel = signal.get('source_channel', '')
+
             # Extraire le numéro de canal (CH1, CH2...)
             ch_num = 0
             for part in mt5_comment.split('-'):
                 if part.startswith('CH') and part[2:].isdigit():
                     ch_num = int(part[2:])
                     break
+
+            # Nom du canal (sans le @)
+            ch_name = ch_name_map.get(ch_num, source_channel)
+            if ch_name.startswith('@'):
+                ch_name = ch_name[1:]
 
             for t in entry.get('tickets', []):
                 pnl = t.get('_last_pnl', 0.0)
@@ -1249,7 +1263,7 @@ class TradeManager:
 
                 # Stats par canal
                 if ch_num not in channels:
-                    channels[ch_num] = {'trades': 0, 'wins': 0, 'pnl': 0.0}
+                    channels[ch_num] = {'trades': 0, 'wins': 0, 'pnl': 0.0, 'name': ch_name}
                 channels[ch_num]['trades'] += 1
                 channels[ch_num]['pnl'] += pnl
                 if pnl > 0:
@@ -1875,6 +1889,7 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.cell(0, 8, "Performance par canal", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(25, 6, "Canal", border=1)
+    pdf.cell(55, 6, "Nom", border=1)
     pdf.cell(20, 6, "Trades", border=1, align="C")
     pdf.cell(20, 6, "Winrate", border=1, align="C")
     pdf.cell(25, 6, "P&L", border=1, align="C")
@@ -1882,7 +1897,9 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.set_font("Helvetica", "", 9)
     for c in sorted(report_data['channels'], key=lambda x: x['pnl'], reverse=True):
         wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
+        name = c.get('name', '')[:25]  # max 25 chars
         pdf.cell(25, 6, f"CH{c['ch_num']}", border=1)
+        pdf.cell(55, 6, name, border=1)
         pdf.cell(20, 6, str(c['trades']), border=1, align="C")
         pdf.cell(20, 6, f"{wr:.1f}%", border=1, align="C")
         pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
