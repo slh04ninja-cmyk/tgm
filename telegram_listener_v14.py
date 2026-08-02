@@ -567,8 +567,8 @@ timesfm_validator = TimesFMValidator()
 # =============================================================
 # SIGNAL PARSER
 # =============================================================
-from signal_parser import SignalParser, is_spam
-import bot_messages as msg
+from signal_parser_v14 import SignalParser, is_spam
+import bot_messages_v14 as msg
 
 # =============================================================
 # NEWS MANAGER
