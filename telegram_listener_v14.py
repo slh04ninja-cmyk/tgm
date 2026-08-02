@@ -1244,8 +1244,8 @@ class TradeManager:
                 t["be_active"] = True
                 t["be_sl"] = be_price
                 t["tp_final"] = be_tp
-                log.info(f"[P1] TP-Fixe BE #{t['ticket']} SL={be_price} TP={be_tp}")
-                send_alert_sync(f"🔒 P1 TP-Fixe | #{t['ticket']} | BE → SL={be_price} TP={be_tp}")
+                log.info(msg.log_p1_be(t["ticket"], be_price, be_tp))
+                send_alert_sync(msg.alert_p1_be(t["ticket"], be_price, be_tp))
 
     def _manage_be_scale(self, t: dict, pos, entry: dict, action: str):
         """P2: BE Escaladé — SL progressif selon le profit
@@ -1266,8 +1266,8 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P2-SCALE L{i}]"):
                     t["be_scale_level"] = i
                     t["be_sl"] = new_sl
-                    log.info(f"[P2] BE-Scale L{i} #{t['ticket']} SL={new_sl} (profit={pos.profit:.2f}$)")
-                    send_alert_sync(f"🔒 P2 BE-Scale L{i} | #{t['ticket']} | SL={new_sl}")
+                    log.info(msg.log_p2_be_scale(t["ticket"], i, new_sl, pos.profit))
+                    send_alert_sync(msg.alert_p2_be_scale(t["ticket"], i, new_sl))
 
     def _manage_trailing(self, t: dict, pos, entry: dict, action: str):
         """P3: Trailing Stop — pas de TP fixe, trailing TRAILING_STOP_USD$"""
@@ -1282,7 +1282,8 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P3-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.debug(f"[P3] Trailing #{t['ticket']} SL={new_sl}")
+                    log.info(msg.log_p3_trail(t["ticket"], new_sl))
+                    send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
         else:
             new_sl = round(pos.price_current + TRAILING_STOP_USD, digits)
             current_sl = pos.sl
@@ -1290,15 +1291,16 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P3-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.debug(f"[P3] Trailing #{t['ticket']} SL={new_sl}")
+                    log.info(msg.log_p3_trail(t["ticket"], new_sl))
+                    send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
 
     def _manage_partial_quick(self, t: dict, pos, entry: dict, action: str):
         """P4a: Partial Quick — fermeture rapide à +5$"""
         if pos.profit >= 5.0:
             if self.bridge.close_position(t["ticket"], "P4a-QUICK"):
                 t["be_active"] = True  # marquer comme géré
-                log.info(f"[P4a] Quick close #{t['ticket']} profit={pos.profit:.2f}$")
-                send_alert_sync(f"✅ P4a Quick | #{t['ticket']} | P&L={pos.profit:+.2f}$")
+                log.info(msg.log_p4a_close(t["ticket"], pos.profit))
+                send_alert_sync(msg.alert_p4a_close(t["ticket"], pos.profit))
 
     def _manage_partial_trail(self, t: dict, pos, entry: dict, action: str):
         """P4b: Partial Trail — trailing PARTIAL_TRAIL_USD$"""
@@ -1313,7 +1315,8 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P4b-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.debug(f"[P4b] Partial trail #{t['ticket']} SL={new_sl}")
+                    log.info(msg.log_p4b_trail(t["ticket"], new_sl))
+                    send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
         else:
             new_sl = round(pos.price_current + PARTIAL_TRAIL_USD, digits)
             current_sl = pos.sl
@@ -1321,7 +1324,8 @@ class TradeManager:
                 if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P4b-TRAIL]"):
                     t["trail_active"] = True
                     t["be_sl"] = new_sl
-                    log.debug(f"[P4b] Partial trail #{t['ticket']} SL={new_sl}")
+                    log.info(msg.log_p4b_trail(t["ticket"], new_sl))
+                    send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
 
     # =============================================================
     # MÉTHODES UTILITAIRES
@@ -1590,7 +1594,7 @@ def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float
         capped = round(entry_price - max_sl_usd, 2)
     else:
         capped = round(entry_price + max_sl_usd, 2)
-    log.info(f"[SL CAP] SL plafonné: {signal_sl} → {capped} (distance {distance:.2f}$ > {max_sl_usd}$)")
+    log.info(msg.log_sl_cap(signal_sl, capped, distance, max_sl_usd))
     return capped
 
 
@@ -1695,15 +1699,11 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
 
     # Alerte Telegram
     methods_str = " | ".join(methods_desc)
-    send_alert_sync(
-        f"🟢 {symbol} | {action} | CH{ch_num}-{prefix}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"MARKET: {current:.2f} | Lot: {unique_lot} × {len(tickets)}\n"
-        f"{methods_str}\n"
-        f"SL: {sl} | TP: {tp_final}\n"
-        f"Canal: {canal}"
-    )
-    log.info(f"Multi-pos {action} {symbol} @{current} × {len(tickets)} positions | {methods_str}")
+    mt5_comment = f"CH{ch_num}-{prefix}"
+    send_alert_sync(msg.alert_multi_pos_open(symbol, action, mt5_comment, current,
+                                              unique_lot, len(tickets), methods_str,
+                                              sl, tp_final, canal))
+    log.info(msg.log_multi_pos_open(action, symbol, current, len(tickets), methods_str))
     return True
 
 

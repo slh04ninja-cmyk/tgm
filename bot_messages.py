@@ -258,3 +258,94 @@ def alert_daily_limit(total: float, limite: float, nb_positions: int, nb_annules
 # =============================================================
 def log_merge_done(action: str, symbol: str) -> str:
     return f">>> | MERGE terminé | {action} {symbol}"
+
+
+# =============================================================
+# 9. MULTI-POSITIONS (A/B Testing — P1 à P4b)
+# =============================================================
+
+# --- Ouverture multi-positions ---
+def log_multi_pos_open(action: str, symbol: str, price: float, count: int, methods: str) -> str:
+    return f"Multi-pos {action} {symbol} @{price} × {count} positions | {methods}"
+
+
+def alert_multi_pos_open(symbol: str, action: str, mt5_comment: str, price: float,
+                          lot: float, count: int, methods: str, sl: float, tp: float, canal: str) -> str:
+    return (
+        f"🟢 {symbol} | {action} | {mt5_comment}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"MARKET: {price:.2f} | Lot: {lot} × {count}\n"
+        f"{methods}\n"
+        f"SL: {sl} | TP: {tp}\n"
+        f"Canal: {canal}"
+    )
+
+
+# --- SL plafonné ---
+def log_sl_cap(signal_sl: float, capped: float, distance: float, max_sl: float) -> str:
+    return f"[SL CAP] SL plafonné: {signal_sl} → {capped} (distance {distance:.2f}$ > {max_sl}$)"
+
+
+# --- P1 : TP Fixe ---
+def log_p1_be(ticket: int, sl: float, tp: float) -> str:
+    return f"[P1] TP-Fixe BE #{ticket} SL={sl} TP={tp}"
+
+
+def alert_p1_be(ticket: int, sl: float, tp: float) -> str:
+    return (
+        f"🔒 P1 TP-Fixe | #{ticket}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"BE → SL={sl} TP={tp}"
+    )
+
+
+# --- P2 : BE Escaladé ---
+def log_p2_be_scale(ticket: int, level: int, sl: float, profit: float) -> str:
+    return f"[P2] BE-Scale L{level} #{ticket} SL={sl} (profit={profit:.2f}$)"
+
+
+def alert_p2_be_scale(ticket: int, level: int, sl: float) -> str:
+    return (
+        f"🔒 P2 BE-Scale L{level} | #{ticket}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"SL → {sl}"
+    )
+
+
+# --- P3 : Trailing Stop ---
+def log_p3_trail(ticket: int, sl: float) -> str:
+    return f"[P3] Trailing #{ticket} SL={sl}"
+
+
+def alert_p3_trail(ticket: int, sl: float) -> str:
+    return (
+        f"📈 P3 Trailing | #{ticket}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"SL → {sl}"
+    )
+
+
+# --- P4a : Partial Quick ---
+def log_p4a_close(ticket: int, profit: float) -> str:
+    return f"[P4a] Quick close #{ticket} profit={profit:.2f}$"
+
+
+def alert_p4a_close(ticket: int, profit: float) -> str:
+    return (
+        f"✅ P4a Quick | #{ticket}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"P&L={profit:+.2f}$"
+    )
+
+
+# --- P4b : Partial Trail ---
+def log_p4b_trail(ticket: int, sl: float) -> str:
+    return f"[P4b] Partial trail #{ticket} SL={sl}"
+
+
+def alert_p4b_trail(ticket: int, sl: float) -> str:
+    return (
+        f"📈 P4b Partial Trail | #{ticket}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"SL → {sl}"
+    )
