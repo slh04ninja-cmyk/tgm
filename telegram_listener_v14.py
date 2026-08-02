@@ -611,7 +611,7 @@ class NewsManager:
                 current_day = get_trading_day_start().day
                 # ★ Re-fetch forcé quand le jour de trading change
                 if last_day is not None and current_day != last_day:
-                    log.info("[NEWS] Nouveau jour de trading → re-fetch des news")
+                    _log_mgmt("[NEWS] Nouveau jour de trading → re-fetch des news")
                     self._force_log = True
                     await asyncio.to_thread(self._fetch_news)
                     last_fetch = now
@@ -684,7 +684,7 @@ class NewsManager:
                         else:
                             formatted = raw_date
                         country = n.get('country', '?')
-                        log.info(f"NEWS: {n.get('title', '?')} @ {formatted} ({country})")
+                        _log_mgmt(f"NEWS: {n.get('title', '?')} @ {formatted} ({country})")
         except Exception as e:
             log.error(msg.log_news_fetch_error(str(e)))
 
@@ -724,17 +724,17 @@ class NewsManager:
 
         if should_close:
             if not self._blocked:
-                log.info(msg.log_news_closing_positions(active_title, active_diff))
+                _log_mgmt(msg.log_news_closing_positions(active_title, active_diff))
                 if self.manager:
                     self._close_all()
             self._blocked = True
         elif should_block:
             if not self._blocked:
-                log.info(msg.log_news_blocking_signals(active_title, active_diff))
+                _log_mgmt(msg.log_news_blocking_signals(active_title, active_diff))
             self._blocked = True
         else:
             if self._blocked:
-                log.info(msg.log_news_resumed(active_title or "Fenêtre news"))
+                _log_mgmt(msg.log_news_resumed(active_title or "Fenêtre news"))
             self._blocked = False
 
     def _close_all(self):
@@ -967,7 +967,7 @@ class MT5Bridge:
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 updated += 1
                 log.debug(f"SL modifié #{pos.ticket} (canal CH{channel_num}) → {new_sl}")
-        log.info(f"<<<<< INFO >>>>> SL MOVE canal {channel_num} → {new_sl} sur {updated} positions")
+        _log_mgmt(f"<<<<< INFO >>>>> SL MOVE canal {channel_num} → {new_sl} sur {updated} positions")
 
 
     def close_all(self, symbol: str | None = None, channel_num: int | None = None):
@@ -1222,8 +1222,8 @@ class TradeManager:
             entry["_be_market_entry"] = entry_price
             entry["_target_gain"] = target_gain
             entry["_be_activated"] = True
-            log.info(msg.log_be_combined(mt5_comment, 1, be_price))
-            send_alert_sync(msg.alert_be_activated(action, signal['symbol'], 1, be_price, target_gain, mt5_comment, 0))
+            _log_mgmt(msg.log_be_combined(mt5_comment, 1, be_price))
+            _alert_mgmt(msg.alert_be_activated(action, signal['symbol'], 1, be_price, target_gain, mt5_comment, 0))
 
     # =============================================================
     # GESTION PAR RÔLE (5 méthodes A/B testing)
@@ -1455,11 +1455,11 @@ class TradeManager:
                     idx = entry["tickets"].index(t) + 1
                     total = len(entry["tickets"])
                     if LOG_TRADE_MANAGEMENT:
-                        log.info(msg.log_close_combined(mt5_comment, label, idx, total, t['ticket'], pnl))
-                        log.info(msg.log_daily_pnl_final(daily_pnl_now))
+                        _log_mgmt(msg.log_close_combined(mt5_comment, label, idx, total, t['ticket'], pnl))
+                        _log_mgmt(msg.log_daily_pnl_final(daily_pnl_now))
 
                     if ALERT_TRADE_MANAGEMENT:
-                        send_alert_sync(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, mt5_comment))
+                        _alert_mgmt(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, mt5_comment))
 
             active_tickets = []
             for t in entry.get("tickets", []):
@@ -1611,7 +1611,7 @@ def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float
         capped = round(entry_price - max_sl_usd, 2)
     else:
         capped = round(entry_price + max_sl_usd, 2)
-    log.info(msg.log_sl_cap(signal_sl, capped, distance, max_sl_usd))
+    _log_mgmt(msg.log_sl_cap(signal_sl, capped, distance, max_sl_usd))
     return capped
 
 
@@ -1644,6 +1644,17 @@ PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "3.0"))
 LOG_TRADE_MANAGEMENT = os.getenv("LOG_TRADE_MANAGEMENT", "true").lower() == "true"
 ALERT_TRADE_MANAGEMENT = os.getenv("ALERT_TRADE_MANAGEMENT", "true").lower() == "true"
 ALERT_DAILY_PERFORMANCE = os.getenv("ALERT_DAILY_PERFORMANCE", "true").lower() == "true"
+
+def _log_mgmt(msg_text: str):
+    """Log uniquement si LOG_TRADE_MANAGEMENT=true"""
+    if LOG_TRADE_MANAGEMENT:
+        log.info(msg_text)
+
+def _alert_mgmt(msg_text: str):
+    """Alerte Telegram uniquement si ALERT_TRADE_MANAGEMENT=true"""
+    if ALERT_TRADE_MANAGEMENT:
+        send_alert_sync(msg_text)
+
 BE_SCALE_LEVELS = [
     {"trigger": 5.0,  "sl_offset": 0.0},   # +5$ → SL à entry
     {"trigger": 10.0, "sl_offset": 3.0},   # +10$ → SL à entry + 3$
@@ -1722,11 +1733,11 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
     # Alerte Telegram
     methods_str = " | ".join(methods_desc)
     mt5_comment = f"CH{ch_num}-{prefix}"
-    send_alert_sync(msg.alert_multi_pos_open(symbol, action, mt5_comment, current,
+    _alert_mgmt(msg.alert_multi_pos_open(symbol, action, mt5_comment, current,
                                               unique_lot, len(tickets), methods_str,
                                               sl, tp_final, canal))
     if LOG_TRADE_MANAGEMENT:
-        log.info(msg.log_multi_pos_open(action, symbol, current, len(tickets), methods_str))
+        _log_mgmt(msg.log_multi_pos_open(action, symbol, current, len(tickets), methods_str))
     return True
 
 
@@ -1755,7 +1766,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             generated_tp = round(entry_for_tp - tp_fixed_points, 2)
         all_tps = [generated_tp]
         signal["tps"] = all_tps
-        log.info(f"Signal sans TP → TP généré: {generated_tp} (entry={entry_for_tp} ± {TP_FIXED_GAIN_USD}$)")
+        _log_mgmt(f"Signal sans TP → TP généré: {generated_tp} (entry={entry_for_tp} ± {TP_FIXED_GAIN_USD}$)")
 
     if action == "SELL":
         all_tps = sorted(all_tps, reverse=True)
@@ -1953,7 +1964,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         signal["zone_mid"] = entry_price
         signal["zone_low"] = entry_price
         signal["zone_high"] = entry_price
-        log.info(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP={tp}")
+        _log_mgmt(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP={tp}")
 
     canal = signal.get("source_channel", "Inconnu")
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
@@ -2017,7 +2028,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         if is_unfavorable:
             log.info(f"Quick Alert annulée — prix défavorable | "
                      f"prix={current} entry={entry_price} écart>défavorable de {QA_PRICE_TOLERANCE}")
-            send_alert_sync(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
+            _alert_mgmt(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
             return
 
     # ★ GARDE : entry_price requis pour les filtres suivants
@@ -2073,7 +2084,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         else:
             # Prix entre entry et SL (favorable) — pas dans tolérance
             mt5_comment_qa = f"CH{ch_num}-AL1"
-    log.info(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
+    _log_mgmt(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
     log.debug(f"Quick Alert MARKET {action} {symbol} @{current} SL={sl}, TP={default_tp}")
 
     # ★ SL plafonné
@@ -2140,7 +2151,7 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                             close_reason = "TP"
                         break
         ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-        send_alert_sync(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
+        _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
         # QA actif -> mettre a jour SL et TP avec ceux du signal complet
         # ★ SL plafonné aussi lors de la fusion
@@ -2157,14 +2168,14 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
         entry["signal"]          = full_signal
         entry["_is_quick_alert"] = False
         ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-        send_alert_sync(msg.alert_fusion(full_signal['action'], ch_num_fusion, qa_ticket, real_sl, tp_final))
+        _alert_mgmt(msg.alert_fusion(full_signal['action'], ch_num_fusion, qa_ticket, real_sl, tp_final))
 
     # Nettoyer quick_alerts
     if key in quick_alerts and qa in quick_alerts[key]:
         quick_alerts[key].remove(qa)
         if not quick_alerts[key]:
             del quick_alerts[key]
-    log.info(msg.log_merge_done(full_signal['action'], full_signal['symbol']))
+    _log_mgmt(msg.log_merge_done(full_signal['action'], full_signal['symbol']))
 
 
 # =============================================================
@@ -2495,7 +2506,7 @@ async def main():
                             f"Conf={tfm_result['confidence']} "
                             f"({tfm_result['reason']})"
                         )
-                        send_alert_sync(msg.alert_timesfm_rejected(
+                        _alert_mgmt(msg.alert_timesfm_rejected(
                             sig_dict['action'], sig_dict['symbol'],
                             tfm_result['predicted_direction'],
                             tfm_result['predicted_move_pips'],
@@ -2557,7 +2568,7 @@ async def main():
                                     entry_qa["_is_quick_alert"] = False
                                 updated_qa = True
                                 log.info(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
-                                send_alert_sync(msg.alert_fusion_oot(action, ch_num, ticket, real_sl, tp_final_fusion))
+                                _alert_mgmt(msg.alert_fusion_oot(action, ch_num, ticket, real_sl, tp_final_fusion))
                                 break
                             else:
                                 # QA déjà fermé → ignorer le signal complet
