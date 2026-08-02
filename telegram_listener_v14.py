@@ -1196,6 +1196,12 @@ class TradeManager:
             )
             send_alert_sync(report)
             log.info(report)
+
+            # ★ Générer et envoyer le PDF
+            pdf_path = _generate_daily_report_pdf(report_data, self._daily_pnl, today)
+            if pdf_path:
+                _send_telegram_document(pdf_path, f"📊 Rapport {today}")
+
         else:
             log.info(msg.log_daily_limit_header())
             log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
@@ -1810,6 +1816,108 @@ def _alert_mgmt(msg_text: str):
     """Alerte Telegram uniquement si ALERT_TRADE_MANAGEMENT=true"""
     if ALERT_TRADE_MANAGEMENT:
         send_alert_sync(msg_text)
+
+
+def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: str) -> str:
+    """Génère un PDF du rapport quotidien et retourne le chemin du fichier."""
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        log.warning("fpdf2 non installé — PDF non généré")
+        return ""
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Titre
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 12, f"Performance du {date_str}", ln=True, align="C")
+    pdf.ln(5)
+
+    # Résumé
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Resume Global", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    trades = report_data['trades']
+    wins = report_data['wins']
+    losses = report_data['losses']
+    winrate = report_data['winrate']
+    pdf.cell(0, 6, f"P&L realise : {daily_pnl:+.2f}$", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Trades : {trades} | Wins : {wins} | Losses : {losses}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Winrate : {winrate:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+
+    # Par methode
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Performance par methode", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(40, 6, "Methode", border=1)
+    pdf.cell(20, 6, "Trades", border=1, align="C")
+    pdf.cell(20, 6, "Winrate", border=1, align="C")
+    pdf.cell(25, 6, "P&L", border=1, align="C")
+    pdf.cell(25, 6, "P&L moy", border=1, align="C")
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 9)
+    for m in report_data['methods']:
+        avg = m['pnl'] / m['trades'] if m['trades'] > 0 else 0
+        wr = m['wins'] / m['trades'] * 100 if m['trades'] > 0 else 0
+        pdf.cell(40, 6, m['name'], border=1)
+        pdf.cell(20, 6, str(m['trades']), border=1, align="C")
+        pdf.cell(20, 6, f"{wr:.1f}%", border=1, align="C")
+        pdf.cell(25, 6, f"{m['pnl']:+.2f}$", border=1, align="C")
+        pdf.cell(25, 6, f"{avg:+.2f}$", border=1, align="C")
+        pdf.ln()
+    pdf.ln(5)
+
+    # Par canal
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Performance par canal", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(25, 6, "Canal", border=1)
+    pdf.cell(20, 6, "Trades", border=1, align="C")
+    pdf.cell(20, 6, "Winrate", border=1, align="C")
+    pdf.cell(25, 6, "P&L", border=1, align="C")
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 9)
+    for c in sorted(report_data['channels'], key=lambda x: x['pnl'], reverse=True):
+        wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
+        pdf.cell(25, 6, f"CH{c['ch_num']}", border=1)
+        pdf.cell(20, 6, str(c['trades']), border=1, align="C")
+        pdf.cell(20, 6, f"{wr:.1f}%", border=1, align="C")
+        pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
+        pdf.ln()
+    pdf.ln(5)
+
+    # Clotures
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Clotures", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"TP : {report_data['tp_count']} trades | {report_data['tp_pnl']:+.2f}$", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"SL : {report_data['sl_count']} trades | {report_data['sl_pnl']:+.2f}$", new_x="LMARGIN", new_y="NEXT")
+
+    filepath = f"daily_report_{date_str}.pdf"
+    pdf.output(filepath)
+    log.info(f"PDF rapport généré: {filepath}")
+    return filepath
+
+
+def _send_telegram_document(filepath: str, caption: str):
+    """Envoie un fichier document à Telegram via l'alert client."""
+    if not TG_ALERT_CHANNEL or not _alert_client or not _main_loop:
+        return
+    try:
+        from telethon import types
+        coro = _alert_client.send_file(
+            TG_ALERT_CHANNEL,
+            file=filepath,
+            caption=caption,
+        )
+        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
+        future.result(timeout=30)
+        log.info(f"PDF envoyé à Telegram: {filepath}")
+    except Exception as e:
+        log.warning(f"Erreur envoi PDF Telegram: {type(e).__name__}: {e}")
 
 BE_SCALE_LEVELS = [
     {"trigger": 5.0,  "sl_offset": 0.0},   # +5$ → SL à entry
