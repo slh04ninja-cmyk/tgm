@@ -2121,7 +2121,8 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
     else:
         # QA actif -> mettre a jour SL et TP avec ceux du signal complet
         # ★ SL plafonné aussi lors de la fusion
-        real_sl = _cap_sl(full_signal["action"], entry_price if entry_price else qa.get("entry_price", 0), real_sl, MAX_SL_USD)
+        qa_entry_price = qa.get("entry_price", 0)
+        real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
         log.info(f"Fusion: mise a jour SL/TP du QA #{qa_ticket} SL={real_sl} TP={tp_final}")
         bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[FUSION-SL-TP]")
         for t in entry["tickets"]:
