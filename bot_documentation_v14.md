@@ -2,218 +2,131 @@
 
 ## Vue d'ensemble
 
-La v14 introduit le système de **multi-positions A/B Testing** et le **SL plafonné**.
-Le bot ouvre désormais 5 positions simultanées par signal pour comparer 5 méthodes de gestion des trades.
+La v14 introduit :
+- **Multi-positions A/B Testing** (5 positions par signal)
+- **SL plafonné** (MAX_SL_USD)
+- **Rapport quotidien** (texte + PDF)
+- **Fermeture automatique** à TRADING_END_HOUR
+- **Contrôle des logs** (3 variables booléennes)
+- **Parser amélioré** (fallback, double zone, BUY NOW zones)
 
 ---
 
 ## 1. Multi-Positions (A/B Testing)
 
-### Principe
+Pour chaque signal (ZN, PU, AL-MP), le bot ouvre **5 positions MARKET** au même prix, même lot (0.01), et les gère différemment.
 
-Pour chaque signal reçu (ZN, PU ou AL-MP), le bot ouvre **5 positions MARKET** au même prix d'entrée, avec le même lot (0.01), et les gère différemment.
+| Position | Rôle | TP | Gestion |
+|---|---|---|---|
+| P1 | tp_fixe | TP du signal | BE classique (PNL_TRIGGER_USD → BE_USD) |
+| P2 | be_scale | +20$ | BE escaladé (+5$→entry, +10$→+3$, +15$→+7$) |
+| P3 | trailing | ∞ | Trailing TRAILING_STOP_USD$ |
+| P4a | partial_quick | +5$ | Fermeture à +5$ |
+| P4b | partial_trail | ∞ | Trailing PARTIAL_TRAIL_USD$ |
 
-### Les 5 méthodes
-
-#### P1 — TP Fixe (méthode actuelle)
-- **TP** : celui fourni par le signal
-- **BE** : quand profit ≥ `PNL_TRIGGER_USD` (défaut 7$)
-- **SL** : déplacé à entry ± `BE_USD` (défaut 3$) côté défavorable
-- **TP** : modifié à entry ± `TP_FIXED_GAIN_USD` (défaut 10$)
-
-#### P2 — BE Escaladé
-- **TP** : entry ± 20$
-- **SL progressif** selon le profit :
-
-| Profit | SL déplacé à |
-|---|---|
-| +5$ | entry (BE neutre) |
-| +10$ | entry + 3$ |
-| +15$ | entry + 7$ |
-
-#### P3 — Trailing Stop
-- **TP** : aucun (TP lointain dans MT5)
-- **SL** : trailing de `TRAILING_STOP_USD`$ (défaut 5$) qui suit le prix
-- Le SL ne se déplace que dans la direction favorable
-
-#### P4a — Partial Quick
-- **TP** : entry ± 5$
-- **Comportement** : fermeture automatique dès +5$ de profit
-
-#### P4b — Partial Trail
-- **TP** : aucun (TP lointain dans MT5)
-- **SL** : trailing de `PARTIAL_TRAIL_USD`$ (défaut 3$) qui suit le prix
-
-### Identification dans MT5
-
-Le champ `comment` de chaque position contient la méthode :
-```
-CH1-ZN1-P1     → P1 TP Fixe
-CH1-ZN1-P2     → P2 BE Escaladé
-CH1-ZN1-P3     → P3 Trailing
-CH1-ZN1-P4a    → P4a Partial Quick
-CH1-ZN1-P4b    → P4b Partial Trail
-```
-
-### Types de signaux
-
-| Type | Description | 5 positions ? |
-|---|---|---|
-| ZN1 | Prix dans la zone | ✅ |
-| ZN2 | Prix entre zone et SL | ✅ |
-| PU1 | Prix unique (entre entry et SL) | ✅ |
-| PU2 | Prix unique (dans tolérance) | ✅ |
-| AL1 | Quick alert prix favorable | ✅ |
-| AL2 | Quick alert prix en tolérance | ✅ |
-| MP | Quick alert marché (pas de prix) | ✅ |
+Comment MT5 : `CH1-ZN1-P1`, `CH1-ZN1-P2`, `CH1-ZN1-P3`, `CH1-ZN1-P4a`, `CH1-ZN1-P4b`
 
 ---
 
-## 2. SL Plafonné (MAX_SL_USD)
+## 2. SL Plafonné
 
-### Principe
-
-Le SL est plafonné à une distance maximale en dollars depuis l'entrée.
-Pour XAUUSD 0.01 lot : **1$ de prix = 1$ de P&L**.
-
-### Variable
+Le SL est capé à MAX_SL_USD$ de l'entrée. Appliqué dans 4 endroits : ZN, PU, AL-MP, fusion.
 
 ```
+BUY @ 4000, signal SL = 3960 (40$)  → SL capé à 3985 (15$)
+BUY @ 4000, signal SL = 3990 (10$)  → SL gardé à 3990
+```
+
+---
+
+## 3. Rapport quotidien
+
+À TRADING_END_HOUR, le bot envoie :
+1. **Message Telegram** : résumé texte
+2. **Fichier PDF** : tableaux détaillés avec noms des canaux
+
+Contenu :
+- Résumé global (P&L, trades, winrate)
+- Par méthode (P1-P4b)
+- Par canal (CH1, CH2... avec nom dans le PDF)
+- Clôtures (TP/SL)
+
+---
+
+## 4. Fermeture automatique
+
+Le bot ferme toutes les positions à TRADING_END_HOUR. Le flag `_end_of_day_done` évite les fermetures répétées. Reset automatique au nouveau jour.
+
+---
+
+## 5. Contrôle des logs
+
+```bash
+LOG_TRADE_MANAGEMENT=true    # Logs P1-P4b en console
+ALERT_TRADE_MANAGEMENT=true  # Alertes Telegram P1-P4b
+ALERT_DAILY_PERFORMANCE=true # Rapport quotidien
+```
+
+Quand `LOG_TRADE_MANAGEMENT=false`, seuls les messages 1x/jour restent (connexion, news, reset, daily limit, shutdown).
+
+---
+
+## 6. Parser V14
+
+- **Fallback XAUUSD** : signaux sans symbole → XAUUSD par défaut
+- **Double zone** : annulation si plusieurs paires de nombres sur la même ligne
+- **BUY NOW zones** : `BUY NOW 4030-4025` → zone [4025, 4030]
+- **@ dans TPs** : `TP1 @ 4076` n'est plus pris comme entrée
+- **Décimaux** : `4074.00` préservé (pas 407400)
+
+---
+
+## 7. Variables .env
+
+```bash
+# Multi-positions
 MAX_SL_USD=15.0
-```
+TRAILING_STOP_USD=5.0
+PARTIAL_TRAIL_USD=3.0
 
-### Comportement
+# Logs & Alertes
+LOG_TRADE_MANAGEMENT=true
+ALERT_TRADE_MANAGEMENT=true
+ALERT_DAILY_PERFORMANCE=true
 
-```
-BUY @ 4000, signal SL = 3960 (distance 40$)
-MAX_SL_USD = 15$
-→ SL capé à 3985 (distance 15$)
-
-BUY @ 4000, signal SL = 3990 (distance 10$)
-MAX_SL_USD = 15$
-→ SL gardé à 3990 (distance 10$ < 15$)
-```
-
-### Où le SL est capé
-
-1. Ouverture ZN (zone)
-2. Ouverture PU (prix unique)
-3. Ouverture AL-MP (quick alert)
-4. Fusion QA → signal complet
-
----
-
-## 3. Variables .env (v14)
-
-### Nouvelles variables
-
-```bash
-# SL plafonné
-MAX_SL_USD=15.0             # Distance SL max en $
-
-# Trailing
-TRAILING_STOP_USD=5.0       # Trailing pour P3
-PARTIAL_TRAIL_USD=3.0       # Trailing pour P4b
-```
-
-### Variables existantes (inchangées)
-
-```bash
-# TP Fixe (P1)
-TP_FIXED_GAIN_USD=10.0      # Gain cible
-PNL_TRIGGER_USD=7.0         # Seuil BE
-BE_USD=3                    # Marge sécurité SL
-
-# Quick Alert
-QUICK_ALERT_SL_OFFSET=10.0  # Offset SL par défaut
-RR_RATIO_DEFAULT=1.5        # Ratio risk/reward
+# Existant
+TP_FIXED_GAIN_USD=10.0
+PNL_TRIGGER_USD=7.0
+BE_USD=3
+TRADING_START_HOUR=2
+TRADING_END_HOUR=20
 ```
 
 ---
 
-## 4. Parser V14 — Améliorations
-
-### 4.1 Fallback XAUUSD
-
-Si aucun symbole (GOLD, XAUUSD, XAU...) n'est détecté dans le signal, le parser utilise XAUUSD par défaut.
-
-**Avant** : `SELL ENTRY 4082` → échec (pas de symbole)
-**Après** : `SELL ENTRY 4082` → XAUUSD SELL @4082
-
-### 4.2 Double zone annulée
-
-Si le texte contient plusieurs paires de nombres sur la même ligne (hors TPs/SL), le signal est annulé comme ambigu.
-
-**Exemple** : `Gold 4088 to 4063 ... SELL 4087 4088` → annulé (2 zones détectées)
-
-### 4.3 Zone après BUY/SELL
-
-Les signaux `BUY NOW 4030-4025` ou `BUY 4030 4025` sont maintenant détectés comme zone [4025, 4030].
-
-`NOW` est ignoré entre BUY/SELL et les prix.
-
-### 4.4 @ dans les TPs ignoré
-
-`TP1 @ 4076` n'est plus matché comme entrée. Le `@` après TP/TARGET est ignoré.
-
-### 4.5 Décimaux préservés
-
-`4074.00` reste `4074.00` (pas transformé en `407400`). Les points parasites (`4025...`) sont supprimés sans casser les décimaux.
-
----
-
-## 5. Fusion QA → Signal Complet
-
-### Flux
-
-```
-Phase 1: GOLD BUY NOW
-  → Entry = 4000 (prix marché)
-  → SL = 3990 (10$)
-  → TP = 4015 (15$)
-  → 5 positions ouvertes (P1-P4b)
-
-Phase 2: GOLD BUY 4000 SL 3090 TP 4030 (signal complet)
-  → SL = 3090 → distance 910$ >> MAX_SL_USD(15$)
-  → SL capé à 3985
-  → TP = 4030
-  → 5 positions mises à jour
-```
-
-Le SL est plafonné **aussi** lors de la fusion.
-
----
-
-## 6. Fichiers du projet
+## 8. Fichiers
 
 | Fichier | Description |
 |---|---|
-| `telegram_listener_v14.py` | Cœur du bot (multi-positions + SL capé) |
-| `signal_parser_v14.py` | Parser amélioré |
-| `signal_parser.py` | Copie de v14 (importé par le bot) |
-| `bot_messages.py` | Templates de logs/alertes |
-| `13.env` | Configuration |
-| `CONTEXT.md` | Historique des modifications |
+| telegram_listener_v14.py | Cœur du bot |
+| signal_parser_v14.py | Parser signaux |
+| bot_messages_v14.py | Logs, alertes, rapport |
+| 13.env | Configuration |
 
 ---
 
-## 7. Architecture
+## 9. Flux complet
 
 ```
-Telegram (52 canaux)
+Signal Telegram
     ↓
-Signal Parser V14
-    ↓ (fallback XAUUSD, double zone check, SL capé)
-MT5 Bridge
+Parser V14 (fallback XAUUSD, double zone check)
     ↓
-5 positions MARKET simultanées
-    ├─ P1: TP Fixe (BE classique)
-    ├─ P2: BE Escaladé
-    ├─ P3: Trailing Stop
-    ├─ P4a: Partial Quick (+5$)
-    └─ P4b: Partial Trail (3$)
+SL capé (MAX_SL_USD)
     ↓
-TradeManager._check_all()
-    ↓ (dispatch par rôle)
-Gestion individuelle par méthode
+5 positions MARKET (P1-P4b)
+    ↓
+TradeManager._check_all() → dispatch par rôle
+    ↓
+Fin de journée → fermeture + rapport texte + PDF → Telegram
 ```
