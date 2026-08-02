@@ -1005,6 +1005,7 @@ class TradeManager:
 
         self._daily_pnl = self._recover_daily_pnl()
         self._daily_pnl_day = get_trading_day_start().day
+        self._end_of_day_done = False  # flag pour éviter les fermetures répétées
 
 
 
@@ -1057,6 +1058,7 @@ class TradeManager:
             if start.day != self._daily_pnl_day:
                 self._daily_pnl = 0.0
                 self._daily_pnl_day = start.day
+                self._end_of_day_done = False  # reset pour le nouveau jour
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
             total = self._daily_pnl + self._get_floating_pnl()
@@ -1068,6 +1070,7 @@ class TradeManager:
             if start.day != self._daily_pnl_day:
                 self._daily_pnl = 0.0
                 self._daily_pnl_day = start.day
+                self._end_of_day_done = False  # reset pour le nouveau jour
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
@@ -1146,6 +1149,46 @@ class TradeManager:
 
         if ALERT_DAILY_PERFORMANCE:
             send_alert_sync(msg.alert_daily_limit(total, DAILY_PROFIT_LIMIT, nb_positions, cancelled))
+
+    def _shutdown_end_of_day(self):
+        """Ferme toutes les positions à TRADING_END_HOUR pour calculer la performance du jour."""
+        self._end_of_day_done = True
+        log.info(f"<<<<< INFO >>>>> FIN DE JOURNÉE {TRADING_END_HOUR}H UTC — Fermeture de toutes les positions")
+
+        positions = mt5.positions_get()
+        nb_positions = len([p for p in positions if p.magic == MAGIC_NUMBER]) if positions else 0
+
+        if nb_positions == 0:
+            log.info("<<<<< INFO >>>>> Aucune position à fermer")
+            if ALERT_DAILY_PERFORMANCE:
+                send_alert_sync(
+                    f"🕐 FIN DE JOURNÉE {TRADING_END_HOUR}H UTC\n"
+                    f"━━━━━━━━━━━━━━━━━━\n"
+                    f"Aucune position ouverte"
+                )
+            return
+
+        cancelled = self._cancel_all_pending_orders()
+        total_pnl = self._close_all_positions()
+
+        with self._daily_lock:
+            self._update_daily_pnl(total_pnl)
+            total = self._daily_pnl + self._get_floating_pnl()
+
+        self._clear_all_entries()
+
+        log.info(msg.log_daily_limit_header())
+        log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
+
+        if ALERT_DAILY_PERFORMANCE:
+            send_alert_sync(
+                f"🕐 FIN DE JOURNÉE {TRADING_END_HOUR}H UTC\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Positions fermées : {nb_positions}\n"
+                f"Ordres annulés : {cancelled}\n"
+                f"P&L réalisé : {self._daily_pnl:.2f}$\n"
+                f"P&L total : {total:.2f}$"
+            )
 
     # =============================================================
     # GESTION DU BE (avec whitelist)
@@ -1416,6 +1459,12 @@ class TradeManager:
     def _check_all(self):
         now = datetime.now(timezone.utc)
         self._refresh_pos_cache()
+
+        # ★ FIN DE JOURNÉE : fermer toutes les positions à TRADING_END_HOUR
+        if TIME_FILTER_ENABLED and not self._end_of_day_done:
+            if now.hour >= TRADING_END_HOUR:
+                self._shutdown_end_of_day()
+                return
 
         if not self._check_daily_pnl_limit():
             if self.active:
