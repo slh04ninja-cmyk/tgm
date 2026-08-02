@@ -1454,10 +1454,12 @@ class TradeManager:
 
                     idx = entry["tickets"].index(t) + 1
                     total = len(entry["tickets"])
-                    log.info(msg.log_close_combined(mt5_comment, label, idx, total, t['ticket'], pnl))
-                    log.info(msg.log_daily_pnl_final(daily_pnl_now))
+                    if LOG_TRADE_MANAGEMENT:
+                        log.info(msg.log_close_combined(mt5_comment, label, idx, total, t['ticket'], pnl))
+                        log.info(msg.log_daily_pnl_final(daily_pnl_now))
 
-                    send_alert_sync(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, mt5_comment))
+                    if ALERT_TRADE_MANAGEMENT:
+                        send_alert_sync(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, mt5_comment))
 
             active_tickets = []
             for t in entry.get("tickets", []):
@@ -1723,7 +1725,8 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
     send_alert_sync(msg.alert_multi_pos_open(symbol, action, mt5_comment, current,
                                               unique_lot, len(tickets), methods_str,
                                               sl, tp_final, canal))
-    log.info(msg.log_multi_pos_open(action, symbol, current, len(tickets), methods_str))
+    if LOG_TRADE_MANAGEMENT:
+        log.info(msg.log_multi_pos_open(action, symbol, current, len(tickets), methods_str))
     return True
 
 
