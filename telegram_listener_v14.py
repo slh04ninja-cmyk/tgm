@@ -1265,8 +1265,7 @@ class TradeManager:
         total_signals = 0
         # Max drawdown tracking
         running_pnl = 0.0
-        peak_pnl = 0.0
-        max_drawdown = 0.0
+        min_pnl = 0.0  # creux le plus bas du P&L cumulé (Max Drawdown vs 0$)
 
         # Map ch_num → canal name
         ch_name_map = {}
@@ -1318,11 +1317,8 @@ class TradeManager:
 
                 # Max drawdown
                 running_pnl += pnl
-                if running_pnl > peak_pnl:
-                    peak_pnl = running_pnl
-                dd = peak_pnl - running_pnl
-                if dd > max_drawdown:
-                    max_drawdown = dd
+                if running_pnl < min_pnl:
+                    min_pnl = running_pnl
 
                 # Stats par méthode
                 if role not in methods:
@@ -1395,7 +1391,7 @@ class TradeManager:
             'wins': total_wins,
             'losses': total_losses,
             'winrate': winrate,
-            'max_drawdown': max_drawdown,
+            'max_drawdown': min_pnl,  # P&L cumulé le plus bas (vs 0$)
             'methods': methods_list,
             'channels': channels_list,
             'tp_count': tp_count,
