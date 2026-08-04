@@ -1293,15 +1293,24 @@ class TradeManager:
         winrate = total_wins / total_trades * 100 if total_trades > 0 else 0
 
         # Formater les méthodes pour bot_messages
+        # ★ P4a + P4b combinés en une seule ligne P4 (50/50 split)
         method_names = {
             'tp_fixe': 'P1 TP Fixe',
             'be_scale': 'P2 BE Scale',
             'trailing': 'P3 Trailing',
-            'partial_quick': 'P4a Quick',
-            'partial_trail': 'P4b Trail',
+            'partial': 'P4 Partial (50/50)',
         }
+        # Fusionner partial_quick + partial_trail → partial
+        if 'partial_quick' in methods or 'partial_trail' in methods:
+            pq = methods.get('partial_quick', {'trades': 0, 'wins': 0, 'pnl': 0.0})
+            pt = methods.get('partial_trail', {'trades': 0, 'wins': 0, 'pnl': 0.0})
+            methods['partial'] = {
+                'trades': pq['trades'] + pt['trades'],
+                'wins': pq['wins'] + pt['wins'],
+                'pnl': pq['pnl'] + pt['pnl'],
+            }
         methods_list = []
-        for role in ['tp_fixe', 'be_scale', 'trailing', 'partial_quick', 'partial_trail']:
+        for role in ['tp_fixe', 'be_scale', 'trailing', 'partial']:
             if role in methods:
                 m = methods[role]
                 m['name'] = method_names.get(role, role)
@@ -1830,11 +1839,11 @@ P4A_QUICK_TARGET = float(os.getenv("P4A_QUICK_TARGET", "3.0"))
 
 # Méthodes de gestion
 METHODS = [
-    {"suffix": "P1",  "role": "tp_fixe",      "tp_offset": None, "desc": "TP Fixe"},
+    {"suffix": "P1",  "role": "tp_fixe",      "tp_offset": None,          "desc": "TP Fixe"},
     {"suffix": "P2",  "role": "be_scale",      "tp_offset": P2_TP_OFFSET, "desc": "BE Escaladé"},
     {"suffix": "P3",  "role": "trailing",      "tp_offset": 0,             "desc": "Trailing"},
-    {"suffix": "P4a", "role": "partial_quick", "tp_offset": P4A_TP_OFFSET, "desc": "Partial Quick"},
-    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,             "desc": "Partial Trail"},
+    {"suffix": "P4a", "role": "partial_quick", "tp_offset": P4A_TP_OFFSET, "desc": "Partial Quick",  "split_lot": True},
+    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,             "desc": "Partial Trail", "split_lot": True},
 ]
 
 # === ALERTES & LOGS ===
@@ -1978,6 +1987,8 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
         suffix = method["suffix"]
         role = method["role"]
         tp_offset = method["tp_offset"]
+        # P4a/P4b partagent un seul lot (50/50)
+        lot = unique_lot / 2 if method.get("split_lot") else unique_lot
         mt5_comment = f"CH{ch_num}-{prefix}-{suffix}"
 
         # Calculer le TP pour cette méthode
@@ -1997,16 +2008,16 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
             else:
                 tp_method = round(current - tp_offset, 2)
 
-        log.debug(f"  → {suffix} {action} @{current} lot={unique_lot} TP={tp_method} SL={sl}")
+        log.debug(f"  → {suffix} {action} @{current} lot={lot} TP={tp_method} SL={sl}")
         try:
-            t = bridge.place_market_order(signal, unique_lot, tp=tp_method, sl=sl, comment=mt5_comment)
+            t = bridge.place_market_order(signal, lot, tp=tp_method, sl=sl, comment=mt5_comment)
         except Exception as e:
             log.error(f"  MARKET EXCEPTION {suffix}: {e}")
             t = None
 
         if t:
             tickets.append({
-                "ticket": t, "lot": unique_lot, "role": role,
+                "ticket": t, "lot": lot, "role": role,
                 "entry_price": current, "tp_final": tp_method,
                 "sl_step": 0, "trail_active": False,
                 "be_active": False, "be_sl": 0,
