@@ -995,6 +995,9 @@ class TradeManager:
         self._task = None
         self._quick_alerts_ref = quick_alerts_ref if quick_alerts_ref is not None else {}
         self._daily_limit_reached = self._load_daily_limit_state()  # FIX: persisté sur disque
+        # ★ Max Drawdown tracking en temps réel
+        self._running_pnl = 0.0    # P&L cumulé du jour
+        self._min_pnl = 0.0        # creux le plus bas vs 0$
 
         # ★★★ WHITELIST des rôles autorisés à déclencher le BE ★★★
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
@@ -1088,8 +1091,14 @@ class TradeManager:
                 self._end_of_day_done = False  # reset pour le nouveau jour
                 self._daily_limit_reached = False  # FIX: reset du flag quotidien
                 self._save_daily_limit_state()
+                self._running_pnl = 0.0
+                self._min_pnl = 0.0
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
+            # ★ Max Drawdown tracking en temps réel
+            self._running_pnl += pnl
+            if self._running_pnl < self._min_pnl:
+                self._min_pnl = self._running_pnl
             total = self._daily_pnl + self._get_floating_pnl()
         log.debug(msg.log_daily_pnl_periodic(self._daily_pnl, self._get_floating_pnl(), total))
 
@@ -1102,6 +1111,8 @@ class TradeManager:
                 self._end_of_day_done = False  # reset pour le nouveau jour
                 self._daily_limit_reached = False  # FIX: reset du flag quotidien
                 self._save_daily_limit_state()
+                self._running_pnl = 0.0
+                self._min_pnl = 0.0
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
@@ -1391,7 +1402,7 @@ class TradeManager:
             'wins': total_wins,
             'losses': total_losses,
             'winrate': winrate,
-            'max_drawdown': min_pnl,  # P&L cumulé le plus bas (vs 0$)
+            'max_drawdown': self._min_pnl,  # P&L cumulé le plus bas (vs 0$) — mis à jour en temps réel
             'methods': methods_list,
             'channels': channels_list,
             'tp_count': tp_count,
