@@ -990,7 +990,7 @@ class TradeManager:
         self.bridge = bridge
         self.active = []
         self._lock = threading.Lock()
-        self._daily_lock = threading.Lock()
+        self._daily_lock = threading.RLock()  # FIX: RLock pour éviter deadlock quand _shutdown_for_daily_limit appelle _update_daily_pnl
         self._stop = False
         self._task = None
         self._quick_alerts_ref = quick_alerts_ref if quick_alerts_ref is not None else {}
