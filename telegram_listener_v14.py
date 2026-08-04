@@ -1475,7 +1475,7 @@ class TradeManager:
 
     def _manage_partial_quick(self, t: dict, pos, entry: dict, action: str):
         """P4a: Partial Quick — fermeture rapide à +5$"""
-        if pos.profit >= 5.0:
+        if pos.profit >= P4A_QUICK_TARGET:
             if self.bridge.close_position(t["ticket"], "P4a-QUICK"):
                 t["be_active"] = True  # marquer comme géré
                 if LOG_TRADE_MANAGEMENT:
@@ -1804,17 +1804,30 @@ def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float
 # P4b: Partial Trail — pas de TP fixe, trailing 3$
 # =============================================================
 
+TRAILING_STOP_USD = float(os.getenv("TRAILING_STOP_USD", "5.0"))
+PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "3.0"))
+
+# === P2 BE ESCALADÉ — paliers configurables ===
+P2_TP_OFFSET = float(os.getenv("P2_TP_OFFSET", "20.0"))
+P2_TRIGGER_1 = float(os.getenv("P2_TRIGGER_1", "5.0"))
+P2_SL_OFFSET_1 = float(os.getenv("P2_SL_OFFSET_1", "0.0"))
+P2_TRIGGER_2 = float(os.getenv("P2_TRIGGER_2", "10.0"))
+P2_SL_OFFSET_2 = float(os.getenv("P2_SL_OFFSET_2", "3.0"))
+P2_TRIGGER_3 = float(os.getenv("P2_TRIGGER_3", "15.0"))
+P2_SL_OFFSET_3 = float(os.getenv("P2_SL_OFFSET_3", "7.0"))
+
+# === P4a PARTIAL QUICK — target configurable ===
+P4A_TP_OFFSET = float(os.getenv("P4A_TP_OFFSET", "5.0"))
+P4A_QUICK_TARGET = float(os.getenv("P4A_QUICK_TARGET", "5.0"))
+
 # Méthodes de gestion
 METHODS = [
     {"suffix": "P1",  "role": "tp_fixe",      "tp_offset": None, "desc": "TP Fixe"},
-    {"suffix": "P2",  "role": "be_scale",      "tp_offset": 20.0, "desc": "BE Escaladé"},
-    {"suffix": "P3",  "role": "trailing",      "tp_offset": 0,    "desc": "Trailing 5$"},
-    {"suffix": "P4a", "role": "partial_quick", "tp_offset": 5.0,  "desc": "Partial +5$"},
-    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,    "desc": "Partial Trail 3$"},
+    {"suffix": "P2",  "role": "be_scale",      "tp_offset": P2_TP_OFFSET, "desc": "BE Escaladé"},
+    {"suffix": "P3",  "role": "trailing",      "tp_offset": 0,             "desc": "Trailing"},
+    {"suffix": "P4a", "role": "partial_quick", "tp_offset": P4A_TP_OFFSET, "desc": "Partial Quick"},
+    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,             "desc": "Partial Trail"},
 ]
-
-TRAILING_STOP_USD = float(os.getenv("TRAILING_STOP_USD", "5.0"))
-PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "3.0"))
 
 # === ALERTES & LOGS ===
 LOG_TRADE_MANAGEMENT = os.getenv("LOG_TRADE_MANAGEMENT", "true").lower() == "true"
@@ -1937,9 +1950,9 @@ def _send_telegram_document(filepath: str, caption: str):
         log.warning(f"Erreur envoi PDF Telegram: {type(e).__name__}: {e}")
 
 BE_SCALE_LEVELS = [
-    {"trigger": 5.0,  "sl_offset": 0.0},   # +5$ → SL à entry
-    {"trigger": 10.0, "sl_offset": 3.0},   # +10$ → SL à entry + 3$
-    {"trigger": 15.0, "sl_offset": 7.0},   # +15$ → SL à entry + 7$
+    {"trigger": P2_TRIGGER_1,  "sl_offset": P2_SL_OFFSET_1},
+    {"trigger": P2_TRIGGER_2,  "sl_offset": P2_SL_OFFSET_2},
+    {"trigger": P2_TRIGGER_3,  "sl_offset": P2_SL_OFFSET_3},
 ]
 
 
