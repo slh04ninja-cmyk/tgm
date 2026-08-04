@@ -143,17 +143,17 @@ MAX_SPREAD_POINTS = float(os.getenv("MAX_SPREAD_POINTS", "50"))
 
 # === GAIN FIXE ===
 TP_FIXED_ENABLED = os.getenv("TP_FIXED_ENABLED", "true").lower() == "true"
-TP_FIXED_GAIN_USD = float(os.getenv("TP_FIXED_GAIN_USD", "15.0"))
+TP_FIXED_GAIN_USD = float(os.getenv("TP_FIXED_GAIN_USD", "8.0"))
 # ★ BE_USD : quand le BE se déclenche, le SL n'est plus posé exactement à l'entrée
 # mais avec une petite marge de sécurité (BE_USD $) du côté DÉFAVORABLE — évite un
 # stop sur un simple retour à l'entrée (bruit/spread). Ex: BUY @4000, BE_USD=3 → SL=3997.
-BE_USD = float(os.getenv("BE_USD", "3"))
-PNL_TRIGGER_USD = float(os.getenv("PNL_TRIGGER_USD", "8.0"))
+BE_USD = float(os.getenv("BE_USD", "3"))  # pas de changement, déjà 3
+PNL_TRIGGER_USD = float(os.getenv("PNL_TRIGGER_USD", "5.0"))
 
 # === SL PLAFONNÉ ===
 # Distance SL maximale en $ (pour XAUUSD 0.01 lot, 1$ prix = 1$ P&L)
 # Si le SL du signal dépasse cette distance, il est capé.
-MAX_SL_USD = float(os.getenv("MAX_SL_USD", "15.0"))
+MAX_SL_USD = float(os.getenv("MAX_SL_USD", "10.0"))
 
 # === FILTRES ===
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
@@ -1804,21 +1804,21 @@ def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float
 # P4b: Partial Trail — pas de TP fixe, trailing 3$
 # =============================================================
 
-TRAILING_STOP_USD = float(os.getenv("TRAILING_STOP_USD", "5.0"))
-PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "3.0"))
+TRAILING_STOP_USD = float(os.getenv("TRAILING_STOP_USD", "7.0"))
+PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "5.0"))
 
 # === P2 BE ESCALADÉ — paliers configurables ===
-P2_TP_OFFSET = float(os.getenv("P2_TP_OFFSET", "20.0"))
-P2_TRIGGER_1 = float(os.getenv("P2_TRIGGER_1", "5.0"))
+P2_TP_OFFSET = float(os.getenv("P2_TP_OFFSET", "15.0"))
+P2_TRIGGER_1 = float(os.getenv("P2_TRIGGER_1", "4.0"))
 P2_SL_OFFSET_1 = float(os.getenv("P2_SL_OFFSET_1", "0.0"))
-P2_TRIGGER_2 = float(os.getenv("P2_TRIGGER_2", "10.0"))
-P2_SL_OFFSET_2 = float(os.getenv("P2_SL_OFFSET_2", "3.0"))
-P2_TRIGGER_3 = float(os.getenv("P2_TRIGGER_3", "15.0"))
-P2_SL_OFFSET_3 = float(os.getenv("P2_SL_OFFSET_3", "7.0"))
+P2_TRIGGER_2 = float(os.getenv("P2_TRIGGER_2", "8.0"))
+P2_SL_OFFSET_2 = float(os.getenv("P2_SL_OFFSET_2", "2.0"))
+P2_TRIGGER_3 = float(os.getenv("P2_TRIGGER_3", "12.0"))
+P2_SL_OFFSET_3 = float(os.getenv("P2_SL_OFFSET_3", "5.0"))
 
 # === P4a PARTIAL QUICK — target configurable ===
-P4A_TP_OFFSET = float(os.getenv("P4A_TP_OFFSET", "5.0"))
-P4A_QUICK_TARGET = float(os.getenv("P4A_QUICK_TARGET", "5.0"))
+P4A_TP_OFFSET = float(os.getenv("P4A_TP_OFFSET", "5.0"))  # pas de changement
+P4A_QUICK_TARGET = float(os.getenv("P4A_QUICK_TARGET", "3.0"))
 
 # Méthodes de gestion
 METHODS = [
