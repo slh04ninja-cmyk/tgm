@@ -398,17 +398,33 @@ def report_daily_closes(tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: flo
     )
 
 
+def report_daily_by_signal_type(signal_types: list) -> str:
+    """signal_types = [{type, channels, trades, wins, losses, pnl}]"""
+    lines = ["📊 PAR TYPE DE SIGNAL", "━━━━━━━━━━━━━━━━━━"]
+    lines.append(f"{'Signal':<8} | {'Canaux':>6} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
+    lines.append("-" * 55)
+    for st in signal_types:
+        wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
+        lines.append(f"{st['type']:<8} | {st['channels']:>6} | {st['pnl']:>+7.2f}$ | {st['trades']:>6} | {st['wins']:>4} | {st['losses']:>5} | {wr:>6.1f}%")
+    return '\n'.join(lines)
+
+
 def report_daily_full(date: str, pnl_realise: float, trades: int, wins: int, losses: int,
                       winrate: float, methods: list, channels: list,
                       tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float,
-                      total_signals: int = 0, max_drawdown: float = 0.0) -> str:
+                      total_signals: int = 0, max_drawdown: float = 0.0,
+                      signal_types: list = None) -> str:
     parts = [
         report_daily_summary(date, pnl_realise, trades, wins, losses, winrate, total_signals, max_drawdown),
         "",
         report_daily_by_method(methods),
+    ]
+    if signal_types:
+        parts.extend(["", report_daily_by_signal_type(signal_types)])
+    parts.extend([
         "",
         report_daily_by_channel(channels),
         "",
         report_daily_closes(tp_count, tp_pnl, sl_count, sl_pnl),
-    ]
+    ])
     return '\n'.join(parts)

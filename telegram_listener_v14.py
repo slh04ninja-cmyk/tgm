@@ -1249,6 +1249,7 @@ class TradeManager:
                 sl_pnl=report_data['sl_pnl'],
                 total_signals=report_data['total_signals'],
                 max_drawdown=report_data['max_drawdown'],
+                signal_types=report_data.get('signal_types'),
             )
             send_alert_sync(report)
             log.info(report)
@@ -1267,6 +1268,7 @@ class TradeManager:
         # Structure: {method: {trades, wins, losses, pnl}}, {ch_num: {trades, wins, losses, pnl}}
         methods = {}
         channels = {}
+        signal_types = {}  # stats par type de signal (PU1, PU2, ZN1, ZN2, MP, AL)
         tp_count = tp_pnl = sl_count = sl_pnl = 0
         total_trades = total_wins = total_losses = 0
         total_signals = 0
@@ -1297,6 +1299,14 @@ class TradeManager:
             ch_name = ch_name_map.get(ch_num, source_channel)
             if ch_name.startswith('@'):
                 ch_name = ch_name[1:]
+
+            # Extraire le type de signal (PU1, PU2, ZN1, ZN2, MP, AL)
+            sig_type = None
+            parts = mt5_comment.split('-')
+            if len(parts) >= 2:
+                sig_type = parts[1]  # CH{num}-{signal_type}-{method}
+            # Canaux uniques par type de signal
+            sig_type_channels = set()
 
             for t in entry.get('tickets', []):
                 pnl = t.get('_last_pnl', 0.0)
@@ -1347,6 +1357,19 @@ class TradeManager:
                 else:
                     channels[ch_num]['losses'] += 1
 
+                # Stats par type de signal
+                if sig_type:
+                    if sig_type not in signal_types:
+                        signal_types[sig_type] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'channels': set()}
+                    signal_types[sig_type]['trades'] += 1
+                    signal_types[sig_type]['pnl'] += pnl
+                    if ch_num:
+                        signal_types[sig_type]['channels'].add(ch_num)
+                    if pnl > 0:
+                        signal_types[sig_type]['wins'] += 1
+                    else:
+                        signal_types[sig_type]['losses'] += 1
+
                 # Stats TP/SL
                 if close_reason == 'TP':
                     tp_count += 1
@@ -1392,6 +1415,20 @@ class TradeManager:
         # Formater les canaux
         channels_list = [{'ch_num': ch, **stats} for ch, stats in channels.items()]
 
+        # Formater les types de signal
+        signal_types_list = []
+        for st in ['ZN1', 'ZN2', 'PU1', 'PU2', 'MP', 'AL']:
+            if st in signal_types:
+                d = signal_types[st]
+                signal_types_list.append({
+                    'type': st,
+                    'channels': len(d['channels']),
+                    'trades': d['trades'],
+                    'wins': d['wins'],
+                    'losses': d['losses'],
+                    'pnl': d['pnl'],
+                })
+
         return {
             'total_signals': total_signals,
             'trades': total_trades,
@@ -1401,6 +1438,7 @@ class TradeManager:
             'max_drawdown': self._min_pnl,  # P&L cumulé le plus bas (vs 0$) — mis à jour en temps réel
             'methods': methods_list,
             'channels': channels_list,
+            'signal_types': signal_types_list,
             'tp_count': tp_count,
             'tp_pnl': tp_pnl,
             'sl_count': sl_count,
@@ -2014,6 +2052,32 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
         pdf.ln()
     pdf.ln(5)
+
+    # ── Par type de signal ──
+    if report_data.get('signal_types'):
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Performance par type de signal", new_x="LMARGIN", new_y="NEXT")
+        sig_headers = [("Signal", 18, "L"), ("Canaux", 18, "C"), ("P&L", 25, "C"),
+                       ("Trades", 18, "C"), ("Win", 15, "C"), ("Loss", 15, "C"),
+                       ("Winrate", 18, "C")]
+        pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 9))
+        pdf.set_font("Helvetica", "B", 9)
+        for txt, w, align in sig_headers:
+            pdf.cell(w, 6, txt, border=1, align=align)
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 9)
+        for st in report_data['signal_types']:
+            wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
+            pdf.cell(18, 6, st['type'], border=1)
+            pdf.cell(18, 6, str(st['channels']), border=1, align="C")
+            pdf.cell(25, 6, f"{st['pnl']:+.2f}$", border=1, align="C")
+            pdf.cell(18, 6, str(st['trades']), border=1, align="C")
+            pdf.cell(15, 6, str(st['wins']), border=1, align="C")
+            pdf.cell(15, 6, str(st['losses']), border=1, align="C")
+            pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
+            pdf.ln()
+        pdf._current_table_headers = None
+        pdf.ln(5)
 
     # ── Par canal ──
     pdf.set_font("Helvetica", "B", 12)
