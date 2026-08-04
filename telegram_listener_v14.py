@@ -1842,8 +1842,8 @@ METHODS = [
     {"suffix": "P1",  "role": "tp_fixe",      "tp_offset": None,          "desc": "TP Fixe"},
     {"suffix": "P2",  "role": "be_scale",      "tp_offset": P2_TP_OFFSET, "desc": "BE Escaladé"},
     {"suffix": "P3",  "role": "trailing",      "tp_offset": 0,             "desc": "Trailing"},
-    {"suffix": "P4a", "role": "partial_quick", "tp_offset": P4A_TP_OFFSET, "desc": "Partial Quick",  "split_lot": True},
-    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,             "desc": "Partial Trail", "split_lot": True},
+    {"suffix": "P4a", "role": "partial_quick", "tp_offset": P4A_TP_OFFSET, "desc": "Partial Quick"},
+    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,             "desc": "Partial Trail"},
 ]
 
 # === ALERTES & LOGS ===
@@ -1987,8 +1987,6 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
         suffix = method["suffix"]
         role = method["role"]
         tp_offset = method["tp_offset"]
-        # P4a/P4b partagent un seul lot (50/50)
-        lot = unique_lot / 2 if method.get("split_lot") else unique_lot
         mt5_comment = f"CH{ch_num}-{prefix}-{suffix}"
 
         # Calculer le TP pour cette méthode
@@ -2008,16 +2006,16 @@ def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
             else:
                 tp_method = round(current - tp_offset, 2)
 
-        log.debug(f"  → {suffix} {action} @{current} lot={lot} TP={tp_method} SL={sl}")
+        log.debug(f"  → {suffix} {action} @{current} lot={unique_lot} TP={tp_method} SL={sl}")
         try:
-            t = bridge.place_market_order(signal, lot, tp=tp_method, sl=sl, comment=mt5_comment)
+            t = bridge.place_market_order(signal, unique_lot, tp=tp_method, sl=sl, comment=mt5_comment)
         except Exception as e:
             log.error(f"  MARKET EXCEPTION {suffix}: {e}")
             t = None
 
         if t:
             tickets.append({
-                "ticket": t, "lot": lot, "role": role,
+                "ticket": t, "lot": unique_lot, "role": role,
                 "entry_price": current, "tp_final": tp_method,
                 "sl_step": 0, "trail_active": False,
                 "be_active": False, "be_sl": 0,
