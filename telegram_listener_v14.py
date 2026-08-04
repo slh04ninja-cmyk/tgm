@@ -159,7 +159,7 @@ MAX_SL_USD = float(os.getenv("MAX_SL_USD", "10.0"))
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
 TRADING_START_HOUR = int(os.getenv("TRADING_START_HOUR", "3"))
 TRADING_END_HOUR = int(os.getenv("TRADING_END_HOUR", "20"))
-DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "30.0"))
+DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "200.0"))
 
 # =============================================================
 # CONFIG TIMESFM
@@ -994,7 +994,7 @@ class TradeManager:
         self._stop = False
         self._task = None
         self._quick_alerts_ref = quick_alerts_ref if quick_alerts_ref is not None else {}
-        self._daily_limit_reached = False  # FIX: flag pour bloquer le trading sans perdre les données du rapport
+        self._daily_limit_reached = self._load_daily_limit_state()  # FIX: persisté sur disque
 
         # ★★★ WHITELIST des rôles autorisés à déclencher le BE ★★★
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
@@ -1012,6 +1012,32 @@ class TradeManager:
 
     # =============================================================
     # P&L QUOTIDIEN (avec verrouillage)
+    # ★ FIX : persistance du flag _daily_limit_reached sur disque
+    _LIMIT_STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_daily_limit_state.json")
+
+    def _load_daily_limit_state(self) -> bool:
+        """Charge le flag _daily_limit_reached depuis le disque."""
+        try:
+            if os.path.exists(self._LIMIT_STATE_FILE):
+                with open(self._LIMIT_STATE_FILE, 'r') as f:
+                    data = json.load(f)
+                # Vérifier que c'est le même jour de trading
+                start = get_trading_day_start()
+                if data.get('day') == start.day:
+                    return data.get('limit_reached', False)
+        except Exception:
+            pass
+        return False
+
+    def _save_daily_limit_state(self):
+        """Sauvegarde le flag _daily_limit_reached sur disque."""
+        try:
+            start = get_trading_day_start()
+            with open(self._LIMIT_STATE_FILE, 'w') as f:
+                json.dump({'day': start.day, 'limit_reached': self._daily_limit_reached}, f)
+        except Exception:
+            pass
+
     # =============================================================
     def _recover_daily_pnl(self) -> float:
         start = get_trading_day_start()
@@ -1061,6 +1087,7 @@ class TradeManager:
                 self._daily_pnl_day = start.day
                 self._end_of_day_done = False  # reset pour le nouveau jour
                 self._daily_limit_reached = False  # FIX: reset du flag quotidien
+                self._save_daily_limit_state()
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
             total = self._daily_pnl + self._get_floating_pnl()
@@ -1074,6 +1101,7 @@ class TradeManager:
                 self._daily_pnl_day = start.day
                 self._end_of_day_done = False  # reset pour le nouveau jour
                 self._daily_limit_reached = False  # FIX: reset du flag quotidien
+                self._save_daily_limit_state()
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
@@ -1140,15 +1168,19 @@ class TradeManager:
 
         cancelled = self._cancel_all_pending_orders()
         total_pnl = self._close_all_positions()
+        time.sleep(0.5)  # ★ FIX: attendre la propagation MT5 avant de lire le P&L
 
         with self._daily_lock:
             self._update_daily_pnl(total_pnl)
-            total = self._daily_pnl + self._get_floating_pnl()
+            # ★ FIX: après fermeture de toutes les positions, le floating = 0
+            # Ne pas appeler _get_floating_pnl() qui peut encore voir les positions fermées
+            total = self._daily_pnl
 
         # ★ FIX : ne PAS vider self.active ici — les données sont nécessaires
         # pour le rapport de fin de journée. Le flag _daily_limit_reached
         # bloque le traitement des nouveaux signaux.
         self._daily_limit_reached = True
+        self._save_daily_limit_state()
 
         log.info(msg.log_daily_limit_header())
         log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
@@ -2365,9 +2397,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             # Défavorable: prix > entry + tolerance
             is_unfavorable = current > entry_price + QA_PRICE_TOLERANCE
         else:  # SELL
-            # Favorable: prix <= entry (on vend plus cher que le marché actuel)
-            # Défavorable: prix > entry + tolerance (le prix monte contre le SELL)
-            is_unfavorable = current > entry_price + QA_PRICE_TOLERANCE
+            # Favorable: prix >= entry (on vend plus cher)
+            # Défavorable: prix < entry - tolerance (le prix descend trop contre le SELL)
+            is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
         if is_unfavorable:
             log.info(f"Quick Alert annulée — prix défavorable | "
                      f"prix={current} entry={entry_price} écart>défavorable de {QA_PRICE_TOLERANCE}")

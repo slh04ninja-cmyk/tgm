@@ -679,6 +679,9 @@ class SignalParser:
             log.debug(f"[PARSING] Action non trouvée dans : {normalized_text[:100]}")
             return None
 
+        # ★ FIX : extraire SL AVANT l'entrée pour éviter que le SL soit capturé comme entrée
+        sl = _extract_sl(normalized_text)
+
         zone_low, zone_high, is_single = _extract_entry_and_zone(normalized_text)
 
         if zone_low is None:
@@ -714,7 +717,7 @@ class SignalParser:
             return None
 
         tps = _extract_all_tps(normalized_text)
-        sl = _extract_sl(normalized_text)
+        # sl déjà extrait plus haut
         merge_price = _extract_merge_price(normalized_text)
 
         # ★ FIX : MORE SELL/BUY → convertir en zone si prix unique
