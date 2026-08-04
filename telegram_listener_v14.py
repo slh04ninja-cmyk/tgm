@@ -994,6 +994,7 @@ class TradeManager:
         self._stop = False
         self._task = None
         self._quick_alerts_ref = quick_alerts_ref if quick_alerts_ref is not None else {}
+        self._daily_limit_reached = False  # FIX: flag pour bloquer le trading sans perdre les données du rapport
 
         # ★★★ WHITELIST des rôles autorisés à déclencher le BE ★★★
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
@@ -1059,6 +1060,7 @@ class TradeManager:
                 self._daily_pnl = 0.0
                 self._daily_pnl_day = start.day
                 self._end_of_day_done = False  # reset pour le nouveau jour
+                self._daily_limit_reached = False  # FIX: reset du flag quotidien
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
             total = self._daily_pnl + self._get_floating_pnl()
@@ -1071,6 +1073,7 @@ class TradeManager:
                 self._daily_pnl = 0.0
                 self._daily_pnl_day = start.day
                 self._end_of_day_done = False  # reset pour le nouveau jour
+                self._daily_limit_reached = False  # FIX: reset du flag quotidien
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
@@ -1137,12 +1140,15 @@ class TradeManager:
 
         cancelled = self._cancel_all_pending_orders()
         total_pnl = self._close_all_positions()
-        
+
         with self._daily_lock:
             self._update_daily_pnl(total_pnl)
             total = self._daily_pnl + self._get_floating_pnl()
-        
-        self._clear_all_entries()
+
+        # ★ FIX : ne PAS vider self.active ici — les données sont nécessaires
+        # pour le rapport de fin de journée. Le flag _daily_limit_reached
+        # bloque le traitement des nouveaux signaux.
+        self._daily_limit_reached = True
 
         log.info(msg.log_daily_limit_header())
         log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
@@ -1593,10 +1599,12 @@ class TradeManager:
                 self._shutdown_end_of_day()
                 return
 
-        if not self._check_daily_pnl_limit():
-            if self.active:
+        if not self._check_daily_pnl_limit() or self._daily_limit_reached:
+            if self.active and not self._daily_limit_reached:
                 log.debug("[DAILY P&L] Limite atteinte ! Fermeture de toutes les positions et annulation des ordres.")
                 self._shutdown_for_daily_limit()
+            # Bloquer le traitement des positions (signaux déjà ignorés par le handler)
+            # mais laisser passer la vérification fin de journée ci-dessus
             if not self.active:
                 return
 
@@ -2780,7 +2788,7 @@ async def main():
                     log.debug(f"[{canal_name}] Signal ignoré - Filtre horaire : {reason}")
                     return
 
-                if not manager._check_daily_pnl_limit():
+                if not manager._check_daily_pnl_limit() or manager._daily_limit_reached:
                     log.debug(f"[{canal_name}] Signal ignoré - Limite de P&L quotidien atteinte ({DAILY_PROFIT_LIMIT}$)")
                     return
 
