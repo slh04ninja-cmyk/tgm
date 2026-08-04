@@ -1182,6 +1182,15 @@ class TradeManager:
         self._daily_limit_reached = True
         self._save_daily_limit_state()
 
+        # ★ FIX : marquer tous les tickets comme _reported pour éviter
+        # le double comptage P&L quand _check_all détecte les positions fermées
+        for entry in self.active:
+            for t in entry.get("tickets", []):
+                if not t.get("_reported"):
+                    t["_reported"] = True
+                    sym = entry.get("signal", {}).get("symbol", "")
+                    t["_last_pnl"] = self._get_last_pnl(t["ticket"], sym)
+
         log.info(msg.log_daily_limit_header())
         log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
 
@@ -1287,6 +1296,7 @@ class TradeManager:
                 pnl = t.get('_last_pnl', 0.0)
                 reported = t.get('_reported', False)
                 role = t.get('role', 'unknown')
+                symbol = entry.get('signal', {}).get('symbol', '')
 
                 if not reported:
                     # Position encore ouverte — récupérer le P&L actuel
@@ -1295,9 +1305,16 @@ class TradeManager:
                         pnl = pos.profit
                         close_reason = 'OPEN'
                     else:
-                        continue
+                        # ★ FIX: position déjà fermée mais pas encore traitée par _check_all
+                        # (race condition après _close_all_positions). Récupérer le P&L depuis
+                        # l'historique MT5 au lieu de skipper le ticket.
+                        pnl = self._get_last_pnl(t['ticket'], symbol)
+                        if pnl == 0.0 and '_last_pnl' not in t:
+                            # Vraiment aucun historique — ignorer
+                            continue
+                        close_reason = self._get_close_reason(t['ticket'], symbol)
                 else:
-                    close_reason = self._get_close_reason(t['ticket'], entry.get('signal', {}).get('symbol', ''))
+                    close_reason = self._get_close_reason(t['ticket'], symbol)
 
                 # Max drawdown
                 running_pnl += pnl
@@ -1359,6 +1376,7 @@ class TradeManager:
             methods['partial'] = {
                 'trades': pq['trades'] + pt['trades'],
                 'wins': pq['wins'] + pt['wins'],
+                'losses': pq.get('losses', 0) + pt.get('losses', 0),
                 'pnl': pq['pnl'] + pt['pnl'],
             }
         methods_list = []
@@ -1924,13 +1942,31 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         log.warning("fpdf2 non installé — PDF non généré")
         return ""
 
-    pdf = FPDF()
+    class DailyReportPDF(FPDF):
+        """PDF avec répétition automatique des headers de table sur page break."""
+        _current_table_headers = None
+
+        def header(self):
+            if self.page_no() > 1 and self._current_table_headers:
+                headers, font_info = self._current_table_headers
+                self.set_font(*font_info)
+                for txt, w, align in headers:
+                    self.cell(w, 6, txt, border=1, align=align)
+                self.ln()
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Helvetica", "I", 8)
+            self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
+
+    pdf = DailyReportPDF()
+    pdf.alias_nb_pages()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=20)
 
     # Titre
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, f"Performance du {date_str}", ln=True, align="C")
+    pdf.cell(0, 12, f"Performance du {date_str}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(5)
 
     # Résumé
@@ -1949,16 +1985,13 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.cell(0, 6, f"Max Drawdown : {max_dd:.2f}$", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
 
-    # Par methode
+    # ── Par methode ──
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Performance par methode", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(35, 6, "Methode", border=1)
-    pdf.cell(25, 6, "P&L", border=1, align="C")
-    pdf.cell(18, 6, "Trades", border=1, align="C")
-    pdf.cell(15, 6, "Win", border=1, align="C")
-    pdf.cell(15, 6, "Loss", border=1, align="C")
-    pdf.cell(18, 6, "Winrate", border=1, align="C")
+    for txt, w, align in [("Methode", 35, "L"), ("P&L", 25, "C"), ("Trades", 18, "C"),
+                          ("Win", 15, "C"), ("Loss", 15, "C"), ("Winrate", 18, "C")]:
+        pdf.cell(w, 6, txt, border=1, align=align)
     pdf.ln()
     pdf.set_font("Helvetica", "", 9)
     for m in report_data['methods']:
@@ -1973,34 +2006,39 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         pdf.ln()
     pdf.ln(5)
 
-    # Par canal
+    # ── Par canal ──
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Performance par canal", new_x="LMARGIN", new_y="NEXT")
+    channel_headers = [("Canal", 18, "L"), ("Nom", 48, "L"), ("P&L", 25, "C"),
+                       ("Trades", 18, "C"), ("Win", 15, "C"), ("Loss", 15, "C"),
+                       ("Winrate", 18, "C")]
+    pdf._current_table_headers = (channel_headers, ("Helvetica", "B", 9))
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(18, 6, "Canal", border=1)
-    pdf.cell(48, 6, "Nom", border=1)
-    pdf.cell(25, 6, "P&L", border=1, align="C")
-    pdf.cell(18, 6, "Trades", border=1, align="C")
-    pdf.cell(15, 6, "Win", border=1, align="C")
-    pdf.cell(15, 6, "Loss", border=1, align="C")
-    pdf.cell(18, 6, "Winrate", border=1, align="C")
+    for txt, w, align in channel_headers:
+        pdf.cell(w, 6, txt, border=1, align=align)
     pdf.ln()
     pdf.set_font("Helvetica", "", 9)
-    for c in sorted(report_data['channels'], key=lambda x: x['pnl'], reverse=True):
-        wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
-        c_losses = c.get('losses', c['trades'] - c['wins'])
-        name = c.get('name', '')[:22]
-        pdf.cell(18, 6, f"CH{c['ch_num']}", border=1)
-        pdf.cell(48, 6, name, border=1)
-        pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
-        pdf.cell(18, 6, str(c['trades']), border=1, align="C")
-        pdf.cell(15, 6, str(c['wins']), border=1, align="C")
-        pdf.cell(15, 6, str(c_losses), border=1, align="C")
-        pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
-        pdf.ln()
+    channels_sorted = sorted(report_data['channels'], key=lambda x: x['pnl'], reverse=True)
+    if not channels_sorted:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 6, "Aucune activite sur les canaux", new_x="LMARGIN", new_y="NEXT")
+    else:
+        for c in channels_sorted:
+            wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
+            c_losses = c.get('losses', c['trades'] - c['wins'])
+            name = c.get('name', '')[:22]
+            pdf.cell(18, 6, f"CH{c['ch_num']}", border=1)
+            pdf.cell(48, 6, name, border=1)
+            pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
+            pdf.cell(18, 6, str(c['trades']), border=1, align="C")
+            pdf.cell(15, 6, str(c['wins']), border=1, align="C")
+            pdf.cell(15, 6, str(c_losses), border=1, align="C")
+            pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
+            pdf.ln()
+    pdf._current_table_headers = None
     pdf.ln(5)
 
-    # Clotures
+    # ── Clotures ──
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Clotures", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
