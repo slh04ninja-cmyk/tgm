@@ -1276,23 +1276,21 @@ class TradeManager:
         running_pnl = 0.0
         min_pnl = 0.0  # creux le plus bas du P&L cumulé (Max Drawdown vs 0$)
 
-        # Map ch_num → canal name (depuis .env + channels.txt)
+        # Map ch_num → canal name — priorité Channels.txt, fallback .env
         ch_name_map = {}
-        for _env_name, _val in _CHANNELS_LIST:
-            _num = int(_env_name.replace('TG_CHANNEL_', ''))
-            ch_name_map[_num] = _val
-        # ★ Compléter avec channels.txt (canaux découverts via TG_FOLDER)
         _channels_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Channels.txt')
         try:
             with open(_channels_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
                     if m:
-                        _num = int(m.group(1))
-                        if _num not in ch_name_map:
-                            ch_name_map[_num] = m.group(2).strip()
+                        ch_name_map[int(m.group(1))] = m.group(2).strip()
         except Exception:
             pass
+        for _env_name, _val in _CHANNELS_LIST:
+            _num = int(_env_name.replace('TG_CHANNEL_', ''))
+            if _num not in ch_name_map:
+                ch_name_map[_num] = _val
 
         for entry in list(self.active):
             total_signals += 1
