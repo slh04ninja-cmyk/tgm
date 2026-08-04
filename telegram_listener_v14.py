@@ -1199,6 +1199,8 @@ class TradeManager:
                 tp_pnl=report_data['tp_pnl'],
                 sl_count=report_data['sl_count'],
                 sl_pnl=report_data['sl_pnl'],
+                total_signals=report_data['total_signals'],
+                max_drawdown=report_data['max_drawdown'],
             )
             send_alert_sync(report)
             log.info(report)
@@ -1214,11 +1216,16 @@ class TradeManager:
 
     def _collect_daily_report_data(self) -> dict:
         """Collecte les données pour le rapport quotidien."""
-        # Structure: {method: {trades, wins, pnl}}, {ch_num: {trades, wins, pnl}}
+        # Structure: {method: {trades, wins, losses, pnl}}, {ch_num: {trades, wins, losses, pnl}}
         methods = {}
         channels = {}
         tp_count = tp_pnl = sl_count = sl_pnl = 0
         total_trades = total_wins = total_losses = 0
+        total_signals = 0
+        # Max drawdown tracking
+        running_pnl = 0.0
+        peak_pnl = 0.0
+        max_drawdown = 0.0
 
         # Map ch_num → canal name
         ch_name_map = {}
@@ -1227,6 +1234,7 @@ class TradeManager:
             ch_name_map[_num] = _val
 
         for entry in list(self.active):
+            total_signals += 1
             mt5_comment = entry.get('_mt5_comment', '')
             signal = entry.get('signal', {})
             source_channel = signal.get('source_channel', '')
@@ -1259,21 +1267,33 @@ class TradeManager:
                 else:
                     close_reason = self._get_close_reason(t['ticket'], entry.get('signal', {}).get('symbol', ''))
 
+                # Max drawdown
+                running_pnl += pnl
+                if running_pnl > peak_pnl:
+                    peak_pnl = running_pnl
+                dd = peak_pnl - running_pnl
+                if dd > max_drawdown:
+                    max_drawdown = dd
+
                 # Stats par méthode
                 if role not in methods:
-                    methods[role] = {'trades': 0, 'wins': 0, 'pnl': 0.0}
+                    methods[role] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0}
                 methods[role]['trades'] += 1
                 methods[role]['pnl'] += pnl
                 if pnl > 0:
                     methods[role]['wins'] += 1
+                else:
+                    methods[role]['losses'] += 1
 
                 # Stats par canal
                 if ch_num not in channels:
-                    channels[ch_num] = {'trades': 0, 'wins': 0, 'pnl': 0.0, 'name': ch_name}
+                    channels[ch_num] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'name': ch_name}
                 channels[ch_num]['trades'] += 1
                 channels[ch_num]['pnl'] += pnl
                 if pnl > 0:
                     channels[ch_num]['wins'] += 1
+                else:
+                    channels[ch_num]['losses'] += 1
 
                 # Stats TP/SL
                 if close_reason == 'TP':
@@ -1320,10 +1340,12 @@ class TradeManager:
         channels_list = [{'ch_num': ch, **stats} for ch, stats in channels.items()]
 
         return {
+            'total_signals': total_signals,
             'trades': total_trades,
             'wins': total_wins,
             'losses': total_losses,
             'winrate': winrate,
+            'max_drawdown': max_drawdown,
             'methods': methods_list,
             'channels': channels_list,
             'tp_count': tp_count,
@@ -1887,30 +1909,35 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     wins = report_data['wins']
     losses = report_data['losses']
     winrate = report_data['winrate']
+    total_signals = report_data.get('total_signals', 0)
+    max_dd = report_data.get('max_drawdown', 0.0)
     pdf.cell(0, 6, f"P&L realise : {daily_pnl:+.2f}$", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Trades : {trades} | Wins : {wins} | Losses : {losses}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Winrate : {winrate:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Total signaux : {total_signals} | Total trades : {trades}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Wins : {wins} | Losses : {losses} | Winrate : {winrate:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Max Drawdown : {max_dd:.2f}$", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
 
     # Par methode
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Performance par methode", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(40, 6, "Methode", border=1)
-    pdf.cell(20, 6, "Trades", border=1, align="C")
-    pdf.cell(20, 6, "Winrate", border=1, align="C")
+    pdf.cell(35, 6, "Methode", border=1)
     pdf.cell(25, 6, "P&L", border=1, align="C")
-    pdf.cell(25, 6, "P&L moy", border=1, align="C")
+    pdf.cell(18, 6, "Trades", border=1, align="C")
+    pdf.cell(15, 6, "Win", border=1, align="C")
+    pdf.cell(15, 6, "Loss", border=1, align="C")
+    pdf.cell(18, 6, "Winrate", border=1, align="C")
     pdf.ln()
     pdf.set_font("Helvetica", "", 9)
     for m in report_data['methods']:
-        avg = m['pnl'] / m['trades'] if m['trades'] > 0 else 0
         wr = m['wins'] / m['trades'] * 100 if m['trades'] > 0 else 0
-        pdf.cell(40, 6, m['name'], border=1)
-        pdf.cell(20, 6, str(m['trades']), border=1, align="C")
-        pdf.cell(20, 6, f"{wr:.1f}%", border=1, align="C")
+        m_losses = m.get('losses', m['trades'] - m['wins'])
+        pdf.cell(35, 6, m['name'], border=1)
         pdf.cell(25, 6, f"{m['pnl']:+.2f}$", border=1, align="C")
-        pdf.cell(25, 6, f"{avg:+.2f}$", border=1, align="C")
+        pdf.cell(18, 6, str(m['trades']), border=1, align="C")
+        pdf.cell(15, 6, str(m['wins']), border=1, align="C")
+        pdf.cell(15, 6, str(m_losses), border=1, align="C")
+        pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
         pdf.ln()
     pdf.ln(5)
 
@@ -1918,21 +1945,26 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "Performance par canal", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(25, 6, "Canal", border=1)
-    pdf.cell(55, 6, "Nom", border=1)
-    pdf.cell(20, 6, "Trades", border=1, align="C")
-    pdf.cell(20, 6, "Winrate", border=1, align="C")
+    pdf.cell(18, 6, "Canal", border=1)
+    pdf.cell(48, 6, "Nom", border=1)
     pdf.cell(25, 6, "P&L", border=1, align="C")
+    pdf.cell(18, 6, "Trades", border=1, align="C")
+    pdf.cell(15, 6, "Win", border=1, align="C")
+    pdf.cell(15, 6, "Loss", border=1, align="C")
+    pdf.cell(18, 6, "Winrate", border=1, align="C")
     pdf.ln()
     pdf.set_font("Helvetica", "", 9)
     for c in sorted(report_data['channels'], key=lambda x: x['pnl'], reverse=True):
         wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
-        name = c.get('name', '')[:25]  # max 25 chars
-        pdf.cell(25, 6, f"CH{c['ch_num']}", border=1)
-        pdf.cell(55, 6, name, border=1)
-        pdf.cell(20, 6, str(c['trades']), border=1, align="C")
-        pdf.cell(20, 6, f"{wr:.1f}%", border=1, align="C")
+        c_losses = c.get('losses', c['trades'] - c['wins'])
+        name = c.get('name', '')[:22]
+        pdf.cell(18, 6, f"CH{c['ch_num']}", border=1)
+        pdf.cell(48, 6, name, border=1)
         pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
+        pdf.cell(18, 6, str(c['trades']), border=1, align="C")
+        pdf.cell(15, 6, str(c['wins']), border=1, align="C")
+        pdf.cell(15, 6, str(c_losses), border=1, align="C")
+        pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
         pdf.ln()
     pdf.ln(5)
 

@@ -354,36 +354,38 @@ def alert_p4b_trail(ticket: int, sl: float) -> str:
 # =============================================================
 # 10. RAPPORT JOURNALIER
 # =============================================================
-def report_daily_summary(date: str, pnl_realise: float, trades: int, wins: int, losses: int, winrate: float) -> str:
+def report_daily_summary(date: str, pnl_realise: float, trades: int, wins: int, losses: int, winrate: float, total_signals: int = 0, max_drawdown: float = 0.0) -> str:
     return (
         f"📅 PERFORMANCE DU {date}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"P&L réalisé : {pnl_realise:+.2f}$\n"
-        f"Trades : {trades} | Wins : {wins} | Losses : {losses}\n"
-        f"Winrate : {winrate:.1f}%"
+        f"Total signaux : {total_signals} | Total trades : {trades}\n"
+        f"Wins : {wins} | Losses : {losses} | Winrate : {winrate:.1f}%\n"
+        f"Max Drawdown : {max_drawdown:.2f}$"
     )
 
 
 def report_daily_by_method(methods: list) -> str:
-    """methods = [{name, trades, wins, pnl}]"""
+    """methods = [{name, trades, wins, losses, pnl}]"""
     lines = ["📊 PAR MÉTHODE", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Méthode':<14} | {'Trades':>6} | {'Winrate':>7} | {'P&L':>8} | {'P&L moy':>8}")
-    lines.append("-" * 58)
+    lines.append(f"{'Méthode':<14} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
+    lines.append("-" * 55)
     for m in methods:
-        avg = m['pnl'] / m['trades'] if m['trades'] > 0 else 0
         wr = m['wins'] / m['trades'] * 100 if m['trades'] > 0 else 0
-        lines.append(f"{m['name']:<14} | {m['trades']:>6} | {wr:>6.1f}% | {m['pnl']:>+7.2f}$ | {avg:>+7.2f}$")
+        m_losses = m.get('losses', m['trades'] - m['wins'])
+        lines.append(f"{m['name']:<14} | {m['pnl']:>+7.2f}$ | {m['trades']:>6} | {m['wins']:>4} | {m_losses:>5} | {wr:>6.1f}%")
     return '\n'.join(lines)
 
 
 def report_daily_by_channel(channels: list) -> str:
-    """channels = [{ch_num, trades, wins, pnl}]"""
+    """channels = [{ch_num, trades, wins, losses, pnl, name}]"""
     lines = ["📊 PAR CANAL", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Canal':<10} | {'Trades':>6} | {'Winrate':>7} | {'P&L':>8}")
-    lines.append("-" * 42)
+    lines.append(f"{'Canal':<10} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
+    lines.append("-" * 55)
     for c in sorted(channels, key=lambda x: x['pnl'], reverse=True):
         wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
-        lines.append(f"{'CH' + str(c['ch_num']):<10} | {c['trades']:>6} | {wr:>6.1f}% | {c['pnl']:>+7.2f}$")
+        c_losses = c.get('losses', c['trades'] - c['wins'])
+        lines.append(f"{'CH' + str(c['ch_num']):<10} | {c['pnl']:>+7.2f}$ | {c['trades']:>6} | {c['wins']:>4} | {c_losses:>5} | {wr:>6.1f}%")
     return '\n'.join(lines)
 
 
@@ -398,9 +400,10 @@ def report_daily_closes(tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: flo
 
 def report_daily_full(date: str, pnl_realise: float, trades: int, wins: int, losses: int,
                       winrate: float, methods: list, channels: list,
-                      tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float) -> str:
+                      tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float,
+                      total_signals: int = 0, max_drawdown: float = 0.0) -> str:
     parts = [
-        report_daily_summary(date, pnl_realise, trades, wins, losses, winrate),
+        report_daily_summary(date, pnl_realise, trades, wins, losses, winrate, total_signals, max_drawdown),
         "",
         report_daily_by_method(methods),
         "",
