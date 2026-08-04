@@ -399,13 +399,15 @@ def report_daily_closes(tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: flo
 
 
 def report_daily_by_signal_type(signal_types: list) -> str:
-    """signal_types = [{type, channels, trades, wins, losses, pnl}]"""
+    """signal_types = [{type, channels, trades, wins, losses, pnl, avg_win, avg_loss}]"""
     lines = ["📊 PAR TYPE DE SIGNAL", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Signal':<8} | {'Canaux':>6} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
-    lines.append("-" * 55)
+    lines.append(f"{'Signal':<8} | {'Canaux':>6} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'WR':>4} | {'Gain':>7} | {'Perte':>7}")
+    lines.append("-" * 70)
     for st in signal_types:
         wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
-        lines.append(f"{st['type']:<8} | {st['channels']:>6} | {st['pnl']:>+7.2f}$ | {st['trades']:>6} | {st['wins']:>4} | {st['losses']:>5} | {wr:>6.1f}%")
+        avg_win = st.get('avg_win', 0)
+        avg_loss = st.get('avg_loss', 0)
+        lines.append(f"{st['type']:<8} | {st['channels']:>6} | {st['pnl']:>+7.2f}$ | {st['trades']:>6} | {st['wins']:>4} | {st['losses']:>5} | {wr:>3.0f}% | {avg_win:>+6.1f}$ | {avg_loss:>+6.1f}$")
     return '\n'.join(lines)
 
 

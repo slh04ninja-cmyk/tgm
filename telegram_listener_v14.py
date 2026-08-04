@@ -1360,15 +1360,17 @@ class TradeManager:
                 # Stats par type de signal
                 if sig_type:
                     if sig_type not in signal_types:
-                        signal_types[sig_type] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'channels': set()}
+                        signal_types[sig_type] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'win_pnl': 0.0, 'loss_pnl': 0.0, 'channels': set()}
                     signal_types[sig_type]['trades'] += 1
                     signal_types[sig_type]['pnl'] += pnl
                     if ch_num:
                         signal_types[sig_type]['channels'].add(ch_num)
                     if pnl > 0:
                         signal_types[sig_type]['wins'] += 1
+                        signal_types[sig_type]['win_pnl'] += pnl
                     else:
                         signal_types[sig_type]['losses'] += 1
+                        signal_types[sig_type]['loss_pnl'] += pnl
 
                 # Stats TP/SL
                 if close_reason == 'TP':
@@ -1420,6 +1422,8 @@ class TradeManager:
         for st in ['ZN1', 'ZN2', 'PU1', 'PU2', 'MP', 'AL']:
             if st in signal_types:
                 d = signal_types[st]
+                avg_win = d['win_pnl'] / d['wins'] if d['wins'] > 0 else 0
+                avg_loss = d['loss_pnl'] / d['losses'] if d['losses'] > 0 else 0
                 signal_types_list.append({
                     'type': st,
                     'channels': len(d['channels']),
@@ -1427,6 +1431,8 @@ class TradeManager:
                     'wins': d['wins'],
                     'losses': d['losses'],
                     'pnl': d['pnl'],
+                    'avg_win': avg_win,
+                    'avg_loss': avg_loss,
                 })
 
         return {
@@ -2057,24 +2063,26 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     if report_data.get('signal_types'):
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, "Performance par type de signal", new_x="LMARGIN", new_y="NEXT")
-        sig_headers = [("Signal", 18, "L"), ("Canaux", 18, "C"), ("P&L", 25, "C"),
-                       ("Trades", 18, "C"), ("Win", 15, "C"), ("Loss", 15, "C"),
-                       ("Winrate", 18, "C")]
-        pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 9))
-        pdf.set_font("Helvetica", "B", 9)
+        sig_headers = [("Signal", 18, "L"), ("Canaux", 16, "C"), ("P&L", 22, "C"),
+                       ("Trades", 14, "C"), ("Win", 12, "C"), ("Loss", 12, "C"),
+                       ("WR", 14, "C"), ("Gain", 18, "C"), ("Perte", 18, "C")]
+        pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 8))
+        pdf.set_font("Helvetica", "B", 8)
         for txt, w, align in sig_headers:
             pdf.cell(w, 6, txt, border=1, align=align)
         pdf.ln()
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font("Helvetica", "", 8)
         for st in report_data['signal_types']:
             wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
             pdf.cell(18, 6, st['type'], border=1)
-            pdf.cell(18, 6, str(st['channels']), border=1, align="C")
-            pdf.cell(25, 6, f"{st['pnl']:+.2f}$", border=1, align="C")
-            pdf.cell(18, 6, str(st['trades']), border=1, align="C")
-            pdf.cell(15, 6, str(st['wins']), border=1, align="C")
-            pdf.cell(15, 6, str(st['losses']), border=1, align="C")
-            pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
+            pdf.cell(16, 6, str(st['channels']), border=1, align="C")
+            pdf.cell(22, 6, f"{st['pnl']:+.2f}$", border=1, align="C")
+            pdf.cell(14, 6, str(st['trades']), border=1, align="C")
+            pdf.cell(12, 6, str(st['wins']), border=1, align="C")
+            pdf.cell(12, 6, str(st['losses']), border=1, align="C")
+            pdf.cell(14, 6, f"{wr:.0f}%", border=1, align="C")
+            pdf.cell(18, 6, f"{st.get('avg_win', 0):+.1f}$", border=1, align="C")
+            pdf.cell(18, 6, f"{st.get('avg_loss', 0):+.1f}$", border=1, align="C")
             pdf.ln()
         pdf._current_table_headers = None
         pdf.ln(5)
