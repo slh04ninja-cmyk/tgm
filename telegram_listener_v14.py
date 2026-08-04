@@ -1282,7 +1282,7 @@ class TradeManager:
             _num = int(_env_name.replace('TG_CHANNEL_', ''))
             ch_name_map[_num] = _val
         # ★ Compléter avec channels.txt (canaux découverts via TG_FOLDER)
-        _channels_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'channels.txt')
+        _channels_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Channels.txt')
         try:
             with open(_channels_file, 'r', encoding='utf-8') as f:
                 for line in f:
