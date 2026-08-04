@@ -1095,10 +1095,6 @@ class TradeManager:
                 self._min_pnl = 0.0
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
-            # ★ Max Drawdown tracking en temps réel
-            self._running_pnl += pnl
-            if self._running_pnl < self._min_pnl:
-                self._min_pnl = self._running_pnl
             total = self._daily_pnl + self._get_floating_pnl()
         log.debug(msg.log_daily_pnl_periodic(self._daily_pnl, self._get_floating_pnl(), total))
 
@@ -1695,6 +1691,12 @@ class TradeManager:
             # mais laisser passer la vérification fin de journée ci-dessus
             if not self.active:
                 return
+
+        # ★ Max Drawdown tracking — mis à jour à chaque polling cycle
+        with self._daily_lock:
+            total_pnl_now = self._daily_pnl + self._get_floating_pnl()
+            if total_pnl_now < self._min_pnl:
+                self._min_pnl = total_pnl_now
 
         with self._lock:
             entries_snapshot = list(self.active)
