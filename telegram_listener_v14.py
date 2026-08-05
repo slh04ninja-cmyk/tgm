@@ -21,7 +21,7 @@ MODIFICATIONS v13.0.0 (depuis v12.0.0) :
 """
 
 import subprocess, sys
-_deps = {"dotenv": "python-dotenv", "telethon": "telethon", "MetaTrader5": "MetaTrader5"}
+_deps = {"dotenv": "python-dotenv", "telethon": "telethon", "MetaTrader5": "MetaTrader5", "fpdf": "fpdf2"}
 for _mod, _pkg in _deps.items():
     try:
         __import__(_mod)
@@ -1010,6 +1010,7 @@ class TradeManager:
         self._daily_pnl = self._recover_daily_pnl()
         self._daily_pnl_day = get_trading_day_start().day
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
+        self._completed_entries = []  # entrées terminées (pour rapport fin de journée)
 
 
 
@@ -1093,6 +1094,7 @@ class TradeManager:
                 self._save_daily_limit_state()
                 self._running_pnl = 0.0
                 self._min_pnl = 0.0
+                self._completed_entries = []  # reset pour le nouveau jour
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             self._daily_pnl += pnl
             total = self._daily_pnl + self._get_floating_pnl()
@@ -1109,6 +1111,7 @@ class TradeManager:
                 self._save_daily_limit_state()
                 self._running_pnl = 0.0
                 self._min_pnl = 0.0
+                self._completed_entries = []  # reset pour le nouveau jour
                 log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
@@ -1264,7 +1267,10 @@ class TradeManager:
             log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
 
     def _collect_daily_report_data(self) -> dict:
-        """Collecte les données pour le rapport quotidien."""
+        """Collecte les données pour le rapport quotidien.
+        Inclut les entrées actives ET les entrées terminées (sauvegardées par _check_all)."""
+        # ★ Combiner entrées actives + terminées pour le rapport
+        all_entries = list(self.active) + [e for e in self._completed_entries if e not in self.active]
         # Structure: {method: {trades, wins, losses, pnl}}, {ch_num: {trades, wins, losses, pnl}}
         methods = {}
         channels = {}
@@ -1292,7 +1298,7 @@ class TradeManager:
             if _num not in ch_name_map:
                 ch_name_map[_num] = _val
 
-        for entry in list(self.active):
+        for entry in all_entries:
             total_signals += 1
             mt5_comment = entry.get('_mt5_comment', '')
             signal = entry.get('signal', {})
@@ -1354,7 +1360,7 @@ class TradeManager:
                 methods[role]['pnl'] += pnl
                 if pnl > 0:
                     methods[role]['wins'] += 1
-                else:
+                elif pnl < 0:
                     methods[role]['losses'] += 1
 
                 # Stats par canal
@@ -1364,7 +1370,7 @@ class TradeManager:
                 channels[ch_num]['pnl'] += pnl
                 if pnl > 0:
                     channels[ch_num]['wins'] += 1
-                else:
+                elif pnl < 0:
                     channels[ch_num]['losses'] += 1
 
                 # Stats par type de signal
@@ -1378,7 +1384,7 @@ class TradeManager:
                     if pnl > 0:
                         signal_types[sig_type]['wins'] += 1
                         signal_types[sig_type]['win_pnl'] += pnl
-                    else:
+                    elif pnl < 0:
                         signal_types[sig_type]['losses'] += 1
                         signal_types[sig_type]['loss_pnl'] += pnl
 
@@ -1394,7 +1400,7 @@ class TradeManager:
                 total_trades += 1
                 if pnl > 0:
                     total_wins += 1
-                else:
+                elif pnl < 0:
                     total_losses += 1
 
         winrate = total_wins / total_trades * 100 if total_trades > 0 else 0
@@ -1806,6 +1812,10 @@ class TradeManager:
             if not active_tickets and all_reported:
                 total_pnl = sum(t.get("_last_pnl", 0.0) for t in entry.get("tickets", []))
                 log.debug(f"Trade terminé ({symbol}) | Canal: {canal} | P&L total: {total_pnl:+.2f}")
+                # ★ Sauvegarder l'entrée terminée pour le rapport de fin de journée
+                # (self.active sera vidé mais le rapport a besoin de ces données)
+                if entry not in self._completed_entries:
+                    self._completed_entries.append(entry)
                 # Note : le P&L quotidien est déjà mis à jour par ticket (voir boucle ci-dessus),
                 # pas besoin de le ré-additionner ici (éviterait un double comptage).
                 with self._lock:
@@ -2002,8 +2012,15 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     try:
         from fpdf import FPDF
     except ImportError:
-        log.warning("fpdf2 non installé — PDF non généré")
-        return ""
+        log.warning("fpdf2 non installé — tentative d'installation...")
+        try:
+            import subprocess, sys
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2", "-q"])
+            from fpdf import FPDF
+            log.info("fpdf2 installé avec succès")
+        except Exception as install_err:
+            log.error(f"Impossible d'installer fpdf2: {install_err}")
+            return ""
 
     class DailyReportPDF(FPDF):
         """PDF avec répétition automatique des headers de table sur page break."""
@@ -2136,7 +2153,7 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.cell(0, 6, f"TP : {report_data['tp_count']} trades | {report_data['tp_pnl']:+.2f}$", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, f"SL : {report_data['sl_count']} trades | {report_data['sl_pnl']:+.2f}$", new_x="LMARGIN", new_y="NEXT")
 
-    filepath = f"daily_report_{date_str}.pdf"
+    filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"daily_report_{date_str}.pdf")
     pdf.output(filepath)
     log.info(f"PDF rapport généré: {filepath}")
     return filepath
@@ -3072,7 +3089,7 @@ async def main():
                                     entry_qa["_is_quick_alert"] = False
                                 updated_qa = True
                                 log.info(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
-                                _alert_mgmt(msg.alert_fusion_oot(action, ch_num, ticket, real_sl, tp_final_fusion))
+                                _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], ch_num, ticket, real_sl, tp_final_fusion))
                                 break
                             else:
                                 # QA déjà fermé → ignorer le signal complet
