@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GZL TradingBot V14.0.0 — Documentation Complète</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--text-muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff;--cyan:#39d2c0;--yellow:#e3b341}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.7;padding:0}
+.container{max-width:1000px;margin:0 auto;padding:2rem 1.5rem}
+.hero{background:linear-gradient(135deg,#1a1e2e 0%,#0d1117 100%);border:1px solid var(--border);border-radius:12px;padding:2.5rem;margin-bottom:2rem;text-align:center}
+.hero h1{font-size:2rem;color:var(--accent);margin-bottom:0.5rem}
+.hero .subtitle{color:var(--text-muted);font-size:1.1rem}
+.hero .version{display:inline-block;background:var(--accent);color:var(--bg);padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;font-weight:600;margin-top:1rem}
+.hero .version-new{display:inline-block;background:var(--green);color:var(--bg);padding:0.2rem 0.8rem;border-radius:20px;font-size:0.8rem;font-weight:600;margin-top:0.5rem;margin-left:0.3rem}
+section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2rem;margin-bottom:1.5rem}
+section h2{color:var(--accent);font-size:1.4rem;margin-bottom:1rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border)}
+section h3{color:var(--cyan);font-size:1.1rem;margin:1.5rem 0 0.8rem}
+section h4{color:var(--yellow);font-size:1rem;margin:1.2rem 0 0.6rem}
+p{margin-bottom:0.8rem}
+ul,ol{padding-left:1.5rem;margin-bottom:1rem}
+li{margin-bottom:0.4rem}
+.signal-box{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.85rem;margin:0.8rem 0;overflow-x:auto;white-space:pre;line-height:1.5}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:0.9rem}
+th,td{padding:0.6rem 0.8rem;border:1px solid var(--border);text-align:left}
+th{background:#1a1e2e;color:var(--accent);font-weight:600}
+td{background:var(--bg)}
+.badge{display:inline-block;padding:0.15rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600}
+.badge-green{background:rgba(63,185,80,0.15);color:var(--green)}
+.badge-red{background:rgba(248,81,73,0.15);color:var(--red)}
+.badge-orange{background:rgba(210,153,34,0.15);color:var(--orange)}
+.badge-purple{background:rgba(188,140,255,0.15);color:var(--purple)}
+.badge-cyan{background:rgba(57,210,192,0.15);color:var(--cyan)}
+.badge-yellow{background:rgba(227,179,65,0.15);color:var(--yellow)}
+.badge-blue{background:rgba(88,166,255,0.15);color:var(--accent)}
+.flow{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:1.2rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.82rem;line-height:1.6;margin:1rem 0;overflow-x:auto;white-space:pre}
+.flow .green{color:var(--green)}.flow .red{color:var(--red)}.flow .orange{color:var(--orange)}.flow .cyan{color:var(--cyan)}.flow .purple{color:var(--purple)}.flow .muted{color:var(--text-muted)}.flow .yellow{color:var(--yellow)}
+.config-key{color:var(--cyan);font-family:monospace}.config-val{color:var(--orange);font-family:monospace}
+.toc{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:1.2rem 1.5rem;margin-bottom:1.5rem}
+.toc h3{margin:0 0 0.8rem;color:var(--accent)}.toc ol{padding-left:1.2rem}.toc a{color:var(--accent);text-decoration:none}.toc a:hover{text-decoration:underline}.toc li{margin-bottom:0.3rem}
+.highlight{border-left:3px solid var(--accent);padding:0.8rem 1rem;background:rgba(88,166,255,0.05);border-radius:0 8px 8px 0;margin:1rem 0}
+.highlight.warn{border-left-color:var(--orange);background:rgba(210,153,34,0.05)}
+.highlight.danger{border-left-color:var(--red);background:rgba(248,81,73,0.05)}
+.highlight.success{border-left-color:var(--green);background:rgba(63,185,80,0.05)}
+.highlight.info{border-left-color:var(--purple);background:rgba(188,140,255,0.05)}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin:1rem 0}
+.stat-card{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1rem;text-align:center}
+.stat-card .stat-value{font-size:1.6rem;font-weight:800;color:var(--accent)}.stat-card .stat-label{font-size:0.78rem;color:var(--text-muted);margin-top:0.3rem}
+.log-box{background:#0d1117;border:1px solid var(--border);border-radius:8px;padding:0.8rem 1rem;font-family:'SF Mono','Fira Code',monospace;font-size:0.82rem;margin:0.6rem 0;overflow-x:auto;white-space:pre;line-height:1.5}
+.log-box .header{color:var(--cyan)}.log-box .info{color:var(--text)}.log-box .green{color:var(--green)}.log-box .red{color:var(--red)}.log-box .orange{color:var(--orange)}
+footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0;border-top:1px solid var(--border);margin-top:2rem}
+@media(max-width:640px){.container{padding:1rem}.hero{padding:1.5rem}.hero h1{font-size:1.4rem}section{padding:1.2rem}.signal-box,.flow,.log-box{font-size:0.75rem;padding:0.8rem}.stat-row{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ============================================================ -->
+<!-- HERO -->
+<!-- ============================================================ -->
+<div class="hero">
+<h1>GZL TradingBot</h1>
+<p class="subtitle">Bot de Copy Trading Telegram &rarr; MetaTrader 5</p>
+<span class="version">V14.0.0</span>
+<span class="version-new">Multi-Position A/B Testing</span>
+<p style="margin-top:1rem;color:var(--text-muted);font-size:0.9rem">
+5 Positions par signal &bull; SL Plafonné &bull; Rapport Quotidien (Texte + PDF) &bull; Fermeture Auto &bull; Tolerance Zone &bull; Parser Amélioré &bull; TimesFM &bull; News Filter
+</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- TABLE DES MATIÈRES -->
+<!-- ============================================================ -->
+<div class="toc">
+<h3>Table des matières</h3>
+<ol>
+<li><a href="#overview">Vue d'ensemble &amp; Architecture</a></li>
+<li><a href="#v14-changes">Changements V14 vs V13</a></li>
+<li><a href="#files">Structure des fichiers</a></li>
+<li><a href="#multi-pos">Multi-Positions (A/B Testing)</a></li>
+<li><a href="#sl-capped">SL Plafonné (MAX_SL_USD)</a></li>
+<li><a href="#tolerance">Tolérance Zone (TOLERANCE_ZN)</a></li>
+<li><a href="#parser">Signal Parser V14</a></li>
+<li><a href="#execution">Cas d'exécution des ordres</a></li>
+<li><a href="#trade-manager">Trade Manager &amp; Gestion par rôle</a></li>
+<li><a href="#daily-report">Rapport Quotidien (Texte + PDF)</a></li>
+<li><a href="#shutdown">Fermeture Automatique (Fin de journée)</a></li>
+<li><a href="#logs">Contrôle des Logs &amp; Alertes</a></li>
+<li><a href="#news">Filtre News</a></li>
+<li><a href="#timesfm">Validation TimesFM</a></li>
+<li><a href="#config">Configuration (.env)</a></li>
+<li><a href="#changelog">Changelog complet</a></li>
+</ol>
+</div>
+
+<!-- ============================================================ -->
+<!-- 1. VUE D'ENSEMBLE -->
+<!-- ============================================================ -->
+<section id="overview">
+<h2>1. Vue d'ensemble &amp; Architecture</h2>
+
+<h3>Architecture générale</h3>
+<div class="flow">
+<span class="cyan">Telegram</span> (52 canaux, dossier ou .env) → <span class="yellow">Signal Parser V14</span> → <span class="green">MT5 Bridge</span> → <span class="purple">MetaTrader 5</span> (Exness)
+    ↓                                            ↓
+ <span class="orange">SL Plafonné</span>                          <span class="cyan">5 positions × signal</span> (A/B Testing)
+    ↓                                            ↓
+ <span class="yellow">Tolerance Zone</span>                    ┌── <span class="green">P1: TP Fixe</span> (BE classique)
+                                      ├── <span class="green">P2: BE Escaladé</span>
+                                      ├── <span class="green">P3: Trailing Stop</span>
+                                      ├── <span class="green">P4a: Partial Quick</span> (TP direct)
+                                      └── <span class="green">P4b: Partial Trail</span> (Trailing)
+                                              ↓
+                                      <span class="orange">Fin de journée</span> (20h UTC)
+                                              ↓
+                                      <span class="cyan">Rapport texte + PDF</span> → Telegram
+</div>
+
+<h3>Principe de fonctionnement</h3>
+<p>Le bot écoute les canaux Telegram configurés, parse les signaux de trading (BUY/SELL), et exécute <strong>5 ordres MARKET simultanés</strong> par signal pour comparer différentes stratégies de gestion (A/B Testing). Le SL est plafonné à une distance maximale, et un rapport quotidien est généré automatiquement à la fin de la journée.</p>
+
+<div class="stat-row">
+<div class="stat-card"><div class="stat-value">5</div><div class="stat-label">Positions par signal</div></div>
+<div class="stat-card"><div class="stat-value">MARKET</div><div class="stat-label">Type d'ordre unique</div></div>
+<div class="stat-card"><div class="stat-value">MAX_SL_USD</div><div class="stat-label">SL plafonné (défaut 10$)</div></div>
+<div class="stat-card"><div class="stat-value">TOLERANCE_ZN</div><div class="stat-label">Tolérance zone (défaut 1$)</div></div>
+</div>
+
+<h3>Types de signaux</h3>
+<table>
+<tr><th>Type</th><th>Commentaire MT5</th><th>Description</th></tr>
+<tr><td><span class="badge badge-green">ZN1</span></td><td>CH{N}-ZN1</td><td>Signal zone — prix dans la zone (ou zone + tolérance)</td></tr>
+<tr><td><span class="badge badge-green">ZN2</span></td><td>CH{N}-ZN2</td><td>Signal zone — prix au-delà de la zone (vers le SL)</td></tr>
+<tr><td><span class="badge badge-cyan">PU1</span></td><td>CH{N}-PU1</td><td>Prix unique — prix entre entry et SL</td></tr>
+<tr><td><span class="badge badge-cyan">PU2</span></td><td>CH{N}-PU2</td><td>Prix unique — prix dans tolérance</td></tr>
+<tr><td><span class="badge badge-orange">MP</span></td><td>CH{N}-MP</td><td>Quick Alert sans prix — MARKET direct (BUY NOW)</td></tr>
+<tr><td><span class="badge badge-green">AL1</span></td><td>CH{N}-AL1</td><td>Quick Alert avec prix — entre entry et SL (favorable)</td></tr>
+<tr><td><span class="badge badge-yellow">AL2</span></td><td>CH{N}-AL2</td><td>Quick Alert avec prix — dans tolérance (entry ± 3$)</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 2. CHANGEMENTS V14 -->
+<!-- ============================================================ -->
+<section id="v14-changes">
+<h2>2. Changements V14 vs V13</h2>
+
+<h3>Nouveautés principales</h3>
+<table>
+<tr><th>Fonctionnalité</th><th>Description</th></tr>
+<tr><td><span class="badge badge-green">Multi-Positions</span></td><td>5 positions par signal (P1-P4b) pour A/B Testing de stratégies</td></tr>
+<tr><td><span class="badge badge-orange">SL Plafonné</span></td><td>Le SL est capé à MAX_SL_USD de l'entrée (défaut 10$)</td></tr>
+<tr><td><span class="badge badge-purple">Rapport Quotidien</span></td><td>Message texte + PDF envoyé à TRADING_END_HOUR</td></tr>
+<tr><td><span class="badge badge-cyan">Fermeture Auto</span></td><td>Toutes les positions fermées à TRADING_END_HOUR</td></tr>
+<tr><td><span class="badge badge-yellow">Tolerance Zone</span></td><td>TOLERANCE_ZN réduit les annulations de signaux ZN</td></tr>
+<tr><td><span class="badge badge-blue">Parser V14</span></td><td>Fallback XAUUSD, double zone check, BUY NOW zones, décimaux préservés</td></tr>
+<tr><td><span class="badge badge-green">Logs Control</span></td><td>3 booléens pour contrôler logs et alertes</td></tr>
+</table>
+
+<h3>Bugs corrigés</h3>
+<table>
+<tr><th>Bug</th><th>Sévérité</th><th>Fix</th></tr>
+<tr><td>Rapport quotidien vide (0 trades)</td><td><span class="badge badge-red">CRITIQUE</span></td><td><code>_completed_entries</code> sauvegarde les trades terminés</td></tr>
+<tr><td>PDF non généré (fpdf2 manquant)</td><td><span class="badge badge-red">CRITIQUE</span></td><td>fpdf2 ajouté aux dépendances auto-installées</td></tr>
+<tr><td>Variable <code>action</code> non définie (fusion OOT)</td><td><span class="badge badge-red">CRITIQUE</span></td><td>Remplacé par <code>sig_dict["action"]</code></td></tr>
+<tr><td>PDF crash sur emojis Unicode</td><td><span class="badge badge-orange">MOYEN</span></td><td>Nettoyage des caractères non-ASCII dans noms de canaux</td></tr>
+<tr><td>P&L=0 compté comme loss</td><td><span class="badge badge-orange">MOYEN</span></td><td><code>elif pnl &lt; 0</code> au lieu de <code>else</code></td></tr>
+<tr><td>P4a fermait à 3$ au lieu du TP à 5$</td><td><span class="badge badge-orange">MOYEN</span></td><td>P4a laisse le TP gérer la fermeture</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 3. STRUCTURE DES FICHIERS -->
+<!-- ============================================================ -->
+<section id="files">
+<h2>3. Structure des fichiers</h2>
+
+<table>
+<tr><th>Fichier</th><th>Lignes</th><th>Rôle</th></tr>
+<tr><td><code>telegram_listener_v14.py</code></td><td>~3100</td><td>Cœur du bot — multi-positions, SL capé, rapport, PDF</td></tr>
+<tr><td><code>signal_parser_v14.py</code></td><td>~880</td><td>Parser amélioré — fallback XAUUSD, double zone, tolérance</td></tr>
+<tr><td><code>bot_messages_v14.py</code></td><td>~450</td><td>Logs, alertes, rapport quotidien (texte + PDF)</td></tr>
+<tr><td><code>.env</code></td><td>—</td><td>Configuration complète</td></tr>
+<tr><td><code>Channels.txt</code></td><td>—</td><td>Noms des canaux (pour le rapport PDF)</td></tr>
+</table>
+
+<h3>Classes principales</h3>
+<table>
+<tr><th>Classe</th><th>Rôle</th></tr>
+<tr><td><code>MT5Bridge</code></td><td>Interface MetaTrader 5 (ordres, prix, positions, SL/TP)</td></tr>
+<tr><td><code>TradeManager</code></td><td>Boucle polling, gestion P1-P4b, P&L quotidien, rapport</td></tr>
+<tr><td><code>NewsManager</code></td><td>Filtre news multi-tier (High, NFP/CPI, FOMC, Spike)</td></tr>
+<tr><td><code>TimesFMValidator</code></td><td>Validation ML de la direction du signal</td></tr>
+<tr><td><code>SignalParser</code></td><td>Parse les signaux — zones, prix unique, Quick Alert</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 4. MULTI-POSITIONS -->
+<!-- ============================================================ -->
+<section id="multi-pos">
+<h2>4. Multi-Positions (A/B Testing)</h2>
+
+<h3>Principe</h3>
+<p>Chaque signal ouvre <strong>5 positions MARKET simultanées</strong> au même prix, même lot (0.01), et les gère avec des méthodes différentes pour comparer les performances.</p>
+
+<table>
+<tr><th>Position</th><th>Rôle</th><th>TP</th><th>Gestion</th></tr>
+<tr><td><span class="badge badge-green">P1</span></td><td>tp_fixe</td><td>TP du signal</td><td>BE classique : profit ≥ PNL_TRIGGER_USD → SL à entry ± BE_USD</td></tr>
+<tr><td><span class="badge badge-cyan">P2</span></td><td>be_scale</td><td>entry ± 15$</td><td>BE escaladé : +4$→BE, +8$→+2$, +12$→+5$</td></tr>
+<tr><td><span class="badge badge-purple">P3</span></td><td>trailing</td><td>Aucun (lointain)</td><td>Trailing stop de TRAILING_STOP_USD (défaut 7$)</td></tr>
+<tr><td><span class="badge badge-yellow">P4a</span></td><td>partial_quick</td><td>entry ± 5$</td><td>TP direct — MT5 ferme automatiquement</td></tr>
+<tr><td><span class="badge badge-orange">P4b</span></td><td>partial_trail</td><td>Aucun (lointain)</td><td>Trailing stop de PARTIAL_TRAIL_USD (défaut 5$)</td></tr>
+</table>
+
+<h3>Comment MT5 identifie chaque position</h3>
+<div class="signal-box">CH1-ZN1-P1     ← canal 1, zone 1, méthode TP Fixe
+CH1-ZN1-P2     ← canal 1, zone 1, méthode BE Escaladé
+CH1-ZN1-P3     ← canal 1, zone 1, méthode Trailing
+CH1-ZN1-P4a    ← canal 1, zone 1, méthode Partial Quick
+CH1-ZN1-P4b    ← canal 1, zone 1, méthode Partial Trail</div>
+
+<h3>P2 : BE Escaladé (paliers configurables)</h3>
+<table>
+<tr><th>Profit atteint</th><th>SL déplacé à</th><th>Variable .env</th></tr>
+<tr><td>+4$</td><td>entry (BE neutre)</td><td>P2_TRIGGER_1 / P2_SL_OFFSET_1</td></tr>
+<tr><td>+8$</td><td>entry + 2$</td><td>P2_TRIGGER_2 / P2_SL_OFFSET_2</td></tr>
+<tr><td>+12$</td><td>entry + 5$</td><td>P2_TRIGGER_3 / P2_SL_OFFSET_3</td></tr>
+</table>
+
+<h3>Flux d'exécution</h3>
+<div class="flow">
+<span class="cyan">Signal reçu</span> (BUY zone 4050-4060)
+    ↓
+<span class="yellow">_open_multi_positions()</span>
+    ├── <span class="green">P1</span> → MARKET lot=0.01 TP=4070 SL=4030
+    ├── <span class="green">P2</span> → MARKET lot=0.01 TP=4065 SL=4030
+    ├── <span class="green">P3</span> → MARKET lot=0.01 TP=4560 SL=4030  (TP lointain)
+    ├── <span class="green">P4a</span> → MARKET lot=0.01 TP=4055 SL=4030  (TP 5$)
+    └── <span class="green">P4b</span> → MARKET lot=0.01 TP=4560 SL=4030  (TP lointain)
+    ↓
+<span class="orange">TradeManager._check_all()</span> → dispatch par rôle
+    ├── P1 → _manage_tp_fixe()
+    ├── P2 → _manage_be_scale()
+    ├── P3 → _manage_trailing()
+    ├── P4a → _manage_partial_quick()  (pass — TP gère)
+    └── P4b → _manage_partial_trail()
+</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 5. SL PLAFONNÉ -->
+<!-- ============================================================ -->
+<section id="sl-capped">
+<h2>5. SL Plafonné (MAX_SL_USD)</h2>
+
+<h3>Principe</h3>
+<p>Le SL est capé à MAX_SL_USD de l'entrée. Si le SL du signal dépasse cette distance, il est réduit.</p>
+
+<div class="signal-box">BUY @ 4000, signal SL = 3960 (40$)  → SL capé à 3990 (10$)  ← MAX_SL_USD=10
+BUY @ 4000, signal SL = 3995 (5$)   → SL gardé à 3995       ← 5$ &lt; 10$, OK</div>
+
+<h3>Où le SL est capé</h3>
+<p>Le <code>_cap_sl()</code> est appelé dans <strong>4 endroits</strong> :</p>
+<ol>
+<li>Ouverture d'une position zone (ZN1/ZN2)</li>
+<li>Ouverture d'une position prix unique (PU1/PU2)</li>
+<li>Ouverture d'une Quick Alert (AL-MP)</li>
+<li>Fusion d'un QA avec un signal complet</li>
+</ol>
+
+<h3>Configuration</h3>
+<div class="signal-box">.env:
+MAX_SL_USD=10.0    # Distance SL maximale en $</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 6. TOLERANCE ZONE -->
+<!-- ============================================================ -->
+<section id="tolerance">
+<h2>6. Tolérance Zone (TOLERANCE_ZN)</h2>
+
+<h3>Principe</h3>
+<p>La tolérance étend la zone vers le SL pour accepter les signaux dont le prix a légèrement dépassé la zone.</p>
+
+<h4>SELL zone 4050-4060, SL=4080, TOL=1 :</h4>
+<div class="signal-box">Prix ≥ 4060                    → ZN2 ✅
+4049 ≤ Prix &lt; 4060             → ZN1 ✅  (zone étendue de 1$)
+Prix &lt; 4049                    → ANNULÉ ❌</div>
+
+<h4>BUY zone 4050-4060, SL=4030, TOL=1 :</h4>
+<div class="signal-box">Prix ≤ 4050                    → ZN2 ✅
+4050 &lt; Prix ≤ 4061             → ZN1 ✅  (zone étendue de 1$)
+Prix &gt; 4061                    → ANNULÉ ❌</div>
+
+<h3>Configuration</h3>
+<div class="signal-box">.env:
+TOLERANCE_ZN=1.0    # Tolérance autour de la zone (en $)</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 7. SIGNAL PARSER V14 -->
+<!-- ============================================================ -->
+<section id="parser">
+<h2>7. Signal Parser V14</h2>
+
+<h3>Améliorations vs V13</h3>
+<table>
+<tr><th>Amélioration</th><th>Description</th></tr>
+<tr><td>Fallback XAUUSD</td><td>Signaux sans symbole → XAUUSD par défaut (100% parsing)</td></tr>
+<tr><td>Double zone check</td><td>Annulation si plusieurs paires de nombres sur la même ligne</td></tr>
+<tr><td>BUY NOW zones</td><td><code>BUY NOW 4030-4025</code> → zone [4025, 4030]</td></tr>
+<tr><td>@ dans TPs</td><td><code>TP1 @ 4076</code> n'est plus pris comme entrée</td></tr>
+<tr><td>Décimaux préservés</td><td><code>4074.00</code> reste <code>4074.00</code> (pas 407400)</td></tr>
+<tr><td>Points parasites</td><td><code>4025...</code> → <code>4025</code> (points supprimés)</td></tr>
+</table>
+
+<h3>Symboles supportés</h3>
+<div class="signal-box">GOLD, XAUUSD, XAU/USD  →  XAUUSD
+SILVER, XAGUSD          →  XAGUSD
+OIL, USOIL              →  USOIL
+BTC, BTCUSD, BITCOIN    →  BTCUSD
+EURUSD, GBPUSD          →  EURUSD, GBPUSD</div>
+
+<h3>Filtre anti-spam</h3>
+<p>Les messages contenant des mots-clés comme "hit", "pips", "tp hit", "good luck", "analysis", "join vip"... sont automatiquement filtrés et ignorés.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- 8. CAS D'EXÉCUTION -->
+<!-- ============================================================ -->
+<section id="execution">
+<h2>8. Cas d'exécution des ordres</h2>
+
+<h3>Signaux Zone (ZN)</h3>
+<div class="flow">
+<span class="cyan">Signal: BUY zone 4050-4060, SL=4030</span>
+
+<span class="green">Prix dans zone</span> [4049, 4060]     → <span class="badge badge-green">ZN1</span> — 5 positions MARKET
+<span class="green">Prix ≤ zone_low</span> (ex: 4048)      → <span class="badge badge-green">ZN2</span> — 5 positions MARKET (meilleur prix)
+<span class="red">Prix &gt; zone_high+TOL</span> (ex: 4062)  → <span class="badge badge-red">ANNULÉ</span>
+</div>
+
+<h3>Signaux Prix Unique (PU)</h3>
+<div class="flow">
+<span class="cyan">Signal: BUY @ 4050, SL=4030</span>
+
+<span class="green">Prix entre SL et entry</span> [4030, 4050[  → <span class="badge badge-green">PU1</span>
+<span class="green">Prix dans tolérance</span> [4050, 4053]      → <span class="badge badge-green">PU2</span>
+<span class="red">Prix hors zones</span>                        → <span class="badge badge-red">ANNULÉ</span>
+</div>
+
+<h3>Filtres avant exécution</h3>
+<table>
+<tr><th>Filtre</th><th>Variable</th><th>Comportement</th></tr>
+<tr><td>Conflit de position</td><td>CONFLIT_FILTER_ENABLED</td><td>Même canal + même symbole + direction opposée → annulé</td></tr>
+<tr><td>Filtre horaire</td><td>TIME_FILTER_ENABLED</td><td>En dehors de TRADING_START_HOUR - TRADING_END_HOUR → ignoré</td></tr>
+<tr><td>Limite quotidienne</td><td>DAILY_PROFIT_LIMIT</td><td>P&L total ≥ limite → arrêt trading</td></tr>
+<tr><td>Max signaux</td><td>MAX_POSITIONS</td><td>Trop de signaux actifs → ignoré</td></tr>
+<tr><td>Spread trop large</td><td>MAX_SPREAD_POINTS</td><td>Spread > max → ignoré</td></tr>
+<tr><td>Protection news</td><td>NEWS_FILTER_ENABLED</td><td>Fenêtre news → signaux bloqués / positions fermées</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 9. TRADE MANAGER -->
+<!-- ============================================================ -->
+<section id="trade-manager">
+<h2>9. Trade Manager &amp; Gestion par rôle</h2>
+
+<h3>Boucle de polling (1s)</h3>
+<div class="flow">
+<span class="cyan">_check_all()</span> (toutes les 1s)
+    ├── Refresh position cache (1 appel MT5)
+    ├── Vérifier fin de journée → <span class="orange">_shutdown_end_of_day()</span>
+    ├── Vérifier P&L limite → <span class="orange">_shutdown_for_daily_limit()</span>
+    ├── Max Drawdown tracking
+    └── Pour chaque entrée active:
+        ├── Détecter les tickets fermés → P&L + alerte
+        ├── Retirer les entrées terminées → <span class="green">_completed_entries</span>
+        └── <span class="yellow">Gestion par rôle</span> (P1-P4b)
+</div>
+
+<h3>Gestion P1 (TP Fixe)</h3>
+<div class="signal-box">BE classique :
+  Quand profit ≥ PNL_TRIGGER_USD → SL à entry ± BE_USD
+  TP à entry ± TP_FIXED_GAIN_USD</div>
+
+<h3>Gestion P2 (BE Escaladé)</h3>
+<div class="signal-box">Paliers configurables :
+  +P2_TRIGGER_1$ → SL à entry + P2_SL_OFFSET_1
+  +P2_TRIGGER_2$ → SL à entry + P2_SL_OFFSET_2
+  +P2_TRIGGER_3$ → SL à entry + P2_SL_OFFSET_3</div>
+
+<h3>Gestion P3 (Trailing)</h3>
+<div class="signal-box">Trailing stop :
+  SL = prix_actuel - TRAILING_STOP_USD
+  Le SL ne recule JAMAIS (condition: new_sl &gt; current_sl)</div>
+
+<h3>Gestion P4a (Partial Quick)</h3>
+<div class="signal-box">TP direct à entry ± P4A_TP_OFFSET (5$)
+  MT5 ferme automatiquement quand le prix atteint le TP
+  Pas de gestion manuelle (pass)</div>
+
+<h3>Gestion P4b (Partial Trail)</h3>
+<div class="signal-box">Trailing stop :
+  SL = prix_actuel - PARTIAL_TRAIL_USD
+  Le SL ne recule JAMAIS (condition: new_sl &gt; current_sl)</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 10. RAPPORT QUOTIDIEN -->
+<!-- ============================================================ -->
+<section id="daily-report">
+<h2>10. Rapport Quotidien (Texte + PDF)</h2>
+
+<h3>Contenu du rapport</h3>
+<table>
+<tr><th>Section</th><th>Données</th></tr>
+<tr><td>Résumé global</td><td>P&L réalisé, trades, wins, losses, winrate, max drawdown</td></tr>
+<tr><td>Par méthode</td><td>P1 TP Fixe, P2 BE Scale, P3 Trailing, P4 Partial (50/50)</td></tr>
+<tr><td>Par type de signal</td><td>ZN1, ZN2, PU1, PU2, MP, AL — canaux, trades, winrate, avg gain/perte</td></tr>
+<tr><td>Par canal</td><td>CH1, CH2... avec nom (Channels.txt), triés par P&L</td></tr>
+<tr><td>Clôtures</td><td>Nombre de TP vs SL avec P&L</td></tr>
+</table>
+
+<h3>Données persistantes (_completed_entries)</h3>
+<p>Les trades terminés sont sauvegardés dans <code>_completed_entries</code> tout au long de la journée. Le rapport combine <code>self.active</code> + <code>_completed_entries</code> pour garantir que les données ne sont pas perdues quand les positions sont fermées.</p>
+
+<h3>Génération PDF</h3>
+<p>Le PDF est généré avec <code>fpdf2</code> (auto-installé au démarrage). Les emojis Unicode sont nettoyés des noms de canaux pour éviter les crashs. Le fichier est sauvé dans le répertoire du bot.</p>
+
+<h3>Configuration</h3>
+<div class="signal-box">.env:
+ALERT_DAILY_PERFORMANCE=true    # Rapport quotidien activé
+TRADING_END_HOUR=20             # Heure de génération du rapport</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 11. FERMETURE AUTOMATIQUE -->
+<!-- ============================================================ -->
+<section id="shutdown">
+<h2>11. Fermeture Automatique (Fin de journée)</h2>
+
+<h3>Comportement</h3>
+<table>
+<tr><th>Heure UTC</th><th>Action</th></tr>
+<tr><td>TRADING_START_HOUR</td><td>RESET JOURNALIER — nouveau jour, flags reset</td></tr>
+<tr><td>Plage horaire</td><td>Trading normal (signaux + gestion P1-P4b)</td></tr>
+<tr><td>TRADING_END_HOUR</td><td><strong>Fermeture automatique</strong> : toutes les positions + annulation ordres + rapport</td></tr>
+<tr><td>Hors plage</td><td>Nouveaux signaux ignorés</td></tr>
+</table>
+
+<h3>Flag _end_of_day_done</h3>
+<p>Le flag <code>_end_of_day_done</code> évite les fermetures répétées. Il est automatiquement reset au début du nouveau jour de trading.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- 12. CONTRÔLE DES LOGS -->
+<!-- ============================================================ -->
+<section id="logs">
+<h2>12. Contrôle des Logs &amp; Alertes</h2>
+
+<h3>Variables</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code>LOG_TRADE_MANAGEMENT</code></td><td>true</td><td>Logs console pour P1-P4b (BE, trailing, partial)</td></tr>
+<tr><td><code>ALERT_TRADE_MANAGEMENT</code></td><td>true</td><td>Alertes Telegram pour P1-P4b</td></tr>
+<tr><td><code>ALERT_DAILY_PERFORMANCE</code></td><td>true</td><td>Rapport quotidien P&L → Telegram</td></tr>
+</table>
+
+<h3>Quand LOG_TRADE_MANAGEMENT=false</h3>
+<p>Seuls les messages <strong>une fois par jour</strong> restent :</p>
+<ul>
+<li>MT5 connecté, Telegram connecté, Balance</li>
+<li>NEWS HIGH IMPACT (1x/jour)</li>
+<li>RESET JOURNALIER (1x/jour)</li>
+<li>DAILY-LIMIT (1x/jour)</li>
+<li>Banner config (1x/jour)</li>
+<li>SHUTDOWN</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 13. FILTRE NEWS -->
+<!-- ============================================================ -->
+<section id="news">
+<h2>13. Filtre News</h2>
+
+<h3>Tiers de news</h3>
+<table>
+<tr><th>Tier</th><th>Mots-clés</th><th>Blocage</th><th>Fermeture</th><th>Après</th></tr>
+<tr><td><span class="badge badge-red">NFP/CPI</span></td><td>non-farm payrolls, cpi</td><td>20 min</td><td>10 min</td><td>30 min</td></tr>
+<tr><td><span class="badge badge-red">FOMC</span></td><td>fomc, powell, federal reserve</td><td>20 min</td><td>15 min</td><td>45 min</td></tr>
+<tr><td><span class="badge badge-orange">Spike</span></td><td>pce, ppi, gdp, unemployment, adp, ism</td><td>20 min</td><td>10 min</td><td>20 min</td></tr>
+<tr><td><span class="badge badge-yellow">High</span></td><td>Autres news high impact</td><td>15 min</td><td>5 min</td><td>15 min</td></tr>
+</table>
+
+<h3>Comportement</h3>
+<ul>
+<li><strong>Blocage</strong> : signaux ignorés pendant la fenêtre</li>
+<li><strong>Fermeture</strong> : toutes les positions fermées avant la news</li>
+<li><strong>Reprise</strong> : trading normal après la fenêtre</li>
+</ul>
+</section>
+
+<!-- ============================================================ -->
+<!-- 14. TIMESFM -->
+<!-- ============================================================ -->
+<section id="timesfm">
+<h2>14. Validation TimesFM</h2>
+
+<h3>Principe</h3>
+<p>TimesFM est un modèle de prévision temporelle (Google, 200M paramètres) qui valide la direction du signal avant exécution.</p>
+
+<h3>Critères de validation</h3>
+<table>
+<tr><th>Critère</th><th>Variable</th><th>Défaut</th></tr>
+<tr><td>Direction prédite = direction du signal</td><td>—</td><td>Obligatoire</td></tr>
+<tr><td>Amplitude minimale</td><td>TIMESFM_MIN_MOVE_PIPS</td><td>5.0 pips</td></tr>
+<tr><td>Confiance minimale</td><td>TIMESFM_MIN_CONFIDENCE</td><td>0.35</td></tr>
+</table>
+
+<h3>Configuration</h3>
+<div class="signal-box">.env:
+TIMESFM_ENABLED=true
+TIMESFM_TIMEFRAME=M5
+TIMESFM_CONTEXT_BARS=256
+TIMESFM_HORIZON=12
+TIMESFM_SYMBOL=XAUUSDm</div>
+</section>
+
+<!-- ============================================================ -->
+<!-- 15. CONFIGURATION -->
+<!-- ============================================================ -->
+<section id="config">
+<h2>15. Configuration (.env)</h2>
+
+<h3>Multi-positions (nouveau en V14)</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code class="config-key">MAX_SL_USD</code></td><td><code class="config-val">10.0</code></td><td>Distance SL maximale en $</td></tr>
+<tr><td><code class="config-key">TRAILING_STOP_USD</code></td><td><code class="config-val">7.0</code></td><td>Trailing stop pour P3</td></tr>
+<tr><td><code class="config-key">PARTIAL_TRAIL_USD</code></td><td><code class="config-val">5.0</code></td><td>Trailing stop pour P4b</td></tr>
+<tr><td><code class="config-key">TOLERANCE_ZN</code></td><td><code class="config-val">1.0</code></td><td>Tolérance autour de la zone</td></tr>
+<tr><td><code class="config-key">P4A_TP_OFFSET</code></td><td><code class="config-val">5.0</code></td><td>TP de P4a (entry ± offset)</td></tr>
+<tr><td><code class="config-key">P2_TP_OFFSET</code></td><td><code class="config-val">15.0</code></td><td>TP de P2</td></tr>
+<tr><td><code class="config-key">P2_TRIGGER_1/2/3</code></td><td><code class="config-val">4/8/12</code></td><td>Paliers BE escaladé P2</td></tr>
+<tr><td><code class="config-key">P2_SL_OFFSET_1/2/3</code></td><td><code class="config-val">0/2/5</code></td><td>Offsets SL escaladé P2</td></tr>
+</table>
+
+<h3>Logs &amp; Alertes</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code class="config-key">LOG_TRADE_MANAGEMENT</code></td><td><code class="config-val">true</code></td><td>Logs console P1-P4b</td></tr>
+<tr><td><code class="config-key">ALERT_TRADE_MANAGEMENT</code></td><td><code class="config-val">true</code></td><td>Alertes Telegram P1-P4b</td></tr>
+<tr><td><code class="config-key">ALERT_DAILY_PERFORMANCE</code></td><td><code class="config-val">true</code></td><td>Rapport quotidien</td></tr>
+</table>
+
+<h3>Trading</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td><code class="config-key">TP_FIXED_GAIN_USD</code></td><td><code class="config-val">8.0</code></td><td>Gain cible pour P1</td></tr>
+<tr><td><code class="config-key">PNL_TRIGGER_USD</code></td><td><code class="config-val">5.0</code></td><td>Seuil BE pour P1</td></tr>
+<tr><td><code class="config-key">BE_USD</code></td><td><code class="config-val">3</code></td><td>Marge de sécurité SL (BE)</td></tr>
+<tr><td><code class="config-key">DAILY_PROFIT_LIMIT</code></td><td><code class="config-val">200.0</code></td><td>Objectif quotidien</td></tr>
+<tr><td><code class="config-key">TRADING_START_HOUR</code></td><td><code class="config-val">3</code></td><td>Heure de début (UTC)</td></tr>
+<tr><td><code class="config-key">TRADING_END_HOUR</code></td><td><code class="config-val">20</code></td><td>Heure de fin (UTC)</td></tr>
+<tr><td><code class="config-key">LOT_TOTAL</code></td><td><code class="config-val">0.01</code></td><td>Lot total par signal (divisé en 5)</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ -->
+<!-- 16. CHANGELOG -->
+<!-- ============================================================ -->
+<section id="changelog">
+<h2>16. Changelog complet</h2>
+
+<h3>V14.0.0 — Multi-Position A/B Testing</h3>
+<table>
+<tr><th>Catégorie</th><th>Changement</th></tr>
+<tr><td><span class="badge badge-green">NOUVEAU</span></td><td>5 positions par signal (P1 TP Fixe, P2 BE Escaladé, P3 Trailing, P4a Partial Quick, P4b Partial Trail)</td></tr>
+<tr><td><span class="badge badge-green">NOUVEAU</span></td><td>SL plafonné (MAX_SL_USD) — capé dans ZN, PU, AL-MP, fusion</td></tr>
+<tr><td><span class="badge badge-green">NOUVEAU</span></td><td>Rapport quotidien (texte + PDF) à TRADING_END_HOUR</td></tr>
+<tr><td><span class="badge badge-green">NOUVEAU</span></td><td>Fermeture automatique de toutes les positions à TRADING_END_HOUR</td></tr>
+<tr><td><span class="badge badge-green">NOUVEAU</span></td><td>TOLERANCE_ZN pour réduire les annulations de signaux zone</td></tr>
+<tr><td><span class="badge badge-green">NOUVEAU</span></td><td>Contrôle des logs (LOG_TRADE_MANAGEMENT, ALERT_TRADE_MANAGEMENT, ALERT_DAILY_PERFORMANCE)</td></tr>
+<tr><td><span class="badge badge-blue">PARSER</span></td><td>Fallback XAUUSD par défaut (100% parsing)</td></tr>
+<tr><td><span class="badge badge-blue">PARSER</span></td><td>Détection double zone (annulation si ambigu)</td></tr>
+<tr><td><span class="badge badge-blue">PARSER</span></td><td>BUY NOW zones (BUY NOW 4030-4025 → zone)</td></tr>
+<tr><td><span class="badge badge-blue">PARSER</span></td><td>@ dans TPs ignoré (TP1 @ 4076 ≠ entrée)</td></tr>
+<tr><td><span class="badge badge-blue">PARSER</span></td><td>Décimaux préservés (4074.00 pas 407400)</td></tr>
+<tr><td><span class="badge badge-orange">FIX</span></td><td>Rapport quotidien : _completed_entries sauvegarde les trades terminés</td></tr>
+<tr><td><span class="badge badge-orange">FIX</span></td><td>PDF : fpdf2 auto-installé + chemin absolu + nettoyage Unicode</td></tr>
+<tr><td><span class="badge badge-orange">FIX</span></td><td>Variable 'action' non définie dans fusion OOT</td></tr>
+<tr><td><span class="badge badge-orange">FIX</span></td><td>P&L=0 n'est plus compté comme loss</td></tr>
+<tr><td><span class="badge badge-orange">FIX</span></td><td>P4a laisse le TP gérer (pas de fermeture prématurée à 3$)</td></tr>
+</table>
+</section>
+
+</div>
+
+<footer>
+<p>GZL TradingBot V14.0.0 — Documentation générée le 2026-08-05</p>
+</footer>
+</body>
+</html>
