@@ -2668,9 +2668,16 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
     tp_final  = full_signal["tps"][-1] if full_signal["tps"] else 0
     canal     = full_signal.get("source_channel", "Inconnu")
 
-    # Fusion : mettre à jour SL/TP du QA existant, jamais de 2e position.
-    pos = mt5.positions_get(ticket=qa_ticket)
-    if not pos:
+    # ★ Vérifier si AU MOINS UNE position du QA est encore ouverte
+    # (pas seulement P1 — qa["ticket"] ne stocke que le premier ticket)
+    any_open = False
+    for t in entry.get("tickets", []):
+        pos_t = mt5.positions_get(ticket=t["ticket"])
+        if pos_t:
+            any_open = True
+            break
+
+    if not any_open:
         # QA déjà fermé (SL/TP touché) → ignorer le signal complet
         since = datetime.now(timezone.utc) - timedelta(minutes=30)
         deals = mt5.history_deals_get(since, datetime.now(timezone.utc))
