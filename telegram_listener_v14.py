@@ -1624,14 +1624,8 @@ class TradeManager:
                         send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
 
     def _manage_partial_quick(self, t: dict, pos, entry: dict, action: str):
-        """P4a: Partial Quick — fermeture rapide à +5$"""
-        if pos.profit >= P4A_QUICK_TARGET:
-            if self.bridge.close_position(t["ticket"], "P4a-QUICK"):
-                t["be_active"] = True  # marquer comme géré
-                if LOG_TRADE_MANAGEMENT:
-                    log.info(msg.log_p4a_close(t["ticket"], pos.profit))
-                if ALERT_TRADE_MANAGEMENT:
-                    send_alert_sync(msg.alert_p4a_close(t["ticket"], pos.profit))
+        """P4a: Partial Quick — TP direct à +5$, géré par MT5 (pas de gestion manuelle)"""
+        pass  # Le TP placé à l'ouverture ferme la position automatiquement
 
     def _manage_partial_trail(self, t: dict, pos, entry: dict, action: str):
         """P4b: Partial Trail — trailing PARTIAL_TRAIL_USD$"""
@@ -1980,7 +1974,6 @@ P2_SL_OFFSET_3 = float(os.getenv("P2_SL_OFFSET_3", "5.0"))
 
 # === P4a PARTIAL QUICK — target configurable ===
 P4A_TP_OFFSET = float(os.getenv("P4A_TP_OFFSET", "5.0"))  # pas de changement
-P4A_QUICK_TARGET = float(os.getenv("P4A_QUICK_TARGET", "3.0"))
 
 # Méthodes de gestion
 METHODS = [
