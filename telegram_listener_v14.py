@@ -855,11 +855,13 @@ class MT5Bridge:
     def place_market_order(self, signal: dict, lot: float, tp: float, sl: float = 0.0, comment: str = "TG-market") -> int | None:
         sym = self._sym(signal["symbol"])
         if not sym:
+            log.warning(f"MARKET FAIL: symbole introuvable: {signal['symbol']}")
             return None
         lot = self._validate_volume(sym, lot)
         action = signal["action"]
         tick = mt5.symbol_info_tick(sym.name)
         if not tick:
+            log.warning(f"MARKET FAIL: pas de prix pour {sym.name}")
             return None
         price = tick.ask if action == "BUY" else tick.bid
         otype = mt5.ORDER_TYPE_BUY if action == "BUY" else mt5.ORDER_TYPE_SELL
@@ -890,6 +892,10 @@ class MT5Bridge:
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 log.debug(f"MARKET {action} {sym.name} lot={lot} @{price} ticket#{result.order}")
                 return result.order
+            else:
+                retcode = result.retcode if result else "NO_RESULT"
+                comment_mt5 = result.comment if result else "no result"
+                log.warning(f"MARKET FAIL {action} {sym.name} lot={lot} @{price} SL={sl} TP={tp} fill={fill_mode} retcode={retcode} comment={comment_mt5}")
         return None
 
     def cancel_order(self, order_ticket: int) -> bool:
