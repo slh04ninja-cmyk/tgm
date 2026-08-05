@@ -184,6 +184,9 @@ CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == 
 # ★ MODE POSITION UNIQUE : convertit les signaux zone (2 positions) en MARKET seul,
 # et désactive le merge QA+Fusion. Seul le Quick Alert est exécuté.
 
+# === TOLÉRANCE ZONE ===
+TOLERANCE_ZN = float(os.getenv("TOLERANCE_ZN", "1.0"))
+
 # === AUTRES ===
 TG_ALERT_CHANNEL = os.getenv("TG_ALERT_CHANNEL", "")
 ACTIVE_GRADE = os.getenv("ACTIVE_GRADE", "false").lower() == "true"
@@ -2357,25 +2360,28 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
     if is_zone_signal and len(all_tps) >= 1:
         unique_lot = LOT_UNIQUE_TRADE
 
-        # ZN1 : prix dans la zone
-        in_zone = zone_low <= current <= zone_high
-        # ZN2 : prix entre la zone et SL (meilleur prix)
         if action == "BUY":
-            # SL < zone_low, prix entre SL et zone_low
-            between_zone_sl = sl < current < zone_low
+            # Prix <= zone_low → ZN2, zone < prix <= zone_high+TOL → ZN1, sinon annulé
+            if current <= zone_low:
+                zn_prefix = "ZN2"
+            elif current <= zone_high + TOLERANCE_ZN:
+                zn_prefix = "ZN1"
+            else:
+                log.info(msg.log_refuse(ch_num, "-ZN", msg.MOTIF_PRIX_HORS_ZONE))
+                log.warning(f"ZN annulé — prix={current} hors zone | zone={zone_low}-{zone_high} SL={sl}")
+                return
         else:
-            # SL > zone_high, prix entre zone_high et SL
-            between_zone_sl = zone_high < current < sl
+            # Prix >= zone_high → ZN2, zone_low-TOL <= prix < zone_high → ZN1, sinon annulé
+            if current >= zone_high:
+                zn_prefix = "ZN2"
+            elif current >= zone_low - TOLERANCE_ZN:
+                zn_prefix = "ZN1"
+            else:
+                log.info(msg.log_refuse(ch_num, "-ZN", msg.MOTIF_PRIX_HORS_ZONE))
+                log.warning(f"ZN annulé — prix={current} hors zone | zone={zone_low}-{zone_high} SL={sl}")
+                return
 
-        if in_zone:
-            mt5_comment_zn = f"CH{ch_num}-ZN1"
-        elif between_zone_sl:
-            mt5_comment_zn = f"CH{ch_num}-ZN2"
-        else:
-            log.info(msg.log_refuse(ch_num, "-ZN", msg.MOTIF_PRIX_HORS_ZONE))
-            log.warning(f"ZN annulé — prix={current} hors zone | "
-                        f"zone={zone_low}-{zone_high} SL={sl}")
-            return
+        mt5_comment_zn = f"CH{ch_num}-{zn_prefix}"
 
         # ★ SL plafonné
         avg_entry = (zone_low + zone_high) / 2
@@ -2384,7 +2390,6 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         log.debug(f"ZN — {mt5_comment_zn} | zone={zone_low}-{zone_high} SL={sl} prix={current}")
 
         # ★ Multi-positions (A/B testing)
-        zn_prefix = "ZN1" if in_zone else "ZN2"
         _open_multi_positions(signal, bridge, manager,
                               action, symbol, current, sl, tp_final,
                               unique_lot, ch_num, canal, prefix=zn_prefix)
