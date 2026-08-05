@@ -2134,7 +2134,11 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         for c in channels_sorted:
             wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
             c_losses = c.get('losses', c['trades'] - c['wins'])
-            name = c.get('name', '')[:22]
+            import re as _re
+            raw_name = c.get('name', '')
+            name = _re.sub(r'[^\x00-\x7F]+', '', raw_name).strip()[:22]
+            if not name:
+                name = f"CH{c['ch_num']}"
             pdf.cell(18, 6, f"CH{c['ch_num']}", border=1)
             pdf.cell(48, 6, name, border=1)
             pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
