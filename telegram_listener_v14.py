@@ -1218,6 +1218,15 @@ class TradeManager:
         positions = mt5.positions_get()
         nb_positions = len([p for p in positions if p.magic == MAGIC_NUMBER]) if positions else 0
 
+        # ★ FIX E2 : marquer tous les tickets comme _reported AVANT fermeture
+        # pour éviter le double comptage P&L quand _check_all détecte les positions fermées
+        for entry in list(self.active):
+            for t in entry.get("tickets", []):
+                if not t.get("_reported"):
+                    t["_reported"] = True
+                    sym = entry.get("signal", {}).get("symbol", "")
+                    t["_last_pnl"] = self._get_last_pnl(t["ticket"], sym)
+
         # Fermer les positions et collecter les données AVANT clear
         cancelled = 0
         if nb_positions > 0:
@@ -2681,13 +2690,41 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
         qa_entry_price = qa.get("entry_price", 0)
         real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
         log.info(f"Fusion: mise a jour SL/TP du QA #{qa_ticket} SL={real_sl} TP={tp_final}")
-        bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[FUSION-SL-TP]")
-        for t in entry["tickets"]:
-            if t["ticket"] == qa_ticket:
-                t["tp_final"]  = tp_final
-                t["tp_target"] = tp_final
-                t["tp3"]       = tp_final
-                break
+
+        # ★ FIX B1 : mettre à jour SL/TP sur TOUTES les positions (P1-P4b)
+        action = full_signal["action"]
+        for t in entry.get("tickets", []):
+            ticket = t["ticket"]
+            pos_t = mt5.positions_get(ticket=ticket)
+            if not pos_t:
+                continue
+            role = t.get("role", "tp_fixe")
+            # Calculer le TP correct pour chaque méthode
+            if role == "tp_fixe":
+                tp_for_method = tp_final
+            elif role == "be_scale":
+                if action == "BUY":
+                    tp_for_method = round(qa_entry_price + P2_TP_OFFSET, 2)
+                else:
+                    tp_for_method = round(qa_entry_price - P2_TP_OFFSET, 2)
+            elif role == "partial_quick":
+                if action == "BUY":
+                    tp_for_method = round(qa_entry_price + P4A_TP_OFFSET, 2)
+                else:
+                    tp_for_method = round(qa_entry_price - P4A_TP_OFFSET, 2)
+            else:
+                # trailing / partial_trail : TP lointain
+                if action == "BUY":
+                    tp_for_method = round(qa_entry_price + 500, 2)
+                else:
+                    tp_for_method = round(qa_entry_price - 500, 2)
+
+            bridge.modify_sl_tp(ticket, real_sl, tp_for_method, f"[FUSION-{role}]")
+            t["tp_final"]  = tp_for_method
+            t["tp_target"] = tp_for_method
+            t["tp3"]       = tp_for_method
+            log.debug(f"  Fusion {role} #{ticket} SL={real_sl} TP={tp_for_method}")
+
         entry["signal"]          = full_signal
         entry["_is_quick_alert"] = False
         ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
@@ -2720,6 +2757,7 @@ async def main():
     parser = SignalParser()
     bridge = MT5Bridge()
     manager = None
+    news_mgr = None  # ★ FIX E1 : initialisé avant try pour éviter UnboundLocalError dans finally
 
     try:
         if not bridge.connect():
@@ -2848,17 +2886,17 @@ async def main():
                 if TG_ALERT_CHANNEL:
                     log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
 
-                # Sauvegarder la liste des canaux dans Channel.txt
+                # Sauvegarder la liste des canaux dans Channels.txt
                 try:
-                    with open("Channel.txt", "w", encoding="utf-8") as f:
+                    with open("Channels.txt", "w", encoding="utf-8") as f:
                         f.write(f"# Canaux chargés depuis les dossiers Telegram: {', '.join(found_folders)}\n")
                         f.write(f"# {ch_num} canaux — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
                         f.write("\n")
                         for i, (ent, name) in enumerate([(e, entity_to_name.get(e.id, '?')) for e in chats], 1):
                             f.write(f"Canal_{i} : {name}\n")
-                    log.info(f"Liste sauvegardée dans Channel.txt")
+                    log.info(f"Liste sauvegardée dans Channels.txt")
                 except Exception as e:
-                    log.warning(f"Impossible de sauvegarder Channel.txt: {e}")
+                    log.warning(f"Impossible de sauvegarder Channels.txt: {e}")
             except Exception as e:
                 log.error(f"Erreur lecture dossier Telegram '{TG_FOLDER}': {e}")
                 return

@@ -1,7 +1,7 @@
 """
 =============================================================
  BOT_MESSAGES.PY — Textes des logs et alertes Telegram
- Version v12.1.0 — Formats d'alertes mis à jour
+ Version v14.0.0 — Multi-Position A/B Testing & Rapport Quotidien
 =============================================================
 Centralise tous les textes affichés (console + Telegram) pour pouvoir
 les modifier facilement SANS toucher à la logique de trading.
