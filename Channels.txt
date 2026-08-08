@@ -1,10 +1,10 @@
 # Canaux filtrés — Top 30 par P&L réalisé (semaine 2026-08-03 au 2026-08-07)
-# Format : Canal_NUM : ID_Telegram # Commentaire
-# 25 IDs résolus + 5 noms (fallback)
+# Format : Canal_NUM : -100XXXXXXXXXX
+# 30/30 IDs Telegram résolus
 # P&L hebdo global : -1079.61$ | WR : 53.0% | 1410 trades sur 55 canaux
 
-Canal_2 : SMITH XAUUSD KLLER
-Canal_5 : Jennifer GOLD
+Canal_2 : -1003864453549
+Canal_5 : -1003093203682
 Canal_59 : -1002034687073
 Canal_66 : -1001461262917
 Canal_25 : -1003186841892
@@ -12,17 +12,17 @@ Canal_30 : -1002292412426
 Canal_33 : -1001929887438
 Canal_10 : -1002145295870
 Canal_23 : -1001506646047
-Canal_18 : TRADING FX STAR
+Canal_18 : -1004296578121
 Canal_49 : -1001501903093
 Canal_14 : -1001390814458
 Canal_17 : -1001513988436
-Canal_22 : David Forex Empire- Market Insights
+Canal_22 : -1001835180497
 Canal_60 : -1001983856587
 Canal_63 : -1001711665003
 Canal_41 : -1001824498595
 Canal_46 : -1001666520346
 Canal_21 : -1002064452602
-Canal_1 : TRADE WITH MARK
+Canal_1 : -1004462714307
 Canal_38 : -1001086101437
 Canal_39 : -1001584939836
 Canal_47 : -1001812730316
