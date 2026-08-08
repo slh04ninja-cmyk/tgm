@@ -2047,13 +2047,14 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                     pos = manager._get_pos(t["ticket"])
                     if pos:
                         ticket = t["ticket"]
-                        symbol = sig.get("symbol", "")
+                        sig_type = sig.get("type", "PU")
+                        ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
                         bridge.close_position(ticket, "NEW-SIGNAL")
+                        log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
                         # Mettre à jour le P&L quotidien (attendre que le deal apparaisse)
                         time.sleep(0.3)
-                        pnl = manager._get_last_pnl(ticket, symbol)
+                        pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
                         manager._update_daily_pnl(pnl)
-                        log.info(f"[1-PER-CH] Position #{ticket} fermée pour canal {canal} P&L={pnl:+.2f}")
                 # Retirer l'entrée
                 manager.active.remove(entry)
                 return True
@@ -2490,8 +2491,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             elif current <= zone_high + TOLERANCE_ZN:
                 zn_prefix = "ZN1"
             else:
-                log.info(msg.log_refuse(ch_num, "-ZN", msg.MOTIF_PRIX_HORS_ZONE))
-                log.warning(f"ZN annulé — prix={current} hors zone | zone={zone_low}-{zone_high} SL={sl}")
+                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE | prix={current} | zone={zone_low}-{zone_high}")
                 return
         else:
             # Prix >= zone_high → ZN2, zone_low-TOL <= prix < zone_high → ZN1, sinon annulé
@@ -2500,8 +2500,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             elif current >= zone_low - TOLERANCE_ZN:
                 zn_prefix = "ZN1"
             else:
-                log.info(msg.log_refuse(ch_num, "-ZN", msg.MOTIF_PRIX_HORS_ZONE))
-                log.warning(f"ZN annulé — prix={current} hors zone | zone={zone_low}-{zone_high} SL={sl}")
+                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE | prix={current} | zone={zone_low}-{zone_high}")
                 return
 
         mt5_comment_zn = f"CH{ch_num}-{zn_prefix}"
@@ -2510,7 +2509,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         avg_entry = (zone_low + zone_high) / 2
         sl = _cap_sl(action, avg_entry, sl, MAX_SL_USD)
 
-        log.debug(f"ZN — {mt5_comment_zn} | zone={zone_low}-{zone_high} SL={sl} prix={current}")
+        log.info(f"CH{ch_num}-{zn_prefix} | ACCEPTE | prix={current} | zone={zone_low}-{zone_high}")
 
         # ★ Multi-positions (A/B testing)
         _open_multi_positions(signal, bridge, manager,
@@ -2541,15 +2540,13 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         elif is_type2:
             mt5_comment_pu = f"CH{ch_num}-{prefix}2"
         else:
-            log.info(msg.log_refuse(ch_num, f"-{prefix}", msg.MOTIF_PRIX_HORS_ZONE))
-            log.warning(f"{prefix} annulé — prix={current} hors zones | "
-                        f"entry={entry_price} SL={sl_price} tolérance={PRICE_TOLERANCE}")
+            log.info(f"CH{ch_num}-{prefix} | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
             return
 
         # ★ SL plafonné
         sl = _cap_sl(action, entry_price, sl, MAX_SL_USD)
 
-        log.debug(f"{prefix} — {mt5_comment_pu} | entry={entry_price} SL={sl} prix={current}")
+        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | prix={current} | entry={entry_price}")
 
         # ★ Multi-positions (A/B testing)
         pu_prefix = "PU1" if is_type1 else "PU2"
@@ -2672,8 +2669,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             # Défavorable: prix < entry - tolerance (le prix descend trop contre le SELL)
             is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
         if is_unfavorable:
-            log.info(f"Quick Alert annulée — prix défavorable | "
-                     f"prix={current} entry={entry_price} écart>défavorable de {QA_PRICE_TOLERANCE}")
+            log.info(f"CH{ch_num}-AL | Quick Alert ANNULE | prix={current} | entry={entry_price}")
             _alert_mgmt(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
             return
 
@@ -2730,8 +2726,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         else:
             # Prix entre entry et SL (favorable) — pas dans tolérance
             mt5_comment_qa = f"CH{ch_num}-AL1"
-    _log_mgmt(msg.log_signal_detected(mt5_comment_qa, action, entry_price))
-    log.debug(f"Quick Alert MARKET {action} {symbol} @{current} SL={sl}, TP={default_tp}")
+    log.info(f"CH{ch_num}-AL | ACCEPTE | prix={current} | entry={entry_price}")
 
     # ★ SL plafonné
     entry_for_sl = entry_price if entry_price else current
@@ -2803,7 +2798,7 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
         # ★ SL plafonné aussi lors de la fusion
         qa_entry_price = qa.get("entry_price", 0)
         real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
-        log.info(f"Fusion: mise a jour SL/TP du QA #{qa_ticket} SL={real_sl} TP={tp_final}")
+        log.info(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final}")
         bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[FUSION-SL-TP]")
         for t in entry["tickets"]:
             if t["ticket"] == qa_ticket:
