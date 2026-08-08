@@ -1355,7 +1355,8 @@ class TradeManager:
                 for line in f:
                     m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
                     if m:
-                        ch_name_map[int(m.group(1))] = m.group(2).strip()
+                        # Support commentaires # : "-100XXX # nom" → "-100XXX"
+                        ch_name_map[int(m.group(1))] = m.group(2).split('#')[0].strip()
         except Exception:
             pass
         for _env_name, _val in _CHANNELS_LIST:
@@ -2878,7 +2879,8 @@ async def main():
                         m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
                         if m:
                             ch_num = int(m.group(1))
-                            name = m.group(2).strip()
+                            # Support commentaires # : "-100XXX # nom" → "-100XXX"
+                            name = m.group(2).split('#')[0].strip()
                             _channels_from_file.append((ch_num, name))
 
                 if not _channels_from_file:
