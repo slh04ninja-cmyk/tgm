@@ -1,35 +1,35 @@
 # Canaux filtrés — Top 30 par P&L réalisé (semaine 2026-08-03 au 2026-08-07)
-# Source : rapport_final_2026-08-03_au_07.pdf
-# 21 canaux en profit + 9 moins déficitaires
+# Format : Canal_NUM : ID_Telegram # Commentaire
+# 25 IDs résolus + 5 noms (fallback)
 # P&L hebdo global : -1079.61$ | WR : 53.0% | 1410 trades sur 55 canaux
 
-Canal_2 : SMITH XAUUSD KLLER🌆
-Canal_5 : 👑Jennifer GOLD👑
-Canal_59 : AJIB BOY FX
-Canal_66 : Pudin Fx Official
-Canal_25 : AMELIA GOLD TRADER
-Canal_30 : ELITE CAPITAL FX
-Canal_33 : ALbert Fx✨🤑
-Canal_10 : GREEN PIPS 🌐
-Canal_23 : Alixza Gold Trading
+Canal_2 : SMITH XAUUSD KLLER
+Canal_5 : Jennifer GOLD
+Canal_59 : -1002034687073
+Canal_66 : -1001461262917
+Canal_25 : -1003186841892
+Canal_30 : -1002292412426
+Canal_33 : -1001929887438
+Canal_10 : -1002145295870
+Canal_23 : -1001506646047
 Canal_18 : TRADING FX STAR
-Canal_49 : World of forex
-Canal_14 : XAUUSD GOLD TRADING
-Canal_17 : XAUUSD GOLD MASTER ☠️
+Canal_49 : -1001501903093
+Canal_14 : -1001390814458
+Canal_17 : -1001513988436
 Canal_22 : David Forex Empire- Market Insights
-Canal_60 : GOLD MARKET ACADEMY
-Canal_63 : USD Scalper Project
-Canal_41 : KING FOREX TRADER
-Canal_46 : XAUUSD TRADING ZONE
-Canal_21 : Roby Sultan Gold Flip
+Canal_60 : -1001983856587
+Canal_63 : -1001711665003
+Canal_41 : -1001824498595
+Canal_46 : -1001666520346
+Canal_21 : -1002064452602
 Canal_1 : TRADE WITH MARK
-Canal_38 : ANN Zerofloat 🇵🇸
-Canal_39 : GOLD Snipers
-Canal_47 : Key Level Academy
-Canal_36 : FOREX GOLD TRADING VIP
-Canal_37 : FX PIPS MASTER
-Canal_9 : XAUUSD GOLD SIGNALS
-Canal_43 : GOLD TECHNICAL
-Canal_40 : TRADE WITH JONNY
-Canal_44 : GOLD KING
-Canal_3 : FX SIMMONS MASTER
+Canal_38 : -1001086101437
+Canal_39 : -1001584939836
+Canal_47 : -1001812730316
+Canal_36 : -1002483675141
+Canal_37 : -1002204484652
+Canal_9 : -1002225635903
+Canal_43 : -1001266008199
+Canal_40 : -1001793730356
+Canal_44 : -1001650552095
+Canal_3 : -1003701551347
