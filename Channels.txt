@@ -1,69 +1,35 @@
-# Canaux chargés depuis les dossiers Telegram: PU, ZN, QA
-# 66 canaux — 2026-08-04 08:26:07 UTC
+# Canaux filtrés — Top 30 par P&L réalisé (semaine 2026-08-03 au 2026-08-07)
+# Source : rapport_final_2026-08-03_au_07.pdf
+# 21 canaux en profit + 9 moins déficitaires
+# P&L hebdo global : -1079.61$ | WR : 53.0% | 1410 trades sur 55 canaux
 
-Canal_1 : TRADE WITH MARK
 Canal_2 : SMITH XAUUSD KLLER🌆
-Canal_3 : FX SIMMONS MASTER
-Canal_4 : FOREX PLATO TRADING
 Canal_5 : 👑Jennifer GOLD👑
-Canal_6 : GOLD SIGNALS VIP (XAUUSD HUNTER FX)
-Canal_7 : SHB EXPERT TRADER
-Canal_8 : TRADE WITH AHSAN
-Canal_9 : XAUUSD GOLD SIGNALS
-Canal_10 : GREEN PIPS 🌐
-Canal_11 : GOLDHUNTER PAUL 🦁 WORLDWIDE COMMUNITY 👑
-Canal_12 : VIP SIGNAL GOLD
-Canal_13 : Forex Xauusd & Binary Market Trader
-Canal_14 : XAUUSD GOLD TRADING
-Canal_15 : Yakuza Trade Direction
-Canal_16 : FxGzl
-Canal_17 : XAUUSD GOLD MASTER ☠️
-Canal_18 : TRADING FX STAR
-Canal_19 : XAUUSD FOREX TRADING TM
-Canal_20 : ELITE TRADE SIGNALS
-Canal_21 : Roby Sultan Gold Flip
-Canal_22 : David Forex Empire- Market Insights
-Canal_23 : Alixza Gold Trading
-Canal_24 : INSIDER TRADING
+Canal_59 : AJIB BOY FX
+Canal_66 : Pudin Fx Official
 Canal_25 : AMELIA GOLD TRADER
-Canal_26 : TOP TRADING SIGNALS
-Canal_27 : XAUUSD DAILY SIGNAL
-Canal_28 : XAU/USD SIGNALS🚦
-Canal_29 : TRADE HARIS FX
 Canal_30 : ELITE CAPITAL FX
-Canal_31 : GOLD PREMIUM SIGNALS
-Canal_32 : GOLD ANALYSIS FREE SIGNALS
 Canal_33 : ALbert Fx✨🤑
-Canal_34 : Xauusd Gold Vip
-Canal_35 : PIPS MASTER
-Canal_36 : FOREX GOLD TRADING VIP
-Canal_37 : FX PIPS MASTER
+Canal_10 : GREEN PIPS 🌐
+Canal_23 : Alixza Gold Trading
+Canal_18 : TRADING FX STAR
+Canal_49 : World of forex
+Canal_14 : XAUUSD GOLD TRADING
+Canal_17 : XAUUSD GOLD MASTER ☠️
+Canal_22 : David Forex Empire- Market Insights
+Canal_60 : GOLD MARKET ACADEMY
+Canal_63 : USD Scalper Project
+Canal_41 : KING FOREX TRADER
+Canal_46 : XAUUSD TRADING ZONE
+Canal_21 : Roby Sultan Gold Flip
+Canal_1 : TRADE WITH MARK
 Canal_38 : ANN Zerofloat 🇵🇸
 Canal_39 : GOLD Snipers
-Canal_40 : TRADE WITH JONNY
-Canal_41 : KING FOREX TRADER
-Canal_42 : ANALYSIS GOLD SIGNALS
-Canal_43 : GOLD TECHNICAL
-Canal_44 : GOLD KING
-Canal_45 : Best of gold
-Canal_46 : XAUUSD TRADING ZONE
 Canal_47 : Key Level Academy
-Canal_48 : SUPER SCALPING KING RYAN 🇸🇬
-Canal_49 : World of forex
-Canal_50 : THE GOLD TRADER
-Canal_51 : ELLIOTT WAVE 🇸🇬
-Canal_52 : GOLD PRO SIGNALS
-Canal_53 : HEATMAP SCALPING
-Canal_54 : ALBALOSHI FX TEAM
-Canal_55 : XAUUSD/GOLD SCALPERS
-Canal_56 : GOLD VIP PIPS MASTER
-Canal_57 : KELVIN GOLD MASTER
-Canal_58 : FX VIP SERVICE
-Canal_59 : AJIB BOY FX
-Canal_60 : GOLD MARKET ACADEMY
-Canal_61 : GOLD SNIPER ZONE
-Canal_62 : GOLD SNIPER
-Canal_63 : USD Scalper Project
-Canal_64 : EAGLE FOREX PESEARCH
-Canal_65 : FOREX GOLD CLUB
-Canal_66 : Pudin Fx Official
+Canal_36 : FOREX GOLD TRADING VIP
+Canal_37 : FX PIPS MASTER
+Canal_9 : XAUUSD GOLD SIGNALS
+Canal_43 : GOLD TECHNICAL
+Canal_40 : TRADE WITH JONNY
+Canal_44 : GOLD KING
+Canal_3 : FX SIMMONS MASTER
