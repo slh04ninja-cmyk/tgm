@@ -180,6 +180,12 @@ SPAM_STANDALONE = ["target", "running"]
 def is_spam(text: str) -> bool:
     low = text.lower()
     lines = low.split("\n")
+    # ★ FIX (v16) : filtrer les messages “Active” même s’ils contiennent BUY/SELL
+    # Ex: "GOLD SELL 4337 Active" → statut de signal déjà suivi, pas un nouveau signal
+    for line in lines:
+        stripped = line.strip().strip("📍🎯📊📈📉❌✅🔴🟢⚪")
+        if stripped.endswith(" active") or stripped == "active":
+            return True
     for kw in EXCLUDE_KEYWORDS:
         if kw in low:
             if re.search(r'\b(BUY|SELL|LONG|SHORT)\b', low):
