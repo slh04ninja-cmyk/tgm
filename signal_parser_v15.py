@@ -411,12 +411,13 @@ def _extract_entry_and_zone(normalized_text: str) -> Tuple[Optional[float], Opti
         if 1000 <= low <= 99999 and 1000 <= high <= 99999:
             return min(low, high), max(low, high), False
 
-    # 9b. Raccourci zone : 4033/37 → zone 4033-4037 (2 chiffres, diff <= 10)
-    m = re.search(r'\b(\d{4})\s+(\d{2})\b', normalized_text)
+    # 9b. Raccourci zone : 4033/37 ou 4028-24 → zone (2 chiffres, diff <= 10)
+    # Supporte espace, tiret, slash comme séparateur
+    m = re.search(r'\b(\d{4})\s*[/\-\s]\s*(\d{2})\b', normalized_text)
     if m:
-        base = int(m.group(1))   # 4033
-        short = int(m.group(2))  # 37
-        last2 = base % 100       # 33
+        base = int(m.group(1))   # 4028
+        short = int(m.group(2))  # 24
+        last2 = base % 100       # 28
         diff_normal = abs(short - last2)
         diff_rollover = abs((short + 100) - last2)  # ex: 4098/03 → abs(103-98)=5
         if diff_normal <= 10:
@@ -433,6 +434,20 @@ def _extract_entry_and_zone(normalized_text: str) -> Tuple[Optional[float], Opti
         low = float(m.group(2)); high = float(m.group(3))
         if 1000 <= low <= 99999 and 1000 <= high <= 99999:
             return min(low, high), max(low, high), False
+    # 10a. Raccourci zone après BUY/SELL : BUY 4028-24 ou SELL 4028-24
+    m = re.search(r'\b(BUY|SELL|LONG|SHORT|SEL)\s+(?:NOW\s+)?(\d{4})\s*[-]\s*(\d{2})\b', normalized_text)
+    if m:
+        base = int(m.group(2))   # 4028
+        short = int(m.group(3))  # 24
+        last2 = base % 100       # 28
+        diff_normal = abs(short - last2)
+        diff_rollover = abs((short + 100) - last2)
+        if diff_normal <= 10:
+            high = (base // 100) * 100 + short
+            return float(min(base, high)), float(max(base, high)), False
+        elif diff_rollover <= 10:
+            high = (base // 100 + 1) * 100 + short
+            return float(min(base, high)), float(max(base, high)), False
     # 10b. Prix unique après la direction (ex: BUY 4512 ou BUY NOW 4512)
     m = re.search(r'\b(BUY|SELL|LONG|SHORT|SEL)\s+(?:NOW\s+)?([\d.]+)', normalized_text)
     if m:

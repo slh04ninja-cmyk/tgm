@@ -2491,7 +2491,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             elif current <= zone_high + TOLERANCE_ZN:
                 zn_prefix = "ZN1"
             else:
-                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE | prix={current} | zone={zone_low}-{zone_high}")
+                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
                 return
         else:
             # Prix >= zone_high → ZN2, zone_low-TOL <= prix < zone_high → ZN1, sinon annulé
@@ -2500,7 +2500,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             elif current >= zone_low - TOLERANCE_ZN:
                 zn_prefix = "ZN1"
             else:
-                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE | prix={current} | zone={zone_low}-{zone_high}")
+                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
                 return
 
         mt5_comment_zn = f"CH{ch_num}-{zn_prefix}"
@@ -2509,7 +2509,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         avg_entry = (zone_low + zone_high) / 2
         sl = _cap_sl(action, avg_entry, sl, MAX_SL_USD)
 
-        log.info(f"CH{ch_num}-{zn_prefix} | ACCEPTE | prix={current} | zone={zone_low}-{zone_high}")
+        log.info(f"CH{ch_num}-{zn_prefix} | ACCEPTE")
 
         # ★ Multi-positions (A/B testing)
         _open_multi_positions(signal, bridge, manager,
@@ -2726,14 +2726,18 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         else:
             # Prix entre entry et SL (favorable) — pas dans tolérance
             mt5_comment_qa = f"CH{ch_num}-AL1"
-    log.info(f"CH{ch_num}-AL | ACCEPTE | prix={current} | entry={entry_price}")
+    # ★ FIX (v16) : utiliser le vrai type (MP/AL1/AL2) au lieu de "AL" en dur
+    qa_label = mt5_comment_qa.split("-")[1] if "-" in mt5_comment_qa else "MP"
+    # ★ Ordre : réception → exécution
+    log.info(msg.log_signal_detected(mt5_comment_qa, action, round(current, 3)))
+    log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | prix={current}")
 
     # ★ SL plafonné
     entry_for_sl = entry_price if entry_price else current
     sl = _cap_sl(action, entry_for_sl, sl, MAX_SL_USD)
 
     # ★ Multi-positions (A/B testing)
-    qa_prefix = mt5_comment_qa.split("-")[1] if "-" in mt5_comment_qa else "MP"
+    qa_prefix = qa_label
     ok = _open_multi_positions(signal, bridge, manager,
                                action, symbol, current, sl, default_tp,
                                LOT_UNIQUE_TRADE, ch_num, canal, prefix=qa_prefix)
@@ -2770,6 +2774,8 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
     real_sl   = full_signal["sl"]
     tp_final  = full_signal["tps"][-1] if full_signal["tps"] else 0
     canal     = full_signal.get("source_channel", "Inconnu")
+    # ★ FIX (v16) : ch_num_fusion défini AVANT le if/else pour être disponible dans les deux branches
+    ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
 
     # Fusion : mettre à jour SL/TP du QA existant, jamais de 2e position.
     pos = mt5.positions_get(ticket=qa_ticket)
@@ -2791,7 +2797,7 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                         elif deal.reason == mt5.DEAL_REASON_TP:
                             close_reason = "TP"
                         break
-        ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+        log.info(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
         _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
         # QA actif -> mettre a jour SL et TP avec ceux du signal complet
@@ -2808,7 +2814,6 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                 break
         entry["signal"]          = full_signal
         entry["_is_quick_alert"] = False
-        ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
         _alert_mgmt(msg.alert_fusion(full_signal['action'], ch_num_fusion, qa_ticket, real_sl, tp_final))
 
     # Nettoyer quick_alerts
@@ -3300,25 +3305,29 @@ async def main():
 
             signal_data.source_channel = canal_name
 
-            # Log du signal reçu (sans scénario — le vrai scénario est loggé par execute_signal)
+            # ★ Déterminer le mode du signal (utilisé plus tard pour le log)
+            _sig_mode = None
+            _sig_ch_num = None
+            _sig_mt5_comment = None
+            _sig_zone_low = None
+            _sig_zone_high = None
             if signal_data.signal_type == "TRADE":
-                action = signal_data.direction or "?"
-                symbol = signal_data.pair or "?"
-                sl = signal_data.sl or 0
-                tp_final = signal_data.tp_final or 0
-                ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
-
+                _sig_ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
                 if signal_data.is_market_price:
-                    mode = "MP"
+                    _sig_mode = "MP"
                 elif signal_data.is_quick_alert:
-                    mode = "AL"
+                    _sig_mode = "AL"
                 elif signal_data.is_single_price:
-                    mode = "PU"
+                    _sig_mode = "PU"
+                elif signal_data.zone_low is not None and signal_data.zone_high is not None and signal_data.zone_low != signal_data.zone_high:
+                    _sig_mode = "ZN"
+                    _sig_zone_low = signal_data.zone_low
+                    _sig_zone_high = signal_data.zone_high
                 else:
-                    mode = "C"
-
-                mt5_comment = f"CH{ch_num}-{mode}"
-                log.info(msg.log_signal_detected(mt5_comment, action, signal_data.zone_mid))
+                    _sig_mode = "C"
+                _sig_mt5_comment = f"CH{_sig_ch_num}-{_sig_mode}"
+                # ★ FIX (v16) : ne pas logger ici — le log est déplacé après le check fusion
+                # pour éviter d'afficher "PU | SELL | 4348" quand c'est en fait une FUSION
 
             if signal_data.signal_type == "CLOSE":
                 canal = canal_name
@@ -3352,6 +3361,13 @@ async def main():
                 return
 
             elif signal_data.signal_type == "TRADE":
+                # ★ FIX (v16) : log de réception AVANT les filtres (pour toujours l'afficher)
+                if _sig_mt5_comment:
+                    if _sig_mode == "ZN" and _sig_zone_low is not None and _sig_zone_high is not None:
+                        log.info(msg.log_signal_detected_zone(_sig_mt5_comment, signal_data.direction or "?", _sig_zone_low, _sig_zone_high))
+                    else:
+                        log.info(msg.log_signal_detected(_sig_mt5_comment, signal_data.direction or "?", signal_data.zone_mid))
+
                 if NEWS_ENABLED and news_mgr.is_blocked():
                     ch_num_news = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
                     log.info(msg.log_refuse(ch_num_news, "", msg.MOTIF_PROTECTION_NEWS))
@@ -3359,11 +3375,11 @@ async def main():
 
                 blocked, reason = in_blocked_window()
                 if blocked:
-                    log.debug(f"[{canal_name}] Signal ignoré - Filtre horaire : {reason}")
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSÉ HORAIRE")
                     return
 
                 if not manager._check_daily_pnl_limit() or manager._daily_limit_reached:
-                    log.debug(f"[{canal_name}] Signal ignoré - Limite de P&L quotidien atteinte ({DAILY_PROFIT_LIMIT}$)")
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSÉ LIMITE P&L")
                     return
 
                 sig_dict = signal_data.to_dict()
