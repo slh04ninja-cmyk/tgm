@@ -3159,6 +3159,53 @@ async def main():
             # Ne pas traiter les DM comme des signaux
             return
 
+        # ★ V17 : HANDLER pour commandes dans le canal de rapport
+        if TG_ALERT_CHANNEL:
+            try:
+                alert_entity = await client.get_entity(TG_ALERT_CHANNEL)
+                alert_chat_id = alert_entity.id
+
+                @client.on(events.NewMessage(chats=[alert_entity]))
+                async def report_handler(event):
+                    """Gère les commandes dans le canal de rapport @TrdReport."""
+                    text = (event.message.text or "").strip().lower()
+                    if text.startswith("/"):
+                        if text in ("/bias", "biais", "bias"):
+                            fresh_bias = bias_engine.calculate_bias()
+                            _bias_state['result'] = fresh_bias
+                            _bias_state['last_calc'] = time.time()
+                            alert_text = bias_engine.format_bias_alert(fresh_bias)
+                            await event.reply(alert_text)
+                            log.info(f"[BIAS] /bias (Report) → {fresh_bias.bias} (score={fresh_bias.total_score:+d})")
+                        elif text in ("/status", "status"):
+                            b = _bias_state['result']
+                            pnl = manager._daily_pnl if manager else 0
+                            positions = mt5.positions_get() if mt5.initialize() else []
+                            active_count = len([p for p in (positions or []) if p.magic == MAGIC_NUMBER])
+                            status_text = (
+                                f"📊 STATUS\n"
+                                f"━━━━━━━━━━━━━━━━━━\n"
+                                f"P&L jour : {pnl:+.2f}$\n"
+                                f"Bias : {b.bias} ({b.total_score:+d})\n"
+                                f"Signaux acceptés : {b.direction}\n"
+                                f"Positions actives : {active_count}\n"
+                                f"Mode : {'DEMO' if DEMO_MODE else 'LIVE'}\n"
+                                f"Filtres : {enabled_count}/5 activés"
+                            )
+                            await event.reply(status_text)
+                        elif text in ("/help", "help", "aide"):
+                            help_text = (
+                                f"🤖 COMMANDES\n"
+                                f"━━━━━━━━━━━━━━━━━━\n"
+                                f"/bias — Détail des 5 filtres\n"
+                                f"/status — P&L, positions\n"
+                                f"/help — Cette aide"
+                            )
+                            await event.reply(help_text)
+                    return
+            except Exception as e:
+                log.warning(f"[BIAS] Impossible d'accéder au canal de rapport {TG_ALERT_CHANNEL}: {e}")
+
         @client.on(events.NewMessage(chats=chats))
         async def handler(event):
             text = event.message.text or ""
