@@ -164,17 +164,6 @@ TRADING_START_HOUR = int(os.getenv("TRADING_START_HOUR", "3"))
 TRADING_END_HOUR = int(os.getenv("TRADING_END_HOUR", "20"))
 DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "200.0"))
 
-# =============================================================
-# CONFIG TIMESFM
-# =============================================================
-TIMESFM_ENABLED         = os.getenv("TIMESFM_ENABLED", "true").lower() == "true"
-TIMESFM_TIMEFRAME       = os.getenv("TIMESFM_TIMEFRAME", "M5")   # M1, M5, M15, M30, H1
-TIMESFM_CONTEXT_BARS    = int(os.getenv("TIMESFM_CONTEXT_BARS", "256"))
-TIMESFM_HORIZON         = int(os.getenv("TIMESFM_HORIZON", "12"))
-TIMESFM_MIN_MOVE_PIPS   = float(os.getenv("TIMESFM_MIN_MOVE_PIPS", "5.0"))
-TIMESFM_MIN_CONFIDENCE  = float(os.getenv("TIMESFM_MIN_CONFIDENCE", "0.35"))
-TIMESFM_SYMBOL          = os.getenv("TIMESFM_SYMBOL", "XAUUSDm")  # symbole MT5 exact
-
 # === CACHE TTL ===
 
 
@@ -367,209 +356,6 @@ def send_alert_sync(message: str, _retries: int = 1):
 # =============================================================
 # PERFORMANCE TRACKER
 # =============================================================
-# =============================================================
-# TIMESFM VALIDATOR
-# =============================================================
-_TF_MAP = {
-    "M1":  mt5.TIMEFRAME_M1,
-    "M5":  mt5.TIMEFRAME_M5,
-    "M15": mt5.TIMEFRAME_M15,
-    "M30": mt5.TIMEFRAME_M30,
-    "H1":  mt5.TIMEFRAME_H1,
-}
-
-class TimesFMValidator:
-    """
-    Valide la direction d'un signal Telegram en comparant
-    avec la prévision TimesFM sur l'historique MT5.
-
-    Nécessite : pip install timesfm[torch]
-    Modèle utilisé : TimesFM 2.5 (200M paramètres, google/timesfm-2.5-200m-pytorch)
-    """
-
-    def __init__(self):
-        self._model   = None
-        self._ready   = False
-        self._loading = False
-        self._lock    = threading.Lock()
-
-        if TIMESFM_ENABLED:
-            # Chargement en arrière-plan pour ne pas bloquer le démarrage
-            t = threading.Thread(target=self._load_model, daemon=True)
-            t.start()
-
-    def _load_model(self):
-        with self._lock:
-            if self._ready or self._loading:
-                return
-            self._loading = True
-        try:
-            log.info("[TIMESFM] Chargement du modèle TimesFM 2.5 …")
-            # Installation automatique si absent
-            try:
-                import timesfm  # noqa: F401
-            except ImportError:
-                log.info("[TIMESFM] Installation de timesfm[torch] …")
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "timesfm[torch]", "-q"]
-                )
-
-            import timesfm
-            import torch
-
-            torch.set_float32_matmul_precision("high")
-
-            model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
-                "google/timesfm-2.5-200m-pytorch"
-            )
-            model.compile(
-                timesfm.ForecastConfig(
-                    max_context=TIMESFM_CONTEXT_BARS,
-                    max_horizon=TIMESFM_HORIZON,
-                    normalize_inputs=True,
-                    use_continuous_quantile_head=True,
-                )
-            )
-            with self._lock:
-                self._model  = model
-                self._ready  = True
-                self._loading = False
-            log.info("[TIMESFM] ✅ Modèle chargé et prêt.")
-        except Exception as e:
-            with self._lock:
-                self._loading = False
-            log.warning(f"[TIMESFM] ⚠️  Impossible de charger le modèle : {e}")
-            log.warning("[TIMESFM] Le bot fonctionnera sans validation TimesFM.")
-
-    # ----------------------------------------------------------
-    def _get_closes(self) -> list[float] | None:
-        """Récupère les cours de clôture depuis MT5."""
-        tf_key = TIMESFM_TIMEFRAME.upper()
-        tf     = _TF_MAP.get(tf_key, mt5.TIMEFRAME_M5)
-        symbol = TIMESFM_SYMBOL
-
-        # Vérifier / activer le symbole
-        info = mt5.symbol_info(symbol)
-        if info is None:
-            log.warning(f"[TIMESFM] Symbole {symbol} introuvable dans MT5")
-            return None
-        if not info.visible:
-            mt5.symbol_select(symbol, True)
-            time.sleep(0.3)
-
-        rates = mt5.copy_rates_from_pos(symbol, tf, 0, TIMESFM_CONTEXT_BARS)
-        if rates is None or len(rates) == 0:
-            log.warning(f"[TIMESFM] Aucune donnée pour {symbol} {tf_key}")
-            return None
-
-        import numpy as np
-        closes = np.array([r[4] for r in rates], dtype=float)  # index 4 = close
-        return closes.tolist()
-
-    # ----------------------------------------------------------
-    def validate(self, signal_direction: str) -> dict:
-        """
-        Valide un signal.
-
-        Retourne :
-            {
-                "valid":               bool,
-                "reason":              str,
-                "predicted_direction": str,
-                "confidence":          float,
-                "predicted_move_pips": float,
-            }
-        """
-        _pass = {
-            "valid": True,
-            "reason": "TimesFM désactivé ou non prêt",
-            "predicted_direction": signal_direction,
-            "confidence": 0.0,
-            "predicted_move_pips": 0.0,
-        }
-
-        if not TIMESFM_ENABLED:
-            return _pass
-
-        with self._lock:
-            ready = self._ready
-            model = self._model
-
-        if not ready or model is None:
-            log.info("[TIMESFM] Modèle non prêt → signal accepté sans validation")
-            return _pass
-
-        try:
-            import numpy as np
-
-            closes = self._get_closes()
-            if closes is None or len(closes) < 32:
-                log.warning("[TIMESFM] Historique insuffisant → signal accepté")
-                return _pass
-
-            point_forecast, quantile_forecast = model.forecast(
-                horizon=TIMESFM_HORIZON,
-                inputs=[np.array(closes)],
-            )
-
-            predicted   = point_forecast[0]       # array (horizon,)
-            last_price  = closes[-1]
-            pred_end    = float(predicted[-1])
-
-            # Direction prédite
-            pred_dir = "BUY" if pred_end > last_price else "SELL"
-
-            # Amplitude en pips (Gold : 1 pip = 0.1)
-            move_pips = abs(pred_end - last_price) / 0.1
-
-            # Confiance basée sur l'écart quantile 10%-90%
-            q10 = float(quantile_forecast[0, -1, 0])
-            q90 = float(quantile_forecast[0, -1, -1])
-            spread = abs(q90 - q10)
-            raw_move = abs(pred_end - last_price)
-            confidence = max(0.0, 1.0 - (spread / (raw_move + 1e-6)))
-            confidence = min(confidence, 1.0)
-
-            direction_ok  = (pred_dir == signal_direction)
-            move_ok       = (move_pips >= TIMESFM_MIN_MOVE_PIPS)
-            confidence_ok = (confidence >= TIMESFM_MIN_CONFIDENCE)
-
-            valid = direction_ok and move_ok and confidence_ok
-
-            reasons = []
-            if not direction_ok:
-                reasons.append(f"direction prédite={pred_dir} ≠ signal={signal_direction}")
-            if not move_ok:
-                reasons.append(f"move={move_pips:.1f} pips < min={TIMESFM_MIN_MOVE_PIPS}")
-            if not confidence_ok:
-                reasons.append(f"confiance={confidence:.2f} < min={TIMESFM_MIN_CONFIDENCE}")
-
-            reason = " | ".join(reasons) if reasons else "OK"
-
-            log.info(
-                f"[TIMESFM] Signal={signal_direction} Prédit={pred_dir} "
-                f"Move={move_pips:.1f}pips Conf={confidence:.2f} → {'✅ VALID' if valid else '❌ REJETÉ'}"
-            )
-            if not valid:
-                log.info(f"[TIMESFM] Raison rejet : {reason}")
-
-            return {
-                "valid":               valid,
-                "reason":              reason,
-                "predicted_direction": pred_dir,
-                "confidence":          round(confidence, 2),
-                "predicted_move_pips": round(move_pips, 1),
-            }
-
-        except Exception as e:
-            log.error(f"[TIMESFM] Erreur lors de la validation : {e}")
-            # En cas d'erreur, on laisse passer le signal
-            return _pass
-
-
-# Instance globale unique (chargement modèle en background)
-timesfm_validator = TimesFMValidator()
-
 # =============================================================
 # SIGNAL PARSER
 # =============================================================
@@ -3426,37 +3212,6 @@ async def main():
 
                 sig_dict = signal_data.to_dict()
 
-                # ============================================================
-                # ★★★ VALIDATION TIMESFM ★★★
-                # Appliquée uniquement aux signaux TRADE (pas aux quick alerts)
-                # ============================================================
-                if TIMESFM_ENABLED and not signal_data.is_quick_alert:
-                    tfm_result = timesfm_validator.validate(sig_dict["action"])
-                    if not tfm_result["valid"]:
-                        log.info(
-                            f"[TIMESFM] 🚫 Signal {sig_dict['action']} {sig_dict['symbol']} REJETÉ "
-                            f"— Prédit={tfm_result['predicted_direction']} "
-                            f"Move={tfm_result['predicted_move_pips']}pips "
-                            f"Conf={tfm_result['confidence']} "
-                            f"({tfm_result['reason']})"
-                        )
-                        _alert_mgmt(msg.alert_timesfm_rejected(
-                            sig_dict['action'], sig_dict['symbol'],
-                            tfm_result['predicted_direction'],
-                            tfm_result['predicted_move_pips'],
-                            tfm_result['confidence'],
-                            tfm_result['reason'],
-                            canal_name
-                        ))
-                        return
-                    else:
-                        log.info(
-                            f"[TIMESFM] ✅ Signal {sig_dict['action']} validé — "
-                            f"Move prédit={tfm_result['predicted_move_pips']}pips "
-                            f"Conf={tfm_result['confidence']}"
-                        )
-                # ============================================================
-
                 if signal_data.is_quick_alert:
                     execute_quick_alert(sig_dict, bridge, manager, _quick_alerts)
                     return
@@ -3534,12 +3289,6 @@ async def main():
             log.info(f"   FOMC      : {NEWS_BLOCK_MIN_FOMC}/{NEWS_CLOSE_MIN_FOMC}/{NEWS_AFTER_MIN_FOMC} min")
             log.info(f"   Spike     : {NEWS_BLOCK_MIN_SPIKE}/{NEWS_CLOSE_MIN_SPIKE}/{NEWS_AFTER_MIN_SPIKE} min")
         log.info(f" Max signaux actifs : {MAX_POSITIONS}")
-        log.info(f" TimesFM : {'ACTIVÉ' if TIMESFM_ENABLED else 'DÉSACTIVÉ'}")
-        if TIMESFM_ENABLED:
-            log.info(f"   Timeframe : {TIMESFM_TIMEFRAME} | Contexte : {TIMESFM_CONTEXT_BARS} bars")
-            log.info(f"   Horizon : {TIMESFM_HORIZON} bougies")
-            log.info(f"   Seuil move : {TIMESFM_MIN_MOVE_PIPS} pips | Confiance min : {TIMESFM_MIN_CONFIDENCE}")
-            log.info(f"   Symbole MT5 : {TIMESFM_SYMBOL}")
         log.info("=" * 55)
 
         await client.run_until_disconnected()

@@ -184,21 +184,6 @@ def alert_fusion_oot(action: str, ch_num, qa_ticket: int, new_sl: float, new_tp:
     )
 
 
-def alert_timesfm_rejected(action: str, symbol: str, pred_dir: str, pred_move: float,
-                             confidence: float, reason: str, canal: str) -> str:
-    """Alerte Telegram quand un signal est rejeté par TimesFM.
-    Format: 🚫 SIGNAL REJETÉ PAR TIMESFM"""
-    return (
-        f"🚫 SIGNAL REJETÉ PAR TIMESFM\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"{action} {symbol}\n"
-        f"Prédit: {pred_dir} ({pred_move} pips)\n"
-        f"Confiance: {confidence}\n"
-        f"Raison: {reason}\n"
-        f"Canal: {canal}"
-    )
-
-
 # =============================================================
 # 5. P&L QUOTIDIEN
 # =============================================================
