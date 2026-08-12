@@ -3148,12 +3148,12 @@ async def main():
                         f"/status — P&L, positions, mode\n"
                         f"/help — Cette aide\n"
                         f"\n"
-                        f"📊 FILTRES ACTIVÉS ({enabled_count}/5)\n"
-                        f"• GLD ETF Flow\n"
-                        f"• Shanghai Premium\n"
-                        f"• COT Report\n"
-                        f"• GVZ Volatility\n"
-                        f"• Fed Funds"
+                        f"📊 FILTRES ({enabled_count}/5) par fiabilité:\n"
+                        f"1. COT Report ⭐⭐⭐⭐⭐\n"
+                        f"2. GLD ETF Flow ⭐⭐⭐⭐⭐\n"
+                        f"3. GVZ Volatility ⭐⭐⭐⭐\n"
+                        f"4. Fed Funds ⭐⭐⭐\n"
+                        f"5. Shanghai Premium ⭐⭐"
                     )
                     await event.reply(help_text)
             # Ne pas traiter les DM comme des signaux
@@ -3472,11 +3472,11 @@ async def main():
             log.info(f"   Spike     : {NEWS_BLOCK_MIN_SPIKE}/{NEWS_CLOSE_MIN_SPIKE}/{NEWS_AFTER_MIN_SPIKE} min")
         log.info(f" Max signaux actifs : {MAX_POSITIONS}")
         log.info(f" BIAS Filters : {enabled_count}/5 activés (mode {'STRICT' if bias_engine.strict_mode else 'SOUPLE'})")
-        log.info(f"   GLD ETF Flow :    {'ON' if bias_engine.gld_enabled else 'OFF'}")
-        log.info(f" Shanghai Premium :  {'ON' if bias_engine.shanghai_enabled else 'OFF'}")
-        log.info(f" COT Report :        {'ON' if bias_engine.cot_enabled else 'OFF'}")
-        log.info(f" GVZ Volatility :    {'ON' if bias_engine.gvz_enabled else 'OFF'}")
-        log.info(f" Fed Funds :         {'ON' if bias_engine.fed_enabled else 'OFF'}")
+        log.info(f"   COT Report ⭐⭐⭐⭐⭐ :  {'ON' if bias_engine.cot_enabled else 'OFF'}")
+        log.info(f"   GLD ETF Flow ⭐⭐⭐⭐⭐ : {'ON' if bias_engine.gld_enabled else 'OFF'}")
+        log.info(f"   GVZ Volatility ⭐⭐⭐⭐ : {'ON' if bias_engine.gvz_enabled else 'OFF'}")
+        log.info(f"   Fed Funds ⭐⭐⭐ :      {'ON' if bias_engine.fed_enabled else 'OFF'}")
+        log.info(f"   Shanghai ⭐⭐ :         {'ON' if bias_engine.shanghai_enabled else 'OFF'}")
         log.info(f" Biais actuel : {bias_result.bias} (score={bias_result.total_score:+d})")
         log.info("=" * 55)
 
