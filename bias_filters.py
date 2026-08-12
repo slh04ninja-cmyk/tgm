@@ -139,10 +139,10 @@ class BiasFilterEngine:
         self.fed_lean_short = float(env.get("FED_LEAN_SHORT", "55"))
 
         # --- Seuils composite (basés sur la moyenne -2 à +2) ---
-        self.strong_threshold = float(env.get("BIAS_STRONG_THRESHOLD", "2"))
-        self.lean_threshold = float(env.get("BIAS_LEAN_THRESHOLD", "1"))
-        self.strong_negative = float(env.get("BIAS_STRONG_NEGATIVE", "-2"))
-        self.lean_negative = float(env.get("BIAS_LEAN_NEGATIVE", "-1"))
+        self.strong_threshold = float(env.get("BIAS_STRONG_THRESHOLD", "1.5"))
+        self.lean_threshold = float(env.get("BIAS_LEAN_THRESHOLD", "0.5"))
+        self.strong_negative = float(env.get("BIAS_STRONG_NEGATIVE", "-1.5"))
+        self.lean_negative = float(env.get("BIAS_LEAN_NEGATIVE", "-0.5"))
 
         # --- Mode strict ---
         self.strict_mode = env.get("BIAS_STRICT_MODE", "true").lower() == "true"
@@ -700,17 +700,17 @@ class BiasFilterEngine:
         # Arrondir pour l'affichage, garder float pour la comparaison
         total_score = round(avg_score)
 
-        # Déterminer le biais (seuils adaptés à la moyenne -2 à +2)
-        if avg_score >= 1.5:
+        # Déterminer le biais (seuils lus depuis 17.env)
+        if avg_score >= self.strong_threshold:
             bias = "STRONG_LONG"
             direction = "LONG"
-        elif avg_score >= 0.5:
+        elif avg_score >= self.lean_threshold:
             bias = "LEAN_LONG"
             direction = "LONG"
-        elif avg_score <= -1.5:
+        elif avg_score <= self.strong_negative:
             bias = "STRONG_SHORT"
             direction = "SHORT"
-        elif avg_score <= -0.5:
+        elif avg_score <= self.lean_negative:
             bias = "LEAN_SHORT"
             direction = "SHORT"
         else:
