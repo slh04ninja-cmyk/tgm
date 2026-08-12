@@ -3149,6 +3149,41 @@ async def main():
             if is_spam(text):
                 return
 
+            # ★ V17 : COMMANDES TELEGRAM
+            text_stripped = text.strip().lower()
+            if text_stripped.startswith("/"):
+                if text_stripped in ("/bias", "biais", "bias"):
+                    # Forcer un recalcul du biais
+                    fresh_bias = bias_engine.calculate_bias()
+                    _bias_state['result'] = fresh_bias
+                    _bias_state['last_calc'] = time.time()
+                    # Envoyer le détail dans le chat courant
+                    alert_text = bias_engine.format_bias_alert(fresh_bias)
+                    try:
+                        await event.reply(alert_text)
+                    except Exception:
+                        pass
+                    log.info(f"[BIAS] Commande /bias → {fresh_bias.bias} (score={fresh_bias.total_score:+d})")
+                    return
+                elif text_stripped in ("/status", "status"):
+                    # Status rapide
+                    b = _bias_state['result']
+                    pnl = manager._daily_pnl if manager else 0
+                    status_text = (
+                        f"📊 STATUS\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"P&L jour : {pnl:+.2f}$\n"
+                        f"Bias : {b.bias} ({b.total_score:+d})\n"
+                        f"Signaux acceptés : {b.direction}\n"
+                        f"Positions actives : {len(manager.active) if manager else 0}\n"
+                        f"Mode : {'DEMO' if DEMO_MODE else 'LIVE'}"
+                    )
+                    try:
+                        await event.reply(status_text)
+                    except Exception:
+                        pass
+                    return
+
             if not _is_signal_message(text):
                 return
 
@@ -3241,9 +3276,14 @@ async def main():
 
                 # ★ V17 : BIAS FILTER — rafraîchissement périodique
                 if time.time() - _bias_state['last_calc'] > _BIAS_REFRESH_SEC:
+                    old_bias = _bias_state['result'].bias
                     _bias_state['result'] = bias_engine.calculate_bias()
                     _bias_state['last_calc'] = time.time()
+                    new_bias = _bias_state['result'].bias
                     log.info(bias_engine.format_bias_log(_bias_state['result']))
+                    # Alerter si le biais a changé
+                    if old_bias != new_bias:
+                        send_alert_sync(f"🔄 BIAS CHANGÉ : {old_bias} → {new_bias}\n{bias_engine.format_bias_alert(_bias_state['result'])}")
 
                 # ★ V17 : BIAS FILTER — vérifier le signal
                 bias_result = _bias_state['result']
