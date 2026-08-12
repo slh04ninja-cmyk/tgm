@@ -138,11 +138,11 @@ class BiasFilterEngine:
         self.fed_strong_short = float(env.get("FED_STRONG_SHORT", "70"))
         self.fed_lean_short = float(env.get("FED_LEAN_SHORT", "55"))
 
-        # --- Seuils composite ---
-        self.strong_threshold = int(env.get("BIAS_STRONG_THRESHOLD", "4"))
-        self.lean_threshold = int(env.get("BIAS_LEAN_THRESHOLD", "2"))
-        self.strong_negative = int(env.get("BIAS_STRONG_NEGATIVE", "-4"))
-        self.lean_negative = int(env.get("BIAS_LEAN_NEGATIVE", "-2"))
+        # --- Seuils composite (basés sur la moyenne -2 à +2) ---
+        self.strong_threshold = float(env.get("BIAS_STRONG_THRESHOLD", "2"))
+        self.lean_threshold = float(env.get("BIAS_LEAN_THRESHOLD", "1"))
+        self.strong_negative = float(env.get("BIAS_STRONG_NEGATIVE", "-2"))
+        self.lean_negative = float(env.get("BIAS_LEAN_NEGATIVE", "-1"))
 
         # --- Mode strict ---
         self.strict_mode = env.get("BIAS_STRICT_MODE", "true").lower() == "true"
@@ -688,20 +688,29 @@ class BiasFilterEngine:
         error_filters = [f for f in active_filters if f.error]
         valid_filters = [f for f in active_filters if not f.error]
 
-        # Score total = somme des scores des filtres valides
-        total_score = sum(f.score for f in valid_filters)
+        # ★ V17 : MOYENNE des scores (pas somme) — toujours entre -2 et +2
+        # Peu importe le nombre de filtres activés, les seuils restent fixes
+        raw_sum = sum(f.score for f in valid_filters)
+        n = len(valid_filters)
+        if n > 0:
+            avg_score = raw_sum / n
+        else:
+            avg_score = 0.0
 
-        # Déterminer le biais
-        if total_score >= self.strong_threshold:
+        # Arrondir pour l'affichage, garder float pour la comparaison
+        total_score = round(avg_score)
+
+        # Déterminer le biais (seuils adaptés à la moyenne -2 à +2)
+        if avg_score >= 1.5:
             bias = "STRONG_LONG"
             direction = "LONG"
-        elif total_score >= self.lean_threshold:
+        elif avg_score >= 0.5:
             bias = "LEAN_LONG"
             direction = "LONG"
-        elif total_score <= self.strong_negative:
+        elif avg_score <= -1.5:
             bias = "STRONG_SHORT"
             direction = "SHORT"
-        elif total_score <= self.lean_negative:
+        elif avg_score <= -0.5:
             bias = "LEAN_SHORT"
             direction = "SHORT"
         else:
@@ -782,7 +791,9 @@ class BiasFilterEngine:
             "NEUTRAL": "⚪",
             "LEAN_SHORT": "🔴", "STRONG_SHORT": "🔴🔴"
         }.get(result.bias, "⚪")
-        lines.append(f"  {emoji} SCORE TOTAL: {result.total_score:+d} → {result.bias}")
+        n_active = len([f for f in result.filters if f.enabled and not f.error])
+        raw_sum = sum(f.score for f in result.filters if f.enabled and not f.error)
+        lines.append(f"  {emoji} MOYENNE: {result.total_score:+d} (somme={raw_sum:+d} / {n_active} filtres) → {result.bias}")
         lines.append(f"  📌 Direction: {result.direction}")
         lines.append("=" * 50)
 
@@ -809,8 +820,10 @@ class BiasFilterEngine:
             "NEUTRAL": "⚪",
             "LEAN_SHORT": "🔴", "STRONG_SHORT": "🔴🔴"
         }.get(result.bias, "⚪")
-        lines.append(f"{emoji} SCORE: {result.total_score:+d} → {result.bias}")
-        lines.append(f"📌 Signaux acceptés: {result.direction}")
+        n_active = len([f for f in result.filters if f.enabled and not f.error])
+        raw_sum = sum(f.score for f in result.filters if f.enabled and not f.error)
+        lines.append(f"{emoji} MOYENNE: {result.total_score:+d} → {result.bias}")
+        lines.append(f"📌 Signaux: {result.direction}")
 
         return "\n".join(lines)
 
