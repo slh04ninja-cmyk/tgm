@@ -3111,6 +3111,54 @@ async def main():
         _SEEN_TTL = 120.0
         _SEEN_MAX_IDS = 5000
 
+        # ★ V17 : HANDLER pour commandes en message privé avec le bot
+        @client.on(events.NewMessage(func=lambda e: e.is_private))
+        async def private_handler(event):
+            """Gère les commandes envoyées en DM au bot."""
+            text = (event.message.text or "").strip().lower()
+            if text.startswith("/"):
+                if text in ("/bias", "biais", "bias"):
+                    fresh_bias = bias_engine.calculate_bias()
+                    _bias_state['result'] = fresh_bias
+                    _bias_state['last_calc'] = time.time()
+                    alert_text = bias_engine.format_bias_alert(fresh_bias)
+                    await event.reply(alert_text)
+                    log.info(f"[BIAS] /bias (DM) → {fresh_bias.bias} (score={fresh_bias.total_score:+d})")
+                elif text in ("/status", "status"):
+                    b = _bias_state['result']
+                    pnl = manager._daily_pnl if manager else 0
+                    positions = mt5.positions_get() if mt5.initialize() else []
+                    active_count = len([p for p in (positions or []) if p.magic == MAGIC_NUMBER])
+                    status_text = (
+                        f"📊 STATUS\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"P&L jour : {pnl:+.2f}$\n"
+                        f"Bias : {b.bias} ({b.total_score:+d})\n"
+                        f"Signaux acceptés : {b.direction}\n"
+                        f"Positions actives : {active_count}\n"
+                        f"Mode : {'DEMO' if DEMO_MODE else 'LIVE'}\n"
+                        f"Filtres : {enabled_count}/5 activés"
+                    )
+                    await event.reply(status_text)
+                elif text in ("/help", "help", "aide"):
+                    help_text = (
+                        f"🤖 COMMANDES DISPONIBLES\n"
+                        f"━━━━━━━━━━━━━━━━━━\n"
+                        f"/bias — Détail des 5 filtres + score\n"
+                        f"/status — P&L, positions, mode\n"
+                        f"/help — Cette aide\n"
+                        f"\n"
+                        f"📊 FILTRES ACTIVÉS ({enabled_count}/5)\n"
+                        f"• GLD ETF Flow\n"
+                        f"• Shanghai Premium\n"
+                        f"• COT Report\n"
+                        f"• GVZ Volatility\n"
+                        f"• Fed Funds"
+                    )
+                    await event.reply(help_text)
+            # Ne pas traiter les DM comme des signaux
+            return
+
         @client.on(events.NewMessage(chats=chats))
         async def handler(event):
             text = event.message.text or ""
