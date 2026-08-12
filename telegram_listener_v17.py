@@ -3369,16 +3369,27 @@ async def main():
                     log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSÉ LIMITE P&L")
                     return
 
-                # ★ V17 : BIAS FILTER — rafraîchissement périodique
-                if time.time() - _bias_state['last_calc'] > _BIAS_REFRESH_SEC:
+                # ★ V17 : BIAS FILTER — rafraîchissement périodique + reset à l'ouverture
+                now_utc = datetime.now(timezone.utc)
+                _time_since_calc = time.time() - _bias_state['last_calc']
+                _just_opened = (
+                    now_utc.hour == TRADING_START_HOUR
+                    and now_utc.minute < 30
+                    and _bias_state.get('_last_open_hour') != TRADING_START_HOUR
+                )
+                if _just_opened:
+                    _bias_state['_last_open_hour'] = TRADING_START_HOUR
+                    log.info(f"[BIAS] Ouverture trading {TRADING_START_HOUR}h UTC → recalcul forcé")
+
+                if _time_since_calc > _BIAS_REFRESH_SEC or _just_opened:
                     old_bias = _bias_state['result'].bias
                     _bias_state['result'] = bias_engine.calculate_bias()
                     _bias_state['last_calc'] = time.time()
                     new_bias = _bias_state['result'].bias
                     log.info(bias_engine.format_bias_log(_bias_state['result']))
-                    # Alerter si le biais a changé
-                    if old_bias != new_bias:
-                        send_alert_sync(f"🔄 BIAS CHANGÉ : {old_bias} → {new_bias}\n{bias_engine.format_bias_alert(_bias_state['result'])}")
+                    send_alert_sync(bias_engine.format_bias_alert(_bias_state['result']))
+                    if old_bias != new_bias and not _just_opened:
+                        send_alert_sync(f"🔄 BIAS CHANGÉ : {old_bias} → {new_bias}")
 
                 # ★ V17 : BIAS FILTER — vérifier le signal
                 bias_result = _bias_state['result']
