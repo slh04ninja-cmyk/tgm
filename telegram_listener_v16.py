@@ -147,11 +147,6 @@ MAX_SPREAD_POINTS = float(os.getenv("MAX_SPREAD_POINTS", "50"))
 # === GAIN FIXE ===
 TP_FIXED_ENABLED = os.getenv("TP_FIXED_ENABLED", "true").lower() == "true"
 TP_FIXED_GAIN_USD = float(os.getenv("TP_FIXED_GAIN_USD", "8.0"))
-# ★ BE_USD : quand le BE se déclenche, le SL n'est plus posé exactement à l'entrée
-# mais avec une petite marge de sécurité (BE_USD $) du côté DÉFAVORABLE — évite un
-# stop sur un simple retour à l'entrée (bruit/spread). Ex: BUY @4000, BE_USD=3 → SL=3997.
-BE_USD = float(os.getenv("BE_USD", "3"))  # pas de changement, déjà 3
-PNL_TRIGGER_USD = float(os.getenv("PNL_TRIGGER_USD", "5.0"))
 
 # === SL PLAFONNÉ ===
 # Distance SL maximale en $ (pour XAUUSD 0.01 lot, 1$ prix = 1$ P&L)
@@ -985,10 +980,7 @@ class TradeManager:
         # ★★★ WHITELIST des rôles autorisés à déclencher le BE ★★★
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
         # ★ Tous les signaux sont MARKET, jamais de pending
-        self._be_allowed_roles = {
-            "market",              # MARKET order
-            "limit",               # LIMIT order
-        }
+
 
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
         self._completed_entries = []  # entrées terminées (pour rapport fin de journée)
@@ -1590,171 +1582,6 @@ class TradeManager:
     # =============================================================
     # GESTION DU BE (avec whitelist)
     # =============================================================
-    def _check_pnl_trigger(self, entry: dict) -> bool:
-        # Le BE se déclenche quand la position atteint le seuil PNL_TRIGGER_USD.
-        # v11 : toujours 1 seule position MARKET par signal.
-        min_profit = float('inf')
-        min_role = "?"
-        has_active = False
-        for t in entry.get("tickets", []):
-            if t.get("be_active"):
-                continue
-            # ★★★ Vérification whitelist ★★★
-            if t.get("role") not in self._be_allowed_roles:
-                continue
-            pos = self._get_pos(t["ticket"])
-            if pos:
-                has_active = True
-                if pos.profit < min_profit:
-                    min_profit = pos.profit
-                    min_role = t.get("role", "?")
-        if has_active and min_profit >= PNL_TRIGGER_USD:
-            return True
-
-        # ✅ LOG DEBUG : pourquoi le BE ne se déclenche pas
-        if has_active and min_profit < float('inf'):
-            log.debug(f"[BE] PnL insuffisant : {min_profit:.2f}$ < {PNL_TRIGGER_USD}$ (pire rôle={min_role})")
-        return False
-
-    def _apply_be_on_open_positions(self, entry: dict, action: str):
-        signal = entry.get("signal", {})
-        canal = signal.get("source_channel", "Inconnu")
-        ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-        mt5_comment = entry.get("_mt5_comment", f"CH{ch_num}-UNK")
-
-        # ★ Toujours 1 position MARKET, jamais de pending
-        open_tickets = [t for t in entry.get("tickets", []) if self._get_pos(t["ticket"])]
-        if not open_tickets:
-            log.warning(f"Aucune position ouverte au moment du BE pour {entry.get('_signal_id', '?')}")
-            return
-
-        t = open_tickets[0]
-        entry_price = t.get("entry_price", 0)
-        if entry_price == 0:
-            return
-
-        pos = self._get_pos(t["ticket"])
-        if not pos:
-            return
-
-        sym = mt5.symbol_info(pos.symbol)
-        # ★ BE_USD : SL posé à BE_USD $ de l'entrée, côté défavorable (pas exactement
-        # à l'entrée) — pour XAUUSD 0.01 lot, 1$ de mouvement = 1$ de P&L.
-        if action == "BUY":
-            be_price = round(entry_price - BE_USD, sym.digits if sym else 2)
-        else:
-            be_price = round(entry_price + BE_USD, sym.digits if sym else 2)
-        target_gain = TP_FIXED_GAIN_USD
-
-        # ★ BE : SL @ entry, TP @ entry ± TP_FIXED_GAIN_USD (en points de prix)
-        # Pour XAUUSD 0.01 lot : 1$ = 1 point de prix
-        tp_fixed_points = TP_FIXED_GAIN_USD  # 10$ = 10 pts pour XAUUSD 0.01 lot
-        if action == "BUY":
-            be_tp = round(entry_price + tp_fixed_points, sym.digits)
-        else:
-            be_tp = round(entry_price - tp_fixed_points, sym.digits)
-
-        if self.bridge.modify_sl_tp(t["ticket"], be_price, be_tp, f"[BE @{be_price} TP @{be_tp}]"):
-            t["be_active"] = True
-            t["be_sl"] = be_price
-            t["tp_final"] = be_tp
-            entry["_be_price"] = be_price
-            entry["_be_market_entry"] = entry_price
-            entry["_target_gain"] = target_gain
-            entry["_be_activated"] = True
-            _log_mgmt(msg.log_be_combined(mt5_comment, 1, be_price))
-            _alert_mgmt(msg.alert_be_activated(action, signal['symbol'], 1, be_price, target_gain, mt5_comment, 0))
-
-    # =============================================================
-    # GESTION PAR RÔLE (5 méthodes A/B testing)
-    # =============================================================
-
-    def _manage_be(self, t: dict, pos, entry: dict, action: str):
-        """Gestion BE : quand profit >= PNL_TRIGGER_USD, SL -> entry ± BE_USD"""
-        if pos.profit >= PNL_TRIGGER_USD:
-            entry_price = t["entry_price"]
-            sym = mt5.symbol_info(pos.symbol)
-            if action == "BUY":
-                be_price = round(entry_price - BE_USD, sym.digits if sym else 2)
-                be_tp = round(entry_price + TP_FIXED_GAIN_USD, sym.digits if sym else 2)
-            else:
-                be_price = round(entry_price + BE_USD, sym.digits if sym else 2)
-                be_tp = round(entry_price - TP_FIXED_GAIN_USD, sym.digits if sym else 2)
-            if self.bridge.modify_sl_tp(t["ticket"], be_price, be_tp, "[BE]"):
-                t["be_active"] = True
-                t["be_sl"] = be_price
-                if LOG_TRADE_MANAGEMENT:
-                    _log_mgmt(f"BE #{t['ticket']} -> SL={be_price} TP={be_tp}")
-
-    def _recalculate_tp(self, entry: dict):
-        """Recalcule le TP dynamique quand un LIMIT se remplit.
-
-        Formule:
-          average_entry = weighted average de tous les prix d'entrée
-          total_lot = somme de tous les lots
-          nb_positions = nombre de positions remplies
-          multiplier = TP_MULTIPE1 si 2 positions, TP_MULTIPE2 si 3, sinon 1
-          pnl_cible = TP_FIXED_GAIN_USD × multiplier
-          TP_prix = average_entry ± (pnl_cible / total_lot)
-
-        Le SL reste fixe (celui du signal).
-        """
-        signal = entry.get("signal", {})
-        action = signal.get("action", "BUY")
-
-        # Collecter les positions actives (remplies)
-        active = []
-        for t in entry.get("tickets", []):
-            pos = self._get_pos(t["ticket"])
-            if pos:
-                active.append(t)
-
-        if len(active) <= 1:
-            return  # Pas besoin de recalculer si seulement MARKET
-
-        # Vérifier si le TP a déjà été recalculé pour ce nombre de positions
-        nb = len(active)
-        if entry.get("_tp_calculated_for", 0) >= nb:
-            return  # Déjà calculé pour ce nombre de positions
-
-        # Average entry pondéré
-        total_lot = sum(t["lot"] for t in active)
-        weighted_entry = sum(t["entry_price"] * t["lot"] for t in active) / total_lot
-
-        # Multiplicateur selon le nombre de positions
-        if nb >= 3:
-            multiplier = TP_MULTIPE2
-        elif nb >= 2:
-            multiplier = TP_MULTIPE1
-        else:
-            multiplier = 1.0
-
-        # P&L cible
-        pnl_cible = TP_FIXED_GAIN_USD * multiplier
-
-        # TP prix
-        # XAUUSD: 0.01 lot = 1 oz, 1$ mouvement = 1$ P&L par position
-        # Avec N positions, 1$ mouvement = N$ P&L total
-        # Formule: TP = average_entry ± (pnl_cible / nb_positions)
-        price_movement = pnl_cible / nb
-        if action == "BUY":
-            tp_price = round(weighted_entry + price_movement, 2)
-        else:
-            tp_price = round(weighted_entry - price_movement, 2)
-
-        # Mettre à jour le TP sur toutes les positions
-        updated = 0
-        for t in active:
-            pos = self._get_pos(t["ticket"])
-            if pos:
-                if self.bridge.modify_sl_tp(t["ticket"], pos.sl, tp_price, f"[DYN-TP x{multiplier}]"):
-                    t["tp_final"] = tp_price
-                    updated += 1
-
-        entry["_tp_calculated_for"] = nb
-        _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
-                  f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated} mis à jour")
-
     # =============================================================
     # MÉTHODES UTILITAIRES
     # =============================================================
@@ -1920,16 +1747,12 @@ class TradeManager:
             # ★★★ PHASE 3 : GESTION BE ★★★
             # ══════════════════════════════════════════════════════════════
             for t in entry.get("tickets", []):
-                if t.get("be_active") or not self._get_pos(t["ticket"]):
-                    continue
                 pos = self._get_pos(t["ticket"])
                 if not pos:
                     continue
                 entry_price = t.get("entry_price", 0)
                 if entry_price == 0:
                     continue
-                self._manage_be(t, pos, entry, action)
-
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 4 : TP DYNAMIQUE (recalcul si LIMIT rempli) ★★★
             # ══════════════════════════════════════════════════════════════
@@ -3337,7 +3160,6 @@ async def main():
         log.info(f" Mode: {mode}")
         log.info(f" Lot :  total : {LOT_SIZE} | unique : {LOT_UNIQUE_TRADE}")
         log.info(f" Gain fixe par position : {TP_FIXED_GAIN_USD}$")
-        log.info(f" BE déclenché à : {PNL_TRIGGER_USD}$")
         log.info(f" Objectif quotidien : {DAILY_PROFIT_LIMIT}$")
         log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC)")
         log.info(f" Filtre news : {'ON' if NEWS_ENABLED else 'OFF'}")
