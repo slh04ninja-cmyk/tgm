@@ -1686,6 +1686,71 @@ class TradeManager:
                 if LOG_TRADE_MANAGEMENT:
                     _log_mgmt(f"BE #{t['ticket']} -> SL={be_price} TP={be_tp}")
 
+    def _recalculate_tp(self, entry: dict):
+        """Recalcule le TP dynamique quand un LIMIT se remplit.
+
+        Formule:
+          average_entry = weighted average de tous les prix d'entrée
+          total_lot = somme de tous les lots
+          nb_positions = nombre de positions remplies
+          multiplier = TP_MULTIPE1 si 2 positions, TP_MULTIPE2 si 3, sinon 1
+          pnl_cible = TP_FIXED_GAIN_USD × multiplier
+          TP_prix = average_entry ± (pnl_cible / total_lot)
+
+        Le SL reste fixe (celui du signal).
+        """
+        signal = entry.get("signal", {})
+        action = signal.get("action", "BUY")
+
+        # Collecter les positions actives (remplies)
+        active = []
+        for t in entry.get("tickets", []):
+            pos = self._get_pos(t["ticket"])
+            if pos:
+                active.append(t)
+
+        if len(active) <= 1:
+            return  # Pas besoin de recalculer si seulement MARKET
+
+        # Vérifier si le TP a déjà été recalculé pour ce nombre de positions
+        nb = len(active)
+        if entry.get("_tp_calculated_for", 0) >= nb:
+            return  # Déjà calculé pour ce nombre de positions
+
+        # Average entry pondéré
+        total_lot = sum(t["lot"] for t in active)
+        weighted_entry = sum(t["entry_price"] * t["lot"] for t in active) / total_lot
+
+        # Multiplicateur selon le nombre de positions
+        if nb >= 3:
+            multiplier = TP_MULTIPE2
+        elif nb >= 2:
+            multiplier = TP_MULTIPE1
+        else:
+            multiplier = 1.0
+
+        # P&L cible
+        pnl_cible = TP_FIXED_GAIN_USD * multiplier
+
+        # TP prix
+        if action == "BUY":
+            tp_price = round(weighted_entry + (pnl_cible / total_lot), 2)
+        else:
+            tp_price = round(weighted_entry - (pnl_cible / total_lot), 2)
+
+        # Mettre à jour le TP sur toutes les positions
+        updated = 0
+        for t in active:
+            pos = self._get_pos(t["ticket"])
+            if pos:
+                if self.bridge.modify_sl_tp(t["ticket"], pos.sl, tp_price, f"[DYN-TP x{multiplier}]"):
+                    t["tp_final"] = tp_price
+                    updated += 1
+
+        entry["_tp_calculated_for"] = nb
+        _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
+                  f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated} mis à jour")
+
     # =============================================================
     # MÉTHODES UTILITAIRES
     # =============================================================
@@ -1862,7 +1927,12 @@ class TradeManager:
                 self._manage_be(t, pos, entry, action)
 
             # ══════════════════════════════════════════════════════════════
-            # ★★★ PHASE 4 : ANNULER LIMIT SI MARKET FERMÉ ★★★
+            # ★★★ PHASE 4 : TP DYNAMIQUE (recalcul si LIMIT rempli) ★★★
+            # ══════════════════════════════════════════════════════════════
+            self._recalculate_tp(entry)
+
+            # ══════════════════════════════════════════════════════════════
+            # ★★★ PHASE 5 : ANNULER LIMIT SI MARKET FERMÉ ★★★
             # ══════════════════════════════════════════════════════════════
             market_ticket = entry.get("_market_ticket")
             if market_ticket:
@@ -2002,8 +2072,11 @@ LIMIT_COUNT = int(os.getenv("LIMIT_COUNT", "2"))           # Nombre de LIMIT ord
 LIMIT_OFFSET_1 = float(os.getenv("LIMIT_OFFSET_1", "3.0"))  # 1er LIMIT à current ± ce montant
 LIMIT_OFFSET_2 = float(os.getenv("LIMIT_OFFSET_2", "6.0"))  # 2ème LIMIT à current ± ce montant
 LOT_MARKET = float(os.getenv("LOT_MARKET", "0.01"))         # Lot pour le MARKET
-LOT_LIMIT = float(os.getenv("LOT_LIMIT", "0.01"))           # Lot pour chaque LIMIT
+LOT_LIMIT1 = float(os.getenv("LOT_LIMIT1", "0.01"))         # Lot pour le LIMIT 1
+LOT_LIMIT2 = float(os.getenv("LOT_LIMIT2", "0.01"))         # Lot pour le LIMIT 2
 LIMIT_EXPIRY_MIN = int(os.getenv("LIMIT_EXPIRY_MIN", "30"))  # Expiration des LIMIT orders (minutes)
+TP_MULTIPE1 = float(os.getenv("TP_MULTIPE1", "2.0"))         # Multiplicateur TP quand MARKET + L1 rempli
+TP_MULTIPE2 = float(os.getenv("TP_MULTIPE2", "3.0"))         # Multiplicateur TP quand MARKET + L1 + L2 remplis
 
 # === ALERTES & LOGS ===
 LOG_TRADE_MANAGEMENT = os.getenv("LOG_TRADE_MANAGEMENT", "true").lower() == "true"
@@ -2197,7 +2270,7 @@ def _send_telegram_document(filepath: str, caption: str):
 def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                        action: str, symbol: str, current: float,
                        sl: float, tp_final: float,
-                       lot_market: float, lot_limit: float,
+                       lot_market: float,
                        ch_num, canal: str, prefix: str = "ZN") -> bool:
     """Ouvre 1 MARKET + N LIMIT orders pour catcher le pullback.
     Retourne True si au moins le MARKET est ouvert."""
@@ -2228,6 +2301,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
     if LIMIT_ENABLED and LIMIT_COUNT > 0:
         for i in range(LIMIT_COUNT):
             offset = LIMIT_OFFSET_1 if i == 0 else LIMIT_OFFSET_2
+            limit_lot = LOT_LIMIT1 if i == 0 else LOT_LIMIT2
             if action == "BUY":
                 limit_price = round(current - offset, 2)
             else:
@@ -2241,7 +2315,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                 result = mt5.order_send({
                     "action": mt5.TRADE_ACTION_PENDING,
                     "symbol": symbol,
-                    "volume": lot_limit,
+                    "volume": limit_lot,
                     "type": order_type,
                     "price": limit_price,
                     "sl": round(sl, 2) if sl else 0,
@@ -2409,12 +2483,12 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         # Si prix dans zone → MARKET + LIMITS, sinon LIMITS seules
         if in_zone:
             _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, LOT_MARKET, LOT_LIMIT, ch_num, canal, prefix)
+                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         else:
             # Prix légèrement au-dessus → LIMITS seules (pas de MARKET)
             signal_limits_only = dict(signal)
             _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
-                              sl, tp_final, 0, LOT_LIMIT, ch_num, canal, prefix)
+                              sl, tp_final, 0, ch_num, canal, prefix)
         return
 
     # ── Prix unique → converti en zone [entry ± TOLERANCE_PU] ──
@@ -2443,10 +2517,10 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
 
         if in_zone:
             _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, LOT_MARKET, LOT_LIMIT, ch_num, canal, prefix)
+                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         else:
             _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, 0, LOT_LIMIT, ch_num, canal, prefix)
+                              sl, tp_final, 0, ch_num, canal, prefix)
         return
 
     # ── Les signaux zone sont convertis en Prix Unique plus haut ──
@@ -2634,10 +2708,10 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # MARKET + LIMITS (ou LIMITS seules si légèrement au-dessus)
     if in_zone:
         ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                                sl, default_tp, LOT_MARKET, LOT_LIMIT, ch_num, canal, qa_label)
+                                sl, default_tp, LOT_MARKET, ch_num, canal, qa_label)
     else:
         ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                                sl, default_tp, 0, LOT_LIMIT, ch_num, canal, qa_label)
+                                sl, default_tp, 0, ch_num, canal, qa_label)
     if not ok:
         log.error("✗ QUICK MARKET échoué")
         return
