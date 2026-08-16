@@ -191,8 +191,11 @@ CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == 
 # ★ MODE POSITION UNIQUE : convertit les signaux zone (2 positions) en MARKET seul,
 # et désactive le merge QA+Fusion. Seul le Quick Alert est exécuté.
 
-# === TOLÉRANCE ZONE ===
+# === TOLÉRANCES ===
 TOLERANCE_ZN = float(os.getenv("TOLERANCE_ZN", "1.0"))
+TOLERANCE_PU = float(os.getenv("TOLERANCE_PU", "3.0"))
+TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "5.0"))
+TP_PAR_DEFAUT = float(os.getenv("TP_PAR_DEFAUT", "15.0"))
 
 # === AUTRES ===
 TG_ALERT_CHANNEL = os.getenv("TG_ALERT_CHANNEL", "")
@@ -936,6 +939,23 @@ class MT5Bridge:
                     continue
             self.close_position(pos.ticket, comment="close-all")
 
+    def cancel_pending_limits(self, entry: dict) -> int:
+        """Annule tous les ordres LIMIT non remplis d'une entrée."""
+        cancelled = 0
+        orders = mt5.orders_get()
+        if not orders:
+            return 0
+        for t in entry.get("tickets", []):
+            if t.get("role") != "limit":
+                continue
+            ticket = t["ticket"]
+            for order in orders:
+                if order.ticket == ticket and order.magic == MAGIC_NUMBER:
+                    if self.cancel_order(ticket):
+                        cancelled += 1
+                        log.debug(f"  ✗ LIMIT #{ticket} annulé")
+        return cancelled
+
 # =============================================================
 # TRADE MANAGER (avec whitelist BE)
 # =============================================================
@@ -966,8 +986,8 @@ class TradeManager:
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
         # ★ Tous les signaux sont MARKET, jamais de pending
         self._be_allowed_roles = {
-            "market_single",       # PU1, PU2, ZN1, ZN2
-            "quick_market",        # QA (AL-MP)
+            "market",              # MARKET order
+            "limit",               # LIMIT order
         }
 
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
@@ -1285,7 +1305,7 @@ class TradeManager:
         `_recover_daily_pnl()`. On applique ici le même principe : reconstruire trades,
         méthodes, canaux, types de signal et TP/SL depuis les deals MT5 de la journée,
         en utilisant le commentaire d'ordre `CH{num}-{signal}-{méthode}` (écrit à
-        l'ouverture, cf. `_open_multi_positions`) comme clé de regroupement — exactement
+        l'ouverture, cf. `_open_market_limit`) comme clé de regroupement — exactement
         la même donnée, à la même source, que celle utilisée pour les rapports manuels.
         """
         # Structure: {method: {trades, wins, losses, pnl}}, {ch_num: {trades, wins, losses, pnl}}
@@ -1347,10 +1367,9 @@ class TradeManager:
                 ch_name_map[_num] = _val
 
         # Rôle interne (utilisé pour l'affichage "Performance par methode") d'après le
-        # suffixe P1/P2/P3/P4a/P4b du commentaire — reflète METHODS dans _open_multi_positions.
+        # suffixe MK/L1/L2 du commentaire — reflète _open_market_limit.
         suffix_to_role = {
-            'P1': 'tp_fixe', 'P2': 'be_scale', 'P3': 'trailing',
-            'P4a': 'partial', 'P4b': 'partial',
+            'MK': 'market', 'L1': 'limit', 'L2': 'limit',
         }
 
         # ── Récupérer tous les deals MT5 de la journée de trading en cours ──
@@ -1512,26 +1531,11 @@ class TradeManager:
         # Formater les méthodes pour bot_messages
         # ★ P4a + P4b combinés en une seule ligne P4 (50/50 split)
         method_names = {
-            'tp_fixe': 'P1 TP Fixe',
-            'be_scale': 'P2 BE Scale',
-            'trailing': 'P3 Trailing',
-            'partial': 'P4 Partial (50/50)',
+            'market': 'MARKET',
+            'limit': 'LIMIT',
         }
-        # Fusionner partial_quick + partial_trail → partial
-        # (legacy : ces rôles n'existent plus depuis le fix v16 — suffix_to_role mappe déjà
-        # P4a/P4b directement vers 'partial' — bloc conservé sans risque si jamais un ancien
-        # rôle réapparaissait via une autre voie)
-        if 'partial_quick' in methods or 'partial_trail' in methods:
-            pq = methods.get('partial_quick', {'trades': 0, 'wins': 0, 'pnl': 0.0})
-            pt = methods.get('partial_trail', {'trades': 0, 'wins': 0, 'pnl': 0.0})
-            methods['partial'] = {
-                'trades': pq['trades'] + pt['trades'],
-                'wins': pq['wins'] + pt['wins'],
-                'losses': pq.get('losses', 0) + pt.get('losses', 0),
-                'pnl': pq['pnl'] + pt['pnl'],
-            }
         methods_list = []
-        for role in ['tp_fixe', 'be_scale', 'trailing', 'partial']:
+        for role in ['market', 'limit']:
             if role in methods:
                 m = methods[role]
                 m['name'] = method_names.get(role, role)
@@ -1665,9 +1669,8 @@ class TradeManager:
     # GESTION PAR RÔLE (5 méthodes A/B testing)
     # =============================================================
 
-    def _manage_tp_fixe(self, t: dict, pos, entry: dict, action: str):
-        """P1: TP Fixe — BE classique (méthode actuelle)
-        BE à PNL_TRIGGER_USD → SL à entry ± BE_USD, TP à entry ± TP_FIXED_GAIN_USD"""
+    def _manage_be(self, t: dict, pos, entry: dict, action: str):
+        """Gestion BE : quand profit >= PNL_TRIGGER_USD, SL -> entry ± BE_USD"""
         if pos.profit >= PNL_TRIGGER_USD:
             entry_price = t["entry_price"]
             sym = mt5.symbol_info(pos.symbol)
@@ -1677,100 +1680,11 @@ class TradeManager:
             else:
                 be_price = round(entry_price + BE_USD, sym.digits if sym else 2)
                 be_tp = round(entry_price - TP_FIXED_GAIN_USD, sym.digits if sym else 2)
-            if self.bridge.modify_sl_tp(t["ticket"], be_price, be_tp, f"[P1-BE]"):
+            if self.bridge.modify_sl_tp(t["ticket"], be_price, be_tp, "[BE]"):
                 t["be_active"] = True
                 t["be_sl"] = be_price
-                t["tp_final"] = be_tp
                 if LOG_TRADE_MANAGEMENT:
-                    log.info(msg.log_p1_be(t["ticket"], be_price, be_tp))
-                if ALERT_TRADE_MANAGEMENT:
-                    send_alert_sync(msg.alert_p1_be(t["ticket"], be_price, be_tp))
-
-    def _manage_be_scale(self, t: dict, pos, entry: dict, action: str):
-        """P2: BE Escaladé — SL progressif selon le profit
-        +5$ → SL à entry, +10$ → SL entry+3$, +15$ → SL entry+7$"""
-        entry_price = t["entry_price"]
-        current_level = t.get("be_scale_level", 0)
-        sym = mt5.symbol_info(pos.symbol)
-        digits = sym.digits if sym else 2
-
-        for i, level in enumerate(BE_SCALE_LEVELS):
-            if i <= current_level:
-                continue
-            if pos.profit >= level["trigger"]:
-                if action == "BUY":
-                    new_sl = round(entry_price + level["sl_offset"], digits)
-                else:
-                    new_sl = round(entry_price - level["sl_offset"], digits)
-                if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P2-SCALE L{i}]"):
-                    t["be_scale_level"] = i
-                    t["be_sl"] = new_sl
-                    if LOG_TRADE_MANAGEMENT:
-                        log.info(msg.log_p2_be_scale(t["ticket"], i, new_sl, pos.profit))
-                    if ALERT_TRADE_MANAGEMENT:
-                        send_alert_sync(msg.alert_p2_be_scale(t["ticket"], i, new_sl))
-
-    def _manage_trailing(self, t: dict, pos, entry: dict, action: str):
-        """P3: Trailing Stop — pas de TP fixe, trailing TRAILING_STOP_USD$"""
-        entry_price = t["entry_price"]
-        sym = mt5.symbol_info(pos.symbol)
-        digits = sym.digits if sym else 2
-
-        if action == "BUY":
-            new_sl = round(pos.price_current - TRAILING_STOP_USD, digits)
-            current_sl = pos.sl
-            if new_sl > current_sl and new_sl > entry_price:
-                if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P3-TRAIL]"):
-                    t["trail_active"] = True
-                    t["be_sl"] = new_sl
-                    if LOG_TRADE_MANAGEMENT:
-                        log.info(msg.log_p3_trail(t["ticket"], new_sl))
-                    if ALERT_TRADE_MANAGEMENT:
-                        send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
-        else:
-            new_sl = round(pos.price_current + TRAILING_STOP_USD, digits)
-            current_sl = pos.sl
-            if new_sl < current_sl and new_sl < entry_price:
-                if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P3-TRAIL]"):
-                    t["trail_active"] = True
-                    t["be_sl"] = new_sl
-                    if LOG_TRADE_MANAGEMENT:
-                        log.info(msg.log_p3_trail(t["ticket"], new_sl))
-                    if ALERT_TRADE_MANAGEMENT:
-                        send_alert_sync(msg.alert_p3_trail(t["ticket"], new_sl))
-
-    def _manage_partial_quick(self, t: dict, pos, entry: dict, action: str):
-        """P4a: Partial Quick — TP direct à +5$, géré par MT5 (pas de gestion manuelle)"""
-        pass  # Le TP placé à l'ouverture ferme la position automatiquement
-
-    def _manage_partial_trail(self, t: dict, pos, entry: dict, action: str):
-        """P4b: Partial Trail — trailing PARTIAL_TRAIL_USD$"""
-        entry_price = t["entry_price"]
-        sym = mt5.symbol_info(pos.symbol)
-        digits = sym.digits if sym else 2
-
-        if action == "BUY":
-            new_sl = round(pos.price_current - PARTIAL_TRAIL_USD, digits)
-            current_sl = pos.sl
-            if new_sl > current_sl and new_sl > entry_price:
-                if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P4b-TRAIL]"):
-                    t["trail_active"] = True
-                    t["be_sl"] = new_sl
-                    if LOG_TRADE_MANAGEMENT:
-                        log.info(msg.log_p4b_trail(t["ticket"], new_sl))
-                    if ALERT_TRADE_MANAGEMENT:
-                        send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
-        else:
-            new_sl = round(pos.price_current + PARTIAL_TRAIL_USD, digits)
-            current_sl = pos.sl
-            if new_sl < current_sl and new_sl < entry_price:
-                if self.bridge.modify_sl_tp(t["ticket"], new_sl, pos.tp, f"[P4b-TRAIL]"):
-                    t["trail_active"] = True
-                    t["be_sl"] = new_sl
-                    if LOG_TRADE_MANAGEMENT:
-                        log.info(msg.log_p4b_trail(t["ticket"], new_sl))
-                    if ALERT_TRADE_MANAGEMENT:
-                        send_alert_sync(msg.alert_p4b_trail(t["ticket"], new_sl))
+                    _log_mgmt(f"BE #{t['ticket']} -> SL={be_price} TP={be_tp}")
 
     # =============================================================
     # MÉTHODES UTILITAIRES
@@ -1934,29 +1848,31 @@ class TradeManager:
                 continue
 
             # ══════════════════════════════════════════════════════════════
-            # ★★★ PHASE 3 : GESTION PAR RÔLE ★★★
+            # ★★★ PHASE 3 : GESTION BE ★★★
             # ══════════════════════════════════════════════════════════════
             for t in entry.get("tickets", []):
                 if t.get("be_active") or not self._get_pos(t["ticket"]):
                     continue
-                role = t.get("role", "tp_fixe")
                 pos = self._get_pos(t["ticket"])
                 if not pos:
                     continue
                 entry_price = t.get("entry_price", 0)
                 if entry_price == 0:
                     continue
+                self._manage_be(t, pos, entry, action)
 
-                if role == "tp_fixe":
-                    self._manage_tp_fixe(t, pos, entry, action)
-                elif role == "be_scale":
-                    self._manage_be_scale(t, pos, entry, action)
-                elif role == "trailing":
-                    self._manage_trailing(t, pos, entry, action)
-                elif role == "partial_quick":
-                    self._manage_partial_quick(t, pos, entry, action)
-                elif role == "partial_trail":
-                    self._manage_partial_trail(t, pos, entry, action)
+            # ══════════════════════════════════════════════════════════════
+            # ★★★ PHASE 4 : ANNULER LIMIT SI MARKET FERMÉ ★★★
+            # ══════════════════════════════════════════════════════════════
+            market_ticket = entry.get("_market_ticket")
+            if market_ticket:
+                market_pos = self._get_pos(market_ticket)
+                if market_pos is None and not entry.get("_limit_cancelled"):
+                    # MARKET fermé -> annuler tous les LIMIT non remplis
+                    entry["_limit_cancelled"] = True
+                    cancelled = self.bridge.cancel_pending_limits(entry)
+                    if cancelled > 0:
+                        _log_mgmt(f"MARKET #{market_ticket} fermé -> {cancelled} LIMIT annulés")
 
 # =============================================================
 # CONFLIT & EXÉCUTION (avec SL paramétrable)
@@ -2077,29 +1993,17 @@ def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float
 # P4b: Partial Trail — pas de TP fixe, trailing 3$
 # =============================================================
 
-TRAILING_STOP_USD = float(os.getenv("TRAILING_STOP_USD", "7.0"))
-PARTIAL_TRAIL_USD = float(os.getenv("PARTIAL_TRAIL_USD", "5.0"))
-
-# === P2 BE ESCALADÉ — paliers configurables ===
-P2_TP_OFFSET = float(os.getenv("P2_TP_OFFSET", "15.0"))
-P2_TRIGGER_1 = float(os.getenv("P2_TRIGGER_1", "4.0"))
-P2_SL_OFFSET_1 = float(os.getenv("P2_SL_OFFSET_1", "0.0"))
-P2_TRIGGER_2 = float(os.getenv("P2_TRIGGER_2", "8.0"))
-P2_SL_OFFSET_2 = float(os.getenv("P2_SL_OFFSET_2", "2.0"))
-P2_TRIGGER_3 = float(os.getenv("P2_TRIGGER_3", "12.0"))
-P2_SL_OFFSET_3 = float(os.getenv("P2_SL_OFFSET_3", "5.0"))
-
-# === P4a PARTIAL QUICK — target configurable ===
-P4A_TP_OFFSET = float(os.getenv("P4A_TP_OFFSET", "5.0"))  # pas de changement
-
-# Méthodes de gestion
-METHODS = [
-    {"suffix": "P1",  "role": "tp_fixe",      "tp_offset": None,          "desc": "TP Fixe"},
-    {"suffix": "P2",  "role": "be_scale",      "tp_offset": P2_TP_OFFSET, "desc": "BE Escaladé"},
-    {"suffix": "P3",  "role": "trailing",      "tp_offset": 0,             "desc": "Trailing"},
-    {"suffix": "P4a", "role": "partial_quick", "tp_offset": P4A_TP_OFFSET, "desc": "Partial Quick"},
-    {"suffix": "P4b", "role": "partial_trail", "tp_offset": 0,             "desc": "Partial Trail"},
-]
+# === MARKET + LIMIT ORDERS ===
+# Au lieu de 5 positions A/B testing (P1-P4), on ouvre :
+#   1 MARKET immédiat (lot principal)
+#   N LIMIT orders à meilleur prix pour catcher le pullback
+LIMIT_ENABLED = os.getenv("LIMIT_ENABLED", "true").lower() == "true"
+LIMIT_COUNT = int(os.getenv("LIMIT_COUNT", "2"))           # Nombre de LIMIT orders (0, 1 ou 2)
+LIMIT_OFFSET_1 = float(os.getenv("LIMIT_OFFSET_1", "3.0"))  # 1er LIMIT à current ± ce montant
+LIMIT_OFFSET_2 = float(os.getenv("LIMIT_OFFSET_2", "6.0"))  # 2ème LIMIT à current ± ce montant
+LOT_MARKET = float(os.getenv("LOT_MARKET", "0.01"))         # Lot pour le MARKET
+LOT_LIMIT = float(os.getenv("LOT_LIMIT", "0.01"))           # Lot pour chaque LIMIT
+LIMIT_EXPIRY_MIN = int(os.getenv("LIMIT_EXPIRY_MIN", "30"))  # Expiration des LIMIT orders (minutes)
 
 # === ALERTES & LOGS ===
 LOG_TRADE_MANAGEMENT = os.getenv("LOG_TRADE_MANAGEMENT", "true").lower() == "true"
@@ -2290,89 +2194,103 @@ def _send_telegram_document(filepath: str, caption: str):
     except Exception as e:
         log.warning(f"Erreur envoi PDF Telegram: {type(e).__name__}: {e}")
 
-BE_SCALE_LEVELS = [
-    {"trigger": P2_TRIGGER_1,  "sl_offset": P2_SL_OFFSET_1},
-    {"trigger": P2_TRIGGER_2,  "sl_offset": P2_SL_OFFSET_2},
-    {"trigger": P2_TRIGGER_3,  "sl_offset": P2_SL_OFFSET_3},
-]
-
-
-def _open_multi_positions(signal: dict, bridge: MT5Bridge, manager,
-                          action: str, symbol: str, current: float,
-                          sl: float, tp_final: float,
-                          unique_lot: float, ch_num, canal: str,
-                          prefix: str = "ZN1") -> bool:
-    """Ouvre 5 positions simultanément pour A/B testing.
-    Retourne True si au moins 1 position est ouverte."""
+def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
+                       action: str, symbol: str, current: float,
+                       sl: float, tp_final: float,
+                       lot_market: float, lot_limit: float,
+                       ch_num, canal: str, prefix: str = "ZN") -> bool:
+    """Ouvre 1 MARKET + N LIMIT orders pour catcher le pullback.
+    Retourne True si au moins le MARKET est ouvert."""
     tickets = []
-    methods_desc = []
+    orders_desc = []
 
-    for method in METHODS:
-        suffix = method["suffix"]
-        role = method["role"]
-        tp_offset = method["tp_offset"]
-        mt5_comment = f"CH{ch_num}-{prefix}-{suffix}"
+    # === MARKET ORDER ===
+    mt5_comment_mk = f"CH{ch_num}-{prefix}-MK"
+    try:
+        t = bridge.place_market_order(signal, lot_market, tp=tp_final, sl=sl, comment=mt5_comment_mk)
+    except Exception as e:
+        log.error(f"  MARKET EXCEPTION: {e}")
+        t = None
 
-        # Calculer le TP pour cette méthode
-        if tp_offset is None:
-            # P1: utiliser le TP du signal
-            tp_method = tp_final
-        elif tp_offset == 0:
-            # P3/P4b: pas de TP fixe (trailing), mettre un TP très lointain
-            if action == "BUY":
-                tp_method = round(current + 500, 2)
-            else:
-                tp_method = round(current - 500, 2)
-        else:
-            # P2/P4a: TP à entry ± offset
-            if action == "BUY":
-                tp_method = round(current + tp_offset, 2)
-            else:
-                tp_method = round(current - tp_offset, 2)
-
-        log.debug(f"  → {suffix} {action} @{current} lot={unique_lot} TP={tp_method} SL={sl}")
-        try:
-            t = bridge.place_market_order(signal, unique_lot, tp=tp_method, sl=sl, comment=mt5_comment)
-        except Exception as e:
-            log.error(f"  MARKET EXCEPTION {suffix}: {e}")
-            t = None
-
-        if t:
-            tickets.append({
-                "ticket": t, "lot": unique_lot, "role": role,
-                "entry_price": current, "tp_final": tp_method,
-                "sl_step": 0, "trail_active": False,
-                "be_active": False, "be_sl": 0,
-                "be_scale_level": 0,
-            })
-            methods_desc.append(f"{suffix}=#{t}")
-            log.debug(f"  ✓ {suffix} #{t} @{current} TP={tp_method}")
-        else:
-            log.error(f"  ✗ {suffix} échoué")
-
-    if not tickets:
-        log.error("  ✗ Aucune position ouverte")
+    if t:
+        tickets.append({
+            "ticket": t, "lot": lot_market, "role": "market",
+            "entry_price": current, "tp_final": tp_final,
+            "be_active": False, "be_sl": 0,
+        })
+        orders_desc.append(f"MK=#{t} @{current}")
+        log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final} SL={sl}")
+    else:
+        log.error("  ✗ MARKET échoué")
         return False
 
-    # Enregistrer toutes les positions dans une seule entrée
+    # === LIMIT ORDERS ===
+    if LIMIT_ENABLED and LIMIT_COUNT > 0:
+        for i in range(LIMIT_COUNT):
+            offset = LIMIT_OFFSET_1 if i == 0 else LIMIT_OFFSET_2
+            if action == "BUY":
+                limit_price = round(current - offset, 2)
+            else:
+                limit_price = round(current + offset, 2)
+
+            mt5_comment_l = f"CH{ch_num}-{prefix}-L{i+1}"
+            order_type = mt5.ORDER_TYPE_BUY_LIMIT if action == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
+            expiry = datetime.now(timezone.utc) + timedelta(minutes=LIMIT_EXPIRY_MIN)
+
+            try:
+                result = mt5.order_send({
+                    "action": mt5.TRADE_ACTION_PENDING,
+                    "symbol": symbol,
+                    "volume": lot_limit,
+                    "type": order_type,
+                    "price": limit_price,
+                    "sl": round(sl, 2) if sl else 0,
+                    "tp": round(tp_final, 2) if tp_final else 0,
+                    "deviation": SLIPPAGE,
+                    "magic": MAGIC_NUMBER,
+                    "comment": mt5_comment_l,
+                    "type_time": mt5.ORDER_TIME_SPECIFIED,
+                    "type_filling": mt5.ORDER_FILLING_RETURN,
+                    "expiration": int(expiry.timestamp()),
+                })
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    tickets.append({
+                        "ticket": result.order, "lot": lot_limit, "role": "limit",
+                        "entry_price": limit_price, "tp_final": tp_final,
+                        "be_active": False, "be_sl": 0,
+                    })
+                    orders_desc.append(f"L{i+1}={result.order} @{limit_price}")
+                    log.debug(f"  ✓ LIMIT {i+1} #{result.order} @{limit_price}")
+                else:
+                    log.warning(f"  ✗ LIMIT {i+1} échoué: {getattr(result, 'retcode', '?')}")
+            except Exception as e:
+                log.error(f"  LIMIT {i+1} EXCEPTION: {e}")
+
+    if not tickets:
+        return False
+
+    # Enregistrer l'entrée
     entry = {
         "signal": signal,
         "tickets": tickets,
         "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "_signal_id": f"{symbol}_{action}_{int(time.time())}",
-        "_expected_positions": len(tickets),
         "_mt5_comment": f"CH{ch_num}-{prefix}",
+        "_market_ticket": tickets[0]["ticket"],  # premier = MARKET
+        "_limit_cancelled": False,
     }
     manager.register(entry)
 
-    # Alerte Telegram
-    methods_str = " | ".join(methods_desc)
-    mt5_comment = f"CH{ch_num}-{prefix}"
-    _alert_mgmt(msg.alert_multi_pos_open(symbol, action, mt5_comment, current,
-                                              unique_lot, len(tickets), methods_str,
-                                              sl, tp_final, canal))
+    # Alerte
+    orders_str = " | ".join(orders_desc)
+    nb_limits = len(tickets) - 1
+    _alert_mgmt(f"{'🟢' if action=='BUY' else '🔴'} {action} | CH{ch_num}-{prefix} | {symbol}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"MARKET: @{current} lot={lot_market}\n"
+                f"LIMITS: {nb_limits} | {orders_str}\n"
+                f"TP: {tp_final} | SL: {sl}")
     if LOG_TRADE_MANAGEMENT:
-        _log_mgmt(msg.log_multi_pos_open(action, symbol, current, len(tickets), methods_str))
+        _log_mgmt(f"OPEN {action} CH{ch_num}-{prefix} | {orders_str}")
     return True
 
 
@@ -2468,81 +2386,67 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         is_zone_signal = True
 
     # ── Signaux Zone ──
-    # Prix dans la zone [zone_low, zone_high] → MARKET ZN1
-    # Prix entre la zone et SL → MARKET ZN2
+    # Prix dans la zone [zone_low, zone_high] → MARKET + LIMITS
+    # Prix légèrement au-dessus (TOLERANCE_ZN) → LIMITS seules
     # Sinon annulé
     if is_zone_signal and len(all_tps) >= 1:
-        unique_lot = LOT_UNIQUE_TRADE
-
         if action == "BUY":
-            # Prix <= zone_low → ZN2, zone < prix <= zone_high+TOL → ZN1, sinon annulé
-            if current <= zone_low:
-                zn_prefix = "ZN2"
-            elif current <= zone_high + TOLERANCE_ZN:
-                zn_prefix = "ZN1"
-            else:
-                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
-                return
+            in_zone = zone_low <= current <= zone_high
+            above_zone = zone_high < current <= zone_high + TOLERANCE_ZN
         else:
-            # Prix >= zone_high → ZN2, zone_low-TOL <= prix < zone_high → ZN1, sinon annulé
-            if current >= zone_high:
-                zn_prefix = "ZN2"
-            elif current >= zone_low - TOLERANCE_ZN:
-                zn_prefix = "ZN1"
-            else:
-                log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
-                return
+            in_zone = zone_low <= current <= zone_high
+            below_zone = zone_low - TOLERANCE_ZN <= current < zone_low
 
-        mt5_comment_zn = f"CH{ch_num}-{zn_prefix}"
-
-        # ★ SL plafonné
-        avg_entry = (zone_low + zone_high) / 2
-        sl = _cap_sl(action, avg_entry, sl, MAX_SL_USD)
-
-        log.info(f"CH{ch_num}-{zn_prefix} | ACCEPTE")
-
-        # ★ Multi-positions (A/B testing)
-        _open_multi_positions(signal, bridge, manager,
-                              action, symbol, current, sl, tp_final,
-                              unique_lot, ch_num, canal, prefix=zn_prefix)
-        return
-
-    # ── Prix unique ──
-    if is_single_price and len(all_tps) >= 1:
-        entry_price = zone_mid
-        sl_price = sl
-        unique_lot = LOT_UNIQUE_TRADE
-
-        # ★ TOLÉRANCE : PU pour prix unique
-        PRICE_TOLERANCE = float(os.getenv("PU_PRICE_TOLERANCE", "3.0"))
-        prefix = "PU"
-
-        # Type 1 : prix entre entry et SL
-        if action == "BUY":
-            is_type1 = sl_price < current < entry_price
-            is_type2 = entry_price < current < entry_price + PRICE_TOLERANCE
-        else:
-            is_type1 = entry_price < current < sl_price
-            is_type2 = entry_price - PRICE_TOLERANCE < current < entry_price
-
-        if is_type1:
-            mt5_comment_pu = f"CH{ch_num}-{prefix}1"
-        elif is_type2:
-            mt5_comment_pu = f"CH{ch_num}-{prefix}2"
-        else:
-            log.info(f"CH{ch_num}-{prefix} | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
+        if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
+            log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
             return
 
-        # ★ SL plafonné
+        prefix = "ZN"
+        avg_entry = (zone_low + zone_high) / 2
+        sl = _cap_sl(action, avg_entry, sl, MAX_SL_USD)
+        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | prix={current}")
+
+        # Si prix dans zone → MARKET + LIMITS, sinon LIMITS seules
+        if in_zone:
+            _open_market_limit(signal, bridge, manager, action, symbol, current,
+                              sl, tp_final, LOT_MARKET, LOT_LIMIT, ch_num, canal, prefix)
+        else:
+            # Prix légèrement au-dessus → LIMITS seules (pas de MARKET)
+            signal_limits_only = dict(signal)
+            _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
+                              sl, tp_final, 0, LOT_LIMIT, ch_num, canal, prefix)
+        return
+
+    # ── Prix unique → converti en zone [entry ± TOLERANCE_PU] ──
+    if is_single_price and len(all_tps) >= 1:
+        entry_price = zone_mid
+        prefix = "PU"
+
+        # Créer zone autour du prix d'entrée
+        if action == "BUY":
+            zone_low_pu = round(entry_price - TOLERANCE_PU, 2)
+            zone_high_pu = round(entry_price + TOLERANCE_PU, 2)
+            in_zone = zone_low_pu <= current <= zone_high_pu
+            above_zone = zone_high_pu < current <= zone_high_pu + TOLERANCE_ZN
+        else:
+            zone_low_pu = round(entry_price - TOLERANCE_PU, 2)
+            zone_high_pu = round(entry_price + TOLERANCE_PU, 2)
+            in_zone = zone_low_pu <= current <= zone_high_pu
+            below_zone = zone_low_pu - TOLERANCE_ZN <= current < zone_low_pu
+
+        if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
+            log.info(f"CH{ch_num}-PU | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
+            return
+
         sl = _cap_sl(action, entry_price, sl, MAX_SL_USD)
+        log.info(f"CH{ch_num}-PU | ACCEPTE | prix={current} | entry={entry_price}")
 
-        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | prix={current} | entry={entry_price}")
-
-        # ★ Multi-positions (A/B testing)
-        pu_prefix = "PU1" if is_type1 else "PU2"
-        _open_multi_positions(signal, bridge, manager,
-                              action, symbol, current, sl, tp_final,
-                              unique_lot, ch_num, canal, prefix=pu_prefix)
+        if in_zone:
+            _open_market_limit(signal, bridge, manager, action, symbol, current,
+                              sl, tp_final, LOT_MARKET, LOT_LIMIT, ch_num, canal, prefix)
+        else:
+            _open_market_limit(signal, bridge, manager, action, symbol, current,
+                              sl, tp_final, 0, LOT_LIMIT, ch_num, canal, prefix)
         return
 
     # ── Les signaux zone sont convertis en Prix Unique plus haut ──
@@ -2581,23 +2485,24 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         log.error(f"Quick alert rejeté — prix indisponible: {symbol}")
         return
 
-    # --- MARKET PRICE : résoudre les offsets relatifs en prix absolus ---
+    # --- MARKET PRICE : zone = [current - TOLERANCE_MP, current] (BUY) / [current, current + TOLERANCE_MP] (SELL)
     if is_market_price and entry_price is None:
         entry_price = current
         sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
-        RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
         if action == "BUY":
             sl = entry_price - sl_offset
-            tp = entry_price + sl_offset * RR_RATIO
+            zone_low_mp = round(entry_price - TOLERANCE_MP, 2)
+            zone_high_mp = entry_price
         else:
             sl = entry_price + sl_offset
-            tp = entry_price - sl_offset * RR_RATIO
+            zone_low_mp = entry_price
+            zone_high_mp = round(entry_price + TOLERANCE_MP, 2)
         signal["sl"] = round(sl, 2)
-        signal["tps"] = [round(tp, 2)]
+        signal["tps"] = []  # TP = TP_PAR_DEFAUT
         signal["zone_mid"] = entry_price
-        signal["zone_low"] = entry_price
-        signal["zone_high"] = entry_price
-        _log_mgmt(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP={tp}")
+        signal["zone_low"] = zone_low_mp
+        signal["zone_high"] = zone_high_mp
+        _log_mgmt(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP=TP_PAR_DEFAUT({TP_PAR_DEFAUT}$)")
 
     canal = signal.get("source_channel", "Inconnu")
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
@@ -2606,18 +2511,16 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
     _close_previous_signal(canal, bridge, manager)
 
-    # Utiliser le TP fourni par le parser s'il existe
+    # TP : signal TP ou TP_PAR_DEFAUT
     if signal.get("tps") and len(signal["tps"]) > 0:
-        default_tp = signal["tps"][0]
+        default_tp = signal["tps"][-1]
         log.debug(f"Quick Alert : TP fourni par le parser = {default_tp}")
     else:
-        sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
         if action == "BUY":
-            default_tp = entry_price + sl_offset
+            default_tp = round(entry_price + TP_PAR_DEFAUT, 2)
         else:
-            default_tp = entry_price - sl_offset
-        default_tp = round(default_tp, 2)
-        log.debug(f"Quick Alert : TP calculé (fallback) = {default_tp}")
+            default_tp = round(entry_price - TP_PAR_DEFAUT, 2)
+        log.debug(f"Quick Alert : TP par défaut = {default_tp} ({TP_PAR_DEFAUT}$)")
 
     if sl is None:
         sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
@@ -2695,47 +2598,51 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         else:
             log.debug("Quick Alert existante introuvable → nouvelle alerte")
 
-    # ★ DÉTERMINER LE TYPE DE COMMENTAIRE MT5
-    # MP  = Market Price (pas de prix dans le signal, ex: BUY NOW)
-    # AL1 = Alert avec prix — prix entre entry et SL ou prix exact
-    # AL2 = Alert avec prix — prix dans tolérance (entry ± tolerance)
+    # ★ DÉTERMINER LE TYPE ET LOGIQUE
     if is_market_price:
-        mt5_comment_qa = f"CH{ch_num}-MP"
-    else:
-        # Vérifier si le prix est dans la zone tolérance ou entre entry et SL
-        in_tolerance = False
+        qa_label = "MP"
+        # Zone MP : [current - TOLERANCE_MP, current] pour BUY
         if action == "BUY":
-            # Tolérance: entry <= current <= entry + tolerance
-            in_tolerance = entry_price <= current <= entry_price + QA_PRICE_TOLERANCE
-        else:  # SELL
-            # Tolérance: entry - tolerance <= current <= entry
-            in_tolerance = entry_price - QA_PRICE_TOLERANCE <= current <= entry_price
-        
-        if in_tolerance:
-            mt5_comment_qa = f"CH{ch_num}-AL2"
+            in_zone = zone_low_mp <= current <= zone_high_mp
+            above_zone = zone_high_mp < current <= zone_high_mp + TOLERANCE_ZN
         else:
-            # Prix entre entry et SL (favorable) — pas dans tolérance
-            mt5_comment_qa = f"CH{ch_num}-AL1"
-    # ★ FIX (v16) : utiliser le vrai type (MP/AL1/AL2) au lieu de "AL" en dur
-    qa_label = mt5_comment_qa.split("-")[1] if "-" in mt5_comment_qa else "MP"
-    # ★ Ordre : réception → exécution
-    log.info(msg.log_signal_detected(mt5_comment_qa, action, round(current, 3)))
+            in_zone = zone_low_mp <= current <= zone_high_mp
+            below_zone = zone_low_mp - TOLERANCE_ZN <= current < zone_low_mp
+    else:
+        qa_label = "QA"
+        # Zone QA : [entry - TOLERANCE_PU, entry + TOLERANCE_PU]
+        zone_low_qa = round(entry_price - TOLERANCE_PU, 2)
+        zone_high_qa = round(entry_price + TOLERANCE_PU, 2)
+        if action == "BUY":
+            in_zone = zone_low_qa <= current <= zone_high_qa
+            above_zone = zone_high_qa < current <= zone_high_qa + TOLERANCE_ZN
+        else:
+            in_zone = zone_low_qa <= current <= zone_high_qa
+            below_zone = zone_low_qa - TOLERANCE_ZN <= current < zone_low_qa
+
+    # Vérifier si le prix est acceptable
+    if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
+        log.info(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
+        return
+
     log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | prix={current}")
 
-    # ★ SL plafonné
+    # SL plafonné
     entry_for_sl = entry_price if entry_price else current
     sl = _cap_sl(action, entry_for_sl, sl, MAX_SL_USD)
 
-    # ★ Multi-positions (A/B testing)
-    qa_prefix = qa_label
-    ok = _open_multi_positions(signal, bridge, manager,
-                               action, symbol, current, sl, default_tp,
-                               LOT_UNIQUE_TRADE, ch_num, canal, prefix=qa_prefix)
+    # MARKET + LIMITS (ou LIMITS seules si légèrement au-dessus)
+    if in_zone:
+        ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
+                                sl, default_tp, LOT_MARKET, LOT_LIMIT, ch_num, canal, qa_label)
+    else:
+        ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
+                                sl, default_tp, 0, LOT_LIMIT, ch_num, canal, qa_label)
     if not ok:
         log.error("✗ QUICK MARKET échoué")
         return
 
-    # Récupérer l'entrée créée par _open_multi_positions
+    # Récupérer l'entrée créée par _open_market_limit
     # (elle est déjà enregistrée dans manager.active)
     with manager._lock:
         entry = manager.active[-1] if manager.active else None

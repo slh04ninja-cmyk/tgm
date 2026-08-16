@@ -291,47 +291,8 @@ def log_sl_cap(signal_sl: float, capped: float, distance: float, max_sl: float) 
 
 
 # --- P1 : TP Fixe ---
-def log_p1_be(ticket: int, sl: float, tp: float) -> str:
-    return f"[P1] TP-Fixe BE #{ticket} SL={sl} TP={tp}"
 
 
-def alert_p1_be(ticket: int, sl: float, tp: float) -> str:
-    return (
-        f"🔒 P1 TP-Fixe | #{ticket}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"BE → SL={sl} TP={tp}"
-    )
-
-
-# --- P2 : BE Escaladé ---
-def log_p2_be_scale(ticket: int, level: int, sl: float, profit: float) -> str:
-    return f"[P2] BE-Scale L{level} #{ticket} SL={sl} (profit={profit:.2f}$)"
-
-
-def alert_p2_be_scale(ticket: int, level: int, sl: float) -> str:
-    return (
-        f"🔒 P2 BE-Scale L{level} | #{ticket}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"SL → {sl}"
-    )
-
-
-# --- P3 : Trailing Stop ---
-def log_p3_trail(ticket: int, sl: float) -> str:
-    return f"[P3] Trailing #{ticket} SL={sl}"
-
-
-def alert_p3_trail(ticket: int, sl: float) -> str:
-    return (
-        f"📈 P3 Trailing | #{ticket}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"SL → {sl}"
-    )
-
-
-# --- P4a : Partial Quick ---
-def log_p4a_close(ticket: int, profit: float) -> str:
-    return f"[P4a] Quick close #{ticket} profit={profit:.2f}$"
 
 
 def alert_p4a_close(ticket: int, profit: float) -> str:
@@ -343,30 +304,6 @@ def alert_p4a_close(ticket: int, profit: float) -> str:
 
 
 # --- P4b : Partial Trail ---
-def log_p4b_trail(ticket: int, sl: float) -> str:
-    return f"[P4b] Partial trail #{ticket} SL={sl}"
-
-
-def alert_p4b_trail(ticket: int, sl: float) -> str:
-    return (
-        f"📈 P4b Partial Trail | #{ticket}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"SL → {sl}"
-    )
-
-
-# =============================================================
-# 10. RAPPORT JOURNALIER
-# =============================================================
-def report_daily_summary(date: str, pnl_realise: float, trades: int, wins: int, losses: int, winrate: float, total_signals: int = 0, max_drawdown: float = 0.0) -> str:
-    return (
-        f"📅 PERFORMANCE DU {date}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"P&L réalisé : {pnl_realise:+.2f}$\n"
-        f"Total signaux : {total_signals} | Total trades : {trades}\n"
-        f"Wins : {wins} | Losses : {losses} | Winrate : {winrate:.1f}%\n"
-        f"Max Drawdown : {max_drawdown:.2f}$"
-    )
 
 
 def report_daily_by_method(methods: list) -> str:
