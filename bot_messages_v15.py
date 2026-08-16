@@ -128,6 +128,7 @@ MOTIF_PRIX_HORS_ZONE = "PRIX HORS ZONE"
 MOTIF_PRIX_ATTEINT_TP3 = "PRIX ATTEINT TP3"
 MOTIF_ECHEC_PLACEMENT = "ÉCHEC PLACEMENT ORDRE"
 MOTIF_PROTECTION_NEWS = "PROTECTION NEWS"
+MOTIF_TREND_OPPOSE = "TREND OPPOSÉ"
 
 
 def alert_qa_cancelled(action: str, symbol: str, ch_num, current: float,
@@ -167,6 +168,19 @@ def alert_fusion(action: str, ch_num, qa_ticket: int, new_sl: float, new_tp: flo
         f"QA : #{qa_ticket}\n"
         f"SL : {new_sl}\n"
         f"TP : {new_tp}\n"
+        f"Canal: CH{ch_num}"
+    )
+
+
+def alert_trend_blocked(action: str, symbol: str, ch_num, signal_dir: str, consensus: str, buy_count: int, sell_count: int) -> str:
+    """Alerte Telegram quand un signal est bloqué par le filtre TradingView."""
+    emoji_map = {"STRONG_BUY": "🟢", "BUY": "🟢", "NEUTRAL": "⚪", "SELL": "🔴", "STRONG_SELL": "🔴"}
+    emoji = emoji_map.get(consensus, "⚪")
+    return (
+        f"🚫 {action} | CH{ch_num} | TRADINGVIEW OPPOSÉ\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Signal: {signal_dir} | Consensus: {emoji} {consensus}\n"
+        f"Votes: {buy_count} BUY / {sell_count} SELL\n"
         f"Canal: CH{ch_num}"
     )
 

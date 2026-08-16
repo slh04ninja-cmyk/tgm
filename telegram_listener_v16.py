@@ -164,6 +164,21 @@ TRADING_START_HOUR = int(os.getenv("TRADING_START_HOUR", "3"))
 TRADING_END_HOUR = int(os.getenv("TRADING_END_HOUR", "20"))
 DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "200.0"))
 
+# === FILTRE TRADINGVIEW (consensus 26 indicateurs) ===
+# Bloque les signaux en opposition avec le consensus TradingView.
+# 26 indicateurs votent BUY/SELL/NEUTRAL → consensus = STRONG_BUY / BUY / NEUTRAL / SELL / STRONG_SELL
+TV_FILTER_ENABLED = os.getenv("TV_FILTER_ENABLED", "false").lower() == "true"
+TV_FILTER_SYMBOL = os.getenv("TV_FILTER_SYMBOL", "GOLD")
+TV_FILTER_SCREENER = os.getenv("TV_FILTER_SCREENER", "cfd")
+TV_FILTER_EXCHANGE = os.getenv("TV_FILTER_EXCHANGE", "TVC")
+TV_FILTER_TIMEFRAME = os.getenv("TV_FILTER_TIMEFRAME", "5m")  # 1m, 5m, 15m, 30m, 1h, 4h, 1d
+TV_FILTER_CACHE_TTL = int(os.getenv("TV_FILTER_CACHE_TTL", "30"))  # secondes entre chaque refresh
+# Seuils de consensus (nombre de votes BUY/SELL sur 26 indicateurs)
+TV_STRONG_BUY = int(os.getenv("TV_STRONG_BUY", "15"))   # ≥ 15 BUY → STRONG_BUY
+TV_BUY = int(os.getenv("TV_BUY", "10"))                  # ≥ 10 BUY → BUY
+TV_STRONG_SELL = int(os.getenv("TV_STRONG_SELL", "15"))   # ≥ 15 SELL → STRONG_SELL
+TV_SELL = int(os.getenv("TV_SELL", "10"))                 # ≥ 10 SELL → SELL
+
 # === CACHE TTL ===
 
 
@@ -547,6 +562,153 @@ class NewsManager:
         self._stop = True
         if self._task:
             self._task.cancel()
+
+# =============================================================
+# TRADINGVIEW FILTER (consensus 26 indicateurs)
+# =============================================================
+class TradingViewFilter:
+    """Filtre basé sur le consensus des 26 indicateurs TradingView.
+
+    Logique :
+    - 26 indicateurs (11 oscillateurs + 15 moyennes mobiles) votent BUY/SELL/NEUTRAL
+    - Consensus = STRONG_BUY / BUY / NEUTRAL / SELL / STRONG_SELL
+    - Signal BUY reçu + consensus SELL/STRONG_SELL → BLOQUÉ
+    - Signal SELL reçu + consensus BUY/STRONG_BUY → BLOQUÉ
+    """
+
+    _INTERVAL_MAP = {
+        "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+        "1h": "1h", "2h": "2h", "4h": "4h",
+        "1d": "1d", "1W": "1W", "1M": "1M",
+    }
+
+    def __init__(self):
+        self.enabled = TV_FILTER_ENABLED
+        self.symbol = TV_FILTER_SYMBOL
+        self.screener = TV_FILTER_SCREENER
+        self.exchange = TV_FILTER_EXCHANGE
+        self.timeframe = TV_FILTER_TIMEFRAME
+        self.cache_ttl = TV_FILTER_CACHE_TTL
+        self.strong_buy_threshold = TV_STRONG_BUY
+        self.buy_threshold = TV_BUY
+        self.strong_sell_threshold = TV_STRONG_SELL
+        self.sell_threshold = TV_SELL
+        # Cache
+        self._last_consensus = None    # "STRONG_BUY" | "BUY" | "NEUTRAL" | "SELL" | "STRONG_SELL"
+        self._last_buy_count = 0
+        self._last_sell_count = 0
+        self._last_neutral_count = 0
+        self._last_recommendation = ""
+        self._last_update = 0.0
+
+    def is_allowed(self, action: str) -> tuple[bool, str]:
+        """Vérifie si la direction du signal est alignée avec le consensus TradingView.
+
+        Returns:
+            (True, "") si le signal est autorisé
+            (False, motif) si le signal doit être bloqué
+        """
+        if not self.enabled:
+            return True, ""
+
+        now = time.time()
+        if now - self._last_update > self.cache_ttl:
+            self._refresh()
+
+        if self._last_consensus is None:
+            # Données indisponibles → laisser passer (ne pas bloquer par erreur)
+            return True, ""
+
+        consensus = self._last_consensus
+
+        # Signal BUY → consensus doit être BUY ou STRONG_BUY (NEUTRAL/SELL/STRONG_SELL = bloqué)
+        if action == "BUY" and consensus not in ("BUY", "STRONG_BUY"):
+            motif = (
+                f"TRADINGVIEW OPPOSÉ : signal BUY mais consensus {consensus} "
+                f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
+            )
+            return False, motif
+
+        # Signal SELL → consensus doit être SELL ou STRONG_SELL (NEUTRAL/BUY/STRONG_BUY = bloqué)
+        if action == "SELL" and consensus not in ("SELL", "STRONG_SELL"):
+            motif = (
+                f"TRADINGVIEW OPPOSÉ : signal SELL mais consensus {consensus} "
+                f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
+            )
+            return False, motif
+
+        return True, ""
+
+    def _refresh(self):
+        """Interroge TradingView pour obtenir le consensus des 26 indicateurs."""
+        try:
+            from tradingview_ta import TA_Handler, Interval
+
+            # Mapper le timeframe
+            interval = self._INTERVAL_MAP.get(self.timeframe, Interval.INTERVAL_5_MINUTES)
+
+            handler = TA_Handler(
+                symbol=self.symbol,
+                screener=self.screener,
+                exchange=self.exchange,
+                interval=interval,
+            )
+
+            analysis = handler.get_analysis()
+            summary = analysis.summary
+
+            recommendation = summary.get("RECOMMENDATION", "")
+            buy_count = summary.get("BUY", 0)
+            sell_count = summary.get("SELL", 0)
+            neutral_count = summary.get("NEUTRAL", 0)
+
+            # Déterminer le consensus avec les seuils personnalisés
+            if buy_count >= self.strong_buy_threshold:
+                consensus = "STRONG_BUY"
+            elif buy_count >= self.buy_threshold:
+                consensus = "BUY"
+            elif sell_count >= self.strong_sell_threshold:
+                consensus = "STRONG_SELL"
+            elif sell_count >= self.sell_threshold:
+                consensus = "SELL"
+            else:
+                consensus = "NEUTRAL"
+
+            self._last_consensus = consensus
+            self._last_buy_count = buy_count
+            self._last_sell_count = sell_count
+            self._last_neutral_count = neutral_count
+            self._last_recommendation = recommendation
+            self._last_update = time.time()
+
+            log.debug(
+                f"[TV] {self.symbol} {self.timeframe} → {consensus} "
+                f"({buy_count} BUY / {sell_count} SELL / {neutral_count} NEUTRAL) "
+                f"[TV raw: {recommendation}]"
+            )
+
+        except ImportError:
+            log.error("[TV] tradingview_ta non installé → pip install tradingview_ta")
+            self._last_consensus = None
+        except Exception as e:
+            log.warning(f"[TV] Erreur TradingView: {e}")
+            self._last_consensus = None
+
+    def get_status(self) -> str:
+        """Retourne une ligne de status pour les logs."""
+        if not self.enabled:
+            return "Filtre TradingView: OFF"
+        if self._last_consensus is None:
+            return (
+                f"Filtre TradingView: ON ({self.symbol} {self.timeframe}) "
+                f"— données indisponibles"
+            )
+        return (
+            f"Filtre TradingView: ON ({self.symbol} {self.timeframe}) "
+            f"— {self._last_consensus} "
+            f"({self._last_buy_count}B/{self._last_sell_count}S/{self._last_neutral_count}N)"
+        )
+
 
 # =============================================================
 # MT5 BRIDGE
@@ -2670,6 +2832,7 @@ async def main():
     
     parser = SignalParser()
     bridge = MT5Bridge()
+    tv_filter = TradingViewFilter()
     manager = None
 
     try:
@@ -2696,214 +2859,41 @@ async def main():
         chats = []
         entity_to_name = {}
 
+        # =============================================================
+        # CHARGEMENT DES CANAUX — ORDRE DE PRIORITÉ :
+        #   1. TG_FOLDER (dossiers Telegram) → source principale
+        #   2. Channels.txt → persistance de la numérotation
+        #   3. TG_CHANNEL_* (.env) → fallback final
+        # =============================================================
+
+        # ★ Charger le mapping existant depuis Channels.txt (pour persistance numérotation)
+        _existing_ch_mapping = {}  # id_telegram -> (ch_num, nom)
+        _max_ch_num = 0
         if os.path.exists(CHANNELS_TXT_FILE):
-            # ★ V15 : CHARGEMENT DEPUIS Channels.txt
-            # Numérotation persistante — les canaux gardent leurs numéros après redémarrage
-            log.info(f"Chargement des canaux depuis {CHANNELS_TXT_FILE}")
             try:
-                _channels_from_file = []  # [(ch_num, value)] — value = nom OU ID Telegram
                 with open(CHANNELS_TXT_FILE, 'r', encoding='utf-8') as f:
                     for line in f:
                         m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
                         if m:
                             ch_num = int(m.group(1))
-                            # Support commentaires # : "-100XXX # nom" → "-100XXX"
-                            value = m.group(2).split('#')[0].strip()
-                            _channels_from_file.append((ch_num, value))
-
-                if not _channels_from_file:
-                    log.error(f"Aucun canal trouvé dans {CHANNELS_TXT_FILE}")
-                    return
-
-                log.info(f"{_channels_from_file.__len__()} canaux trouvés dans Channels.txt")
-
-                # ★ FIX (v16) : matching par ID Telegram plutôt que par nom, car un canal
-                # peut renommer son titre à tout moment (le nom n'est pas une clé stable),
-                # alors que l'ID numérique (-100XXXXXXXXXX) ne change jamais. On détecte le
-                # format de chaque ligne : un ID Telegram valide est un entier négatif
-                # commençant par -100 ; sinon on traite la valeur comme un nom (ancien
-                # format, conservé pour compatibilité ascendante).
-                from telethon.tl.types import PeerChannel
-
-                def _is_telegram_id(value: str) -> bool:
-                    try:
-                        return int(value) < 0
-                    except ValueError:
-                        return False
-
-                # Résoudre les entités Telegram pour chaque canal
-                _unresolved = []  # [(ch_num, value)] — non résolus après tentative directe
-                for ch_num, value in _channels_from_file:
-                    try:
-                        if _is_telegram_id(value):
-                            raw_id = int(value)
-                            # Un ID de canal Telegram exposé sous la forme -100XXXXXXXXXX
-                            # correspond en interne au channel_id XXXXXXXXXX (sans le préfixe
-                            # -100) une fois passé à PeerChannel — c'est la conversion que
-                            # Telethon attend pour résoudre un ID "à froid", sans que
-                            # l'entité ait déjà été vue dans un dialogue de la session.
-                            channel_id = int(str(raw_id)[4:]) if str(raw_id).startswith('-100') else abs(raw_id)
-                            entity = await client.get_entity(PeerChannel(channel_id))
-                        else:
-                            entity = await client.get_entity(value)
-                        title_raw = getattr(entity, 'title', value)
-                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title_raw)
-                        title_clean = unicodedata.normalize('NFKC', title_clean)
-                        chats.append(entity)
-                        entity_to_name[entity.id] = title_clean
-                        CHANNEL_NUM_MAP[title_clean] = ch_num
-                        CHANNEL_NUM_MAP[str(entity.id)] = ch_num
-                        log.debug(f"Canal_{ch_num} : {title_clean}")
-                    except Exception:
-                        _unresolved.append((ch_num, value))
-
-                # Pour les canaux non résolus directement, chercher dans les dialogs Telegram
-                if _unresolved:
-                    log.info(f"{_unresolved.__len__()} canaux non résolus directement — recherche dans les dialogs...")
-
-                    def _normalize_id(value: str):
-                        """Normalise un ID Telegram au format -100XXXXXXXXXX pour comparaison stable."""
-                        try:
-                            v = int(value)
-                        except (ValueError, TypeError):
-                            return None
-                        if v < 0 and not str(v).startswith('-100'):
-                            # ID "court" (ex: -1234567890) → forme longue -100XXXXXXXXXX
-                            v = int(f"-100{abs(v)}")
-                        return v
-
-                    _unresolved_by_id = {}   # {id_normalise: ch_num}
-                    _unresolved_by_name = {}  # {nom: ch_num} — compat ascendante
-                    for ch_num, value in _unresolved:
-                        norm_id = _normalize_id(value)
-                        if norm_id is not None:
-                            _unresolved_by_id[norm_id] = (ch_num, value)
-                        else:
-                            _unresolved_by_name[value] = ch_num
-
-                    def _resolve_one(entity, ch_num, title_clean):
-                        chats.append(entity)
-                        entity_to_name[entity.id] = title_clean
-                        CHANNEL_NUM_MAP[title_clean] = ch_num
-                        CHANNEL_NUM_MAP[str(entity.id)] = ch_num
-                        log.debug(f"Canal_{ch_num} : {title_clean} (résolu via dialogs)")
-
-                    # ★ FIX (v16) : parcourir directement les dialogues de la session pour
-                    # matcher par ID Telegram (stable, insensible au renommage du canal),
-                    # plutôt que de dépendre uniquement d'un dossier (TG_FOLDER) et d'un
-                    # matching par titre qui échoue si le canal a été renommé depuis la
-                    # dernière mise à jour de Channels.txt.
-                    if _unresolved_by_id:
-                        try:
-                            async for dialog in client.iter_dialogs():
-                                entity = dialog.entity
-                                # entity.id de Telethon est positif pour les channels ; on le
-                                # reconstruit au format -100XXXXXXXXXX pour comparer.
-                                try:
-                                    candidate_id = int(f"-100{entity.id}")
-                                except Exception:
-                                    continue
-                                if candidate_id in _unresolved_by_id:
-                                    ch_num, orig_value = _unresolved_by_id.pop(candidate_id)
-                                    title_raw = getattr(entity, 'title', orig_value)
-                                    title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title_raw)
-                                    title_clean = unicodedata.normalize('NFKC', title_clean)
-                                    _resolve_one(entity, ch_num, title_clean)
-                                if not _unresolved_by_id:
-                                    break
-                        except Exception as e:
-                            log.warning(f"Erreur lors du parcours des dialogs : {e}")
-
-                    if TG_FOLDER and (_unresolved_by_id or _unresolved_by_name):
-                        try:
-                            from telethon import functions
-                            result = None
-                            for fn_name in ['GetDialogFilters', 'GetDialogFiltersRequest', 'getDialogFilters']:
-                                try:
-                                    fn = getattr(functions.messages, fn_name)
-                                    result = await client(fn())
-                                    break
-                                except AttributeError:
-                                    continue
-
-                            if result:
-                                filters = []
-                                if hasattr(result, 'filters'):
-                                    filters = result.filters
-                                elif hasattr(result, 'to_dict'):
-                                    d = result.to_dict()
-                                    for key in ['filters', 'dialogs', 'items']:
-                                        if key in d:
-                                            filters = d[key]
-                                            break
-
-                                # Résoudre les peers depuis les dossiers
-                                folder_names = [f.strip() for f in TG_FOLDER.split(',') if f.strip()]
-                                all_peers = []
-                                for f in filters:
-                                    if isinstance(f, dict):
-                                        ftitle = f.get('title', '')
-                                        if isinstance(ftitle, dict):
-                                            ftitle = ftitle.get('text', str(ftitle))
-                                    else:
-                                        ftitle_obj = getattr(f, 'title', '')
-                                        ftitle = ftitle_obj.text if hasattr(ftitle_obj, 'text') else str(ftitle_obj)
-                                    if ftitle.lower() in [fn.lower() for fn in folder_names]:
-                                        peers = f.get('include_peers', []) if isinstance(f, dict) else getattr(f, 'include_peers', [])
-                                        all_peers.extend(peers)
-
-                                for peer in all_peers:
-                                    if not (_unresolved_by_id or _unresolved_by_name):
-                                        break
-                                    try:
-                                        entity = await client.get_entity(peer)
-                                        if not hasattr(entity, 'title'):
-                                            continue
-                                        title = entity.title
-                                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
-                                        title_clean = unicodedata.normalize('NFKC', title_clean)
-
-                                        # 1) Matching par ID en priorité (stable au renommage)
-                                        try:
-                                            candidate_id = int(f"-100{entity.id}")
-                                        except Exception:
-                                            candidate_id = None
-                                        if candidate_id is not None and candidate_id in _unresolved_by_id:
-                                            ch_num, _ = _unresolved_by_id.pop(candidate_id)
-                                            _resolve_one(entity, ch_num, title_clean)
-                                            continue
-
-                                        # 2) Repli sur le matching par nom (ancien format)
-                                        for unresolved_name, ch_num in list(_unresolved_by_name.items()):
-                                            _u = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', unresolved_name)
-                                            _u = unicodedata.normalize('NFKC', _u)
-                                            if title_clean == _u:
-                                                _resolve_one(entity, ch_num, title_clean)
-                                                del _unresolved_by_name[unresolved_name]
-                                                break
-                                    except Exception:
-                                        continue
-                        except Exception as e:
-                            log.warning(f"Erreur résolution via dossiers: {e}")
-
-                    # Log des canaux toujours non résolus (par ID puis par nom)
-                    for norm_id, (ch_num, orig_value) in _unresolved_by_id.items():
-                        log.warning(f"Canal_{ch_num} : {orig_value} — introuvable dans Telegram")
-                    for name, ch_num in _unresolved_by_name.items():
-                        log.warning(f"Canal_{ch_num} : {name} — introuvable dans Telegram")
-
-                log.info(f"Canaux chargés : {len(chats)}")
-                if TG_ALERT_CHANNEL:
-                    log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
-
+                            raw = m.group(2)
+                            if '#' in raw:
+                                main_part, comment = raw.split('#', 1)
+                                main_part = main_part.strip()
+                                comment = comment.strip()
+                            else:
+                                main_part, comment = raw.strip(), ''
+                            _existing_ch_mapping[main_part] = (ch_num, comment)
+                            if ch_num > _max_ch_num:
+                                _max_ch_num = ch_num
+                log.info(f"Channels.txt chargé : {len(_existing_ch_mapping)} canaux existants (max CH{_max_ch_num})")
             except Exception as e:
-                log.error(f"Erreur lecture Channels.txt: {e}")
-                return
+                log.warning(f"Erreur lecture Channels.txt pour persistance: {e}")
 
-        elif TG_FOLDER:
-            # ★ CHARGEMENT DEPUIS DOSSIERS TELEGRAM (multiples séparés par virgules)
+        if TG_FOLDER:
+            # ★ PRIORITÉ 1 : CHARGEMENT DEPUIS LES DOSSIERS TELEGRAM
             folder_names = [f.strip() for f in TG_FOLDER.split(',') if f.strip()]
-            log.info(f"Recherche de {len(folder_names)} dossier(s): {', '.join(folder_names)}...")
+            log.info(f"Chargement depuis dossiers Telegram: {', '.join(folder_names)}...")
             try:
                 from telethon import functions
                 result = None
@@ -2977,79 +2967,132 @@ async def main():
                         seen_ids.add(pid)
                         unique_peers.append(peer)
 
-                # ★ PERSISTANCE DE LA NUMÉROTATION DES CANAUX
-                # Charger le mapping existant pour garder les mêmes numéros après redémarrage
-                _mapping_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channel_mapping.json")
-                _existing_mapping = {}  # title_clean -> ch_num
-                _max_existing_num = 0
-                try:
-                    if os.path.exists(_mapping_file):
-                        with open(_mapping_file, 'r', encoding='utf-8') as f:
-                            _existing_mapping = json.load(f)
-                        if _existing_mapping:
-                            _max_existing_num = max(_existing_mapping.values())
-                        log.info(f"Mapping canaux chargé : {len(_existing_mapping)} canaux (max CH{_max_existing_num})")
-                except Exception as e:
-                    log.warning(f"Impossible de charger channel_mapping.json: {e}")
+                # ★ Résoudre les entités et conserver la numérotation existante
+                # Construire un index inverse : id_telegram -> ch_num (depuis Channels.txt)
+                _id_to_num = {}  # id_string -> ch_num
+                for _key, (_cn, _) in _existing_ch_mapping.items():
+                    _id_to_num[_key] = _cn
 
-                ch_num = _max_existing_num  # reprendre après le dernier numéro existant
+                _next_num = _max_ch_num + 1
+                _new_channels = []  # [(entity, ch_num, title_clean)] pour sauvegarde
+
                 for peer in unique_peers:
                     try:
                         entity = await client.get_entity(peer)
                         if not hasattr(entity, 'title'):
                             continue
-                        title = entity.title
-                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title)
+                        title_raw = entity.title
+                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title_raw)
                         title_clean = unicodedata.normalize('NFKC', title_clean)
                         if title_clean.strip() == "":
                             title_clean = str(entity.id)
-                        # ★ Réutiliser le numéro existant si disponible
-                        if title_clean in _existing_mapping:
-                            canal_num = _existing_mapping[title_clean]
-                        else:
-                            ch_num += 1
-                            canal_num = ch_num
-                            _existing_mapping[title_clean] = canal_num
+
+                        # Construire l'ID Telegram au format -100XXXXXXXXXX
+                        tg_id = f"-100{entity.id}"
+
+                        # Chercher un numéro existant (par ID ou par nom)
+                        canal_num = None
+                        if tg_id in _id_to_num:
+                            canal_num = _id_to_num[tg_id]
+                        elif str(entity.id) in _id_to_num:
+                            canal_num = _id_to_num[str(entity.id)]
+                        elif title_clean in _id_to_num:
+                            canal_num = _id_to_num[title_clean]
+
+                        if canal_num is None:
+                            canal_num = _next_num
+                            _next_num += 1
+
                         chats.append(entity)
                         entity_to_name[entity.id] = title_clean
                         CHANNEL_NUM_MAP[title_clean] = canal_num
                         CHANNEL_NUM_MAP[str(entity.id)] = canal_num
+                        CHANNEL_NUM_MAP[tg_id] = canal_num
+                        _new_channels.append((tg_id, canal_num, title_clean))
                         log.debug(f"Canal_{canal_num} : {title_clean}")
                     except Exception as e:
                         log.debug(f"Impossible de résoudre un peer: {e}")
 
-                # Sauvegarder le mapping pour les prochains redémarrages
+                # ★ Sauvegarder dans Channels.txt (persistance)
                 try:
-                    with open(_mapping_file, 'w', encoding='utf-8') as f:
-                        json.dump(_existing_mapping, f, ensure_ascii=False, indent=2)
-                    log.info(f"Mapping canaux sauvegardé : {len(_existing_mapping)} canaux")
+                    with open(CHANNELS_TXT_FILE, 'w', encoding='utf-8') as f:
+                        f.write("# Canaux Telegram — Numérotation persistante\n")
+                        f.write("# Format: Canal_N : -100XXXXXXXXXX # NomDuCanal\n")
+                        f.write(f"# Mis à jour automatiquement — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+                        f.write(f"# Sources: {', '.join(found_folders)}\n")
+                        f.write("\n")
+                        # Trier par numéro de canal
+                        _new_channels.sort(key=lambda x: x[1])
+                        for tg_id, ch_num, title in _new_channels:
+                            f.write(f"Canal_{ch_num} : {tg_id} # {title}\n")
+                    log.info(f"Channels.txt sauvegardé : {len(_new_channels)} canaux")
                 except Exception as e:
-                    log.warning(f"Impossible de sauvegarder channel_mapping.json: {e}")
+                    log.warning(f"Impossible de sauvegarder Channels.txt: {e}")
 
                 folders_str = " , ".join(found_folders)
                 log.info(f"Dossier Trouvé : '{folders_str}'")
-                log.info(f"Channels Telechargés : {len(chats)}")
+                log.info(f"Channels Téléchargés : {len(chats)}")
                 if TG_ALERT_CHANNEL:
                     log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
 
-                # Sauvegarder la liste des canaux dans Channel.txt
-                try:
-                    with open("Channel.txt", "w", encoding="utf-8") as f:
-                        f.write(f"# Canaux chargés depuis les dossiers Telegram: {', '.join(found_folders)}\n")
-                        f.write(f"# {len(chats)} canaux — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
-                        f.write("\n")
-                        for ent in chats:
-                            name = entity_to_name.get(ent.id, '?')
-                            ch = CHANNEL_NUM_MAP.get(name, CHANNEL_NUM_MAP.get(str(ent.id), '?'))
-                            f.write(f"Canal_{ch} : {name}\n")
-                    log.info(f"Liste sauvegardée dans Channel.txt")
-                except Exception as e:
-                    log.warning(f"Impossible de sauvegarder Channel.txt: {e}")
             except Exception as e:
                 log.error(f"Erreur lecture dossier Telegram '{TG_FOLDER}': {e}")
                 return
+
+        elif os.path.exists(CHANNELS_TXT_FILE):
+            # ★ PRIORITÉ 2 : CHARGEMENT DEPUIS Channels.txt (si TG_FOLDER absent)
+            log.info(f"Chargement des canaux depuis {CHANNELS_TXT_FILE}")
+            try:
+                _channels_from_file = []
+                with open(CHANNELS_TXT_FILE, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
+                        if m:
+                            ch_num = int(m.group(1))
+                            value = m.group(2).split('#')[0].strip()
+                            _channels_from_file.append((ch_num, value))
+
+                if not _channels_from_file:
+                    log.error(f"Aucun canal trouvé dans {CHANNELS_TXT_FILE}")
+                    return
+
+                log.info(f"{len(_channels_from_file)} canaux trouvés dans Channels.txt")
+                from telethon.tl.types import PeerChannel
+
+                def _is_telegram_id(value: str) -> bool:
+                    try:
+                        return int(value) < 0
+                    except ValueError:
+                        return False
+
+                for ch_num, value in _channels_from_file:
+                    try:
+                        if _is_telegram_id(value):
+                            raw_id = int(value)
+                            channel_id = int(str(raw_id)[4:]) if str(raw_id).startswith('-100') else abs(raw_id)
+                            entity = await client.get_entity(PeerChannel(channel_id))
+                        else:
+                            entity = await client.get_entity(value)
+                        title_raw = getattr(entity, 'title', value)
+                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title_raw)
+                        title_clean = unicodedata.normalize('NFKC', title_clean)
+                        chats.append(entity)
+                        entity_to_name[entity.id] = title_clean
+                        CHANNEL_NUM_MAP[title_clean] = ch_num
+                        CHANNEL_NUM_MAP[str(entity.id)] = ch_num
+                        log.debug(f"Canal_{ch_num} : {title_clean}")
+                    except Exception as e:
+                        log.warning(f"Canal_{ch_num} : {value} — introuvable: {e}")
+
+                log.info(f"Canaux chargés : {len(chats)}")
+                if TG_ALERT_CHANNEL:
+                    log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
+            except Exception as e:
+                log.error(f"Erreur lecture Channels.txt: {e}")
+                return
+
         else:
-            # ★ CHARGEMENT DEPUIS .ENV (TG_CHANNEL_*)
+            # ★ PRIORITÉ 3 : CHARGEMENT DEPUIS .ENV (TG_CHANNEL_*)
             active_channels = [(e, v) for e, v in _CHANNELS_LIST if v]
             log.info(f"Canaux depuis .env : {len(active_channels)}")
 
@@ -3071,6 +3114,23 @@ async def main():
                     log.info(f"Canal_{ch_num} : {title_clean}")
                 except Exception as e:
                     log.warning(f"Canal introuvable ({env_name}={ch_value}) : {e}")
+
+            # Sauvegarder dans Channels.txt pour persistance
+            if chats:
+                try:
+                    with open(CHANNELS_TXT_FILE, 'w', encoding='utf-8') as f:
+                        f.write("# Canaux Telegram — Numérotation persistante\n")
+                        f.write("# Format: Canal_N : -100XXXXXXXXXX # NomDuCanal\n")
+                        f.write(f"# Mis à jour automatiquement — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+                        f.write("\n")
+                        for ent in chats:
+                            name = entity_to_name.get(ent.id, '?')
+                            ch = CHANNEL_NUM_MAP.get(name, CHANNEL_NUM_MAP.get(str(ent.id), '?'))
+                            tg_id = f"-100{ent.id}"
+                            f.write(f"Canal_{ch} : {tg_id} # {name}\n")
+                    log.info(f"Channels.txt sauvegardé : {len(chats)} canaux")
+                except Exception as e:
+                    log.warning(f"Impossible de sauvegarder Channels.txt: {e}")
 
         # ★ DÉDUPLICATION : éviter le double traitement du même message
         # (ex: canal + groupe de discussion lié → Telegram livre 2x le même msg)
@@ -3210,6 +3270,20 @@ async def main():
                     log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSÉ LIMITE P&L")
                     return
 
+                # ★ FILTRE TRADINGVIEW — bloquer les signaux opposés au consensus 26 indicateurs
+                if tv_filter.enabled and signal_data.direction:
+                    allowed, motif = tv_filter.is_allowed(signal_data.direction)
+                    if not allowed:
+                        ch_num_tf = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
+                        log.info(msg.log_refuse(ch_num_tf, "", msg.MOTIF_TREND_OPPOSE))
+                        log.info(f"CH{ch_num_tf}-{_sig_mode} | {motif}")
+                        _alert_mgmt(msg.alert_trend_blocked(
+                            signal_data.direction, signal_data.pair, ch_num_tf,
+                            signal_data.direction, tv_filter._last_consensus,
+                            tv_filter._last_buy_count, tv_filter._last_sell_count
+                        ))
+                        return
+
                 sig_dict = signal_data.to_dict()
 
                 if signal_data.is_quick_alert:
@@ -3289,6 +3363,7 @@ async def main():
             log.info(f"   FOMC      : {NEWS_BLOCK_MIN_FOMC}/{NEWS_CLOSE_MIN_FOMC}/{NEWS_AFTER_MIN_FOMC} min")
             log.info(f"   Spike     : {NEWS_BLOCK_MIN_SPIKE}/{NEWS_CLOSE_MIN_SPIKE}/{NEWS_AFTER_MIN_SPIKE} min")
         log.info(f" Max signaux actifs : {MAX_POSITIONS}")
+        log.info(f" {tv_filter.get_status()}")
         log.info("=" * 55)
 
         await client.run_until_disconnected()
