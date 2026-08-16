@@ -977,11 +977,7 @@ class TradeManager:
         self._running_pnl = 0.0    # P&L cumulé du jour
         self._min_pnl = 0.0        # creux le plus bas vs 0$
 
-        # ★★★ WHITELIST des rôles autorisés à déclencher le BE ★★★
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
-        # ★ Tous les signaux sont MARKET, jamais de pending
-
-
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
         self._completed_entries = []  # entrées terminées (pour rapport fin de journée)
 
@@ -1582,6 +1578,66 @@ class TradeManager:
     # =============================================================
     # GESTION DU BE (avec whitelist)
     # =============================================================
+    def _recalculate_tp(self, entry: dict):
+        """Recalcule le TP dynamique quand un LIMIT se remplit.
+
+        Formule: TP = average_entry ± (pnl_cible / nb_positions)
+        XAUUSD: 0.01 lot = 1 oz, 1$ mouvement = 1$ P&L par position
+        Avec N positions, 1$ mouvement = N$ P&L total.
+        Le SL reste fixe (jamais déplacé).
+        """
+        signal = entry.get("signal", {})
+        action = signal.get("action", "BUY")
+
+        # Collecter les positions actives
+        active = []
+        for t in entry.get("tickets", []):
+            pos = self._get_pos(t["ticket"])
+            if pos:
+                active.append(t)
+
+        if len(active) <= 1:
+            return  # Pas de recalcul si seulement MARKET
+
+        nb = len(active)
+        if entry.get("_tp_calculated_for", 0) >= nb:
+            return  # Déjà calculé pour ce nombre de positions
+
+        # Average entry pondéré
+        total_lot = sum(t["lot"] for t in active)
+        weighted_entry = sum(t["entry_price"] * t["lot"] for t in active) / total_lot
+
+        # Multiplicateur selon le nombre de positions
+        if nb >= 3:
+            multiplier = TP_MULTIPE2
+        elif nb >= 2:
+            multiplier = TP_MULTIPE1
+        else:
+            multiplier = 1.0
+
+        # P&L cible et mouvement requis
+        pnl_cible = TP_FIXED_GAIN_USD * multiplier
+        price_movement = pnl_cible / nb
+
+        # TP prix
+        if action == "BUY":
+            tp_price = round(weighted_entry + price_movement, 2)
+        else:
+            tp_price = round(weighted_entry - price_movement, 2)
+
+        # Mettre à jour le TP sur toutes les positions
+        updated = 0
+        for t in active:
+            pos = self._get_pos(t["ticket"])
+            if pos:
+                if self.bridge.modify_sl_tp(t["ticket"], pos.sl, tp_price, f"[DYN-TP x{multiplier}]"):
+                    t["tp_final"] = tp_price
+                    updated += 1
+
+        entry["_tp_calculated_for"] = nb
+        _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
+                  f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated} mis à jour")
+
     # =============================================================
     # MÉTHODES UTILITAIRES
     # =============================================================
