@@ -1733,10 +1733,14 @@ class TradeManager:
         pnl_cible = TP_FIXED_GAIN_USD * multiplier
 
         # TP prix
+        # XAUUSD: 0.01 lot = 1 oz, 1$ mouvement = 1$ P&L par position
+        # Avec N positions, 1$ mouvement = N$ P&L total
+        # Formule: TP = average_entry ± (pnl_cible / nb_positions)
+        price_movement = pnl_cible / nb
         if action == "BUY":
-            tp_price = round(weighted_entry + (pnl_cible / total_lot), 2)
+            tp_price = round(weighted_entry + price_movement, 2)
         else:
-            tp_price = round(weighted_entry - (pnl_cible / total_lot), 2)
+            tp_price = round(weighted_entry - price_movement, 2)
 
         # Mettre à jour le TP sur toutes les positions
         updated = 0
