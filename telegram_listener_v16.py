@@ -3163,6 +3163,25 @@ async def main():
                             if ch_num is None or p.comment.startswith(f"CH{ch_num}-"):
                                 close_tickets[p.ticket] = p
                 bridge.close_all(symbol=close_symbol, channel_num=ch_num)
+
+                # ★ Annuler les ordres LIMIT en attente pour ce canal
+                cancelled_limits = 0
+                with manager._lock:
+                    for entry in manager.active:
+                        entry_ch = entry.get("signal", {}).get("source_channel", "")
+                        entry_ch_num = CHANNEL_NUM_MAP.get(entry_ch, CHANNEL_NUM_MAP.get(entry_ch.lstrip("-"), None))
+                        if ch_num is not None and entry_ch_num != ch_num:
+                            continue
+                        if close_symbol and entry.get("signal", {}).get("symbol") != close_symbol:
+                            continue
+                        if not entry.get("_limit_cancelled"):
+                            c = bridge.cancel_pending_limits(entry)
+                            if c > 0:
+                                cancelled_limits += c
+                            entry["_limit_cancelled"] = True
+                if cancelled_limits > 0:
+                    log.info(f"CLOSE: {cancelled_limits} ordres LIMIT annulés pour CH{ch_num}")
+
                 # Mettre à jour le P&L quotidien
                 time.sleep(0.3)
                 for ticket in close_tickets:
