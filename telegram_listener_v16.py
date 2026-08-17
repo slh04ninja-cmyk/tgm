@@ -1841,7 +1841,7 @@ class TradeManager:
                                 break
                     if limit_names:
                         names_str = " et ".join(limit_names)
-                        _log_mgmt(f"CH{ch_num}-{prefix} | {names_str} ANNULE{'S' if len(limit_names) > 1 else ''} (expiration)")
+                        _log_mgmt(f"CH{ch_num}-{prefix} | {names_str} EXPIRE{'S' if len(limit_names) > 1 else ''}")
                     entry["_limit_expired_logged"] = len([t for t in entry["tickets"] if t.get("role") == "limit"]) == len([t for t in entry["tickets"] if t.get("role") == "limit" and t.get("_expired_logged")])
 
             # ══════════════════════════════════════════════════════════════
