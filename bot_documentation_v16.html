@@ -76,7 +76,6 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 <h3>Table des matières</h3>
 <ol>
 <li><a href="#overview">Vue d'ensemble &amp; Architecture</a></li>
-<li><a href="#v16-changes">Changements V16 vs V14</a></li>
 <li><a href="#market-limit">Système MARKET + LIMIT</a></li>
 <li><a href="#tp-dynamic">TP Dynamique (TP_FIXED_GAIN_USD)</a></li>
 <li><a href="#pnl-close">Clôture P&L Cible</a></li>
@@ -133,38 +132,13 @@ footer{text-align:center;color:var(--text-muted);font-size:0.8rem;padding:2rem 0
 </table>
 </section>
 
-<!-- ============================================================ -->
-<!-- 2. CHANGEMENTS V16 -->
-<!-- ============================================================ -->
-<section id="v16-changes">
-<h2>2. Changements V16 vs V14</h2>
 
-<h3>Nouveautés principales</h3>
-<table>
-<tr><th>Fonctionnalité</th><th>V14</th><th>V16</th></tr>
-<tr><td><span class="badge badge-green">Ordres</span></td><td>5 × MARKET (A/B Testing)</td><td>1 MARKET + 2 LIMIT (pullback)</td></tr>
-<tr><td><span class="badge badge-orange">TP</span></td><td>TP du signal (fixe)</td><td>TP dynamique basé sur TP_FIXED_GAIN_USD</td></tr>
-<tr><td><span class="badge badge-purple">Clôture</span></td><td>TP/SL classique MT5</td><td>Clôture P&L cible (ferme tout + annule LIMITs)</td></tr>
-<tr><td><span class="badge badge-cyan">Filling</span></td><td>RETURN hardcodé</td><td>Fallback FOK → IOC → RETURN</td></tr>
-<tr><td><span class="badge badge-yellow">Symbole</span></td><td>mt5.symbol_info() direct</td><td>bridge._sym() (résolution suffixes)</td></tr>
-<tr><td><span class="badge badge-red">CLOSE</span></td><td>Ferme positions seulement</td><td>Ferme positions + annule LIMITs</td></tr>
-</table>
-
-<h3>Bugs corrigés dans V16</h3>
-<table>
-<tr><th>Bug</th><th>Sévérité</th><th>Fix</th></tr>
-<tr><td>LIMIT orders échouent (10013)</td><td><span class="badge badge-red">CRITIQUE</span></td><td>Filling mode fallback + bridge._sym() pour résolution symbole</td></tr>
-<tr><td>Variable <code>lot_limit</code> inexistante</td><td><span class="badge badge-red">CRITIQUE</span></td><td>Renommée en <code>limit_lot</code></td></tr>
-<tr><td>CLOSE ne cancel pas les LIMITs</td><td><span class="badge badge-orange">MOYEN</span></td><td>Ajout de cancel_pending_limits() dans le handler CLOSE</td></tr>
-<tr><td>Prix non normalisé (hardcodé 2)</td><td><span class="badge badge-orange">MOYEN</span></td><td>Utilisation de sym.digits</td></tr>
-</table>
-</section>
 
 <!-- ============================================================ -->
 <!-- 3. SYSTÈME MARKET + LIMIT -->
 <!-- ============================================================ -->
 <section id="market-limit">
-<h2>3. Système MARKET + LIMIT</h2>
+<h2>2. Système MARKET + LIMIT</h2>
 
 <h3>Principe</h3>
 <p>Chaque signal ouvre <strong>1 position MARKET</strong> (exécution immédiate) et <strong>2 ordres LIMIT</strong> (pullback à meilleur prix). Les LIMITs sont placés à un offset du prix actuel.</p>
@@ -225,7 +199,7 @@ LIMIT_EXPIRY_MIN=30         # Expiration des LIMIT orders (minutes)</div>
 <!-- 4. TP DYNAMIQUE -->
 <!-- ============================================================ -->
 <section id="tp-dynamic">
-<h2>4. TP Dynamique (TP_FIXED_GAIN_USD)</h2>
+<h2>3. TP Dynamique (TP_FIXED_GAIN_USD)</h2>
 
 <h3>Principe</h3>
 <p>Le TP n'est <strong>pas celui du signal</strong>. Il est calculé dynamiquement en fonction de <code>TP_FIXED_GAIN_USD</code> et du nombre de positions actives. Le TP est recalculé à chaque fois qu'un LIMIT se remplit.</p>
@@ -295,7 +269,7 @@ TP_MULTIPE2=3.0                 # Multiplicateur quand MARKET + L1 + L2</div>
 <!-- 5. CLÔTURE P&L CIBLE -->
 <!-- ============================================================ -->
 <section id="pnl-close">
-<h2>5. Clôture P&L Cible (PHASE 4b)</h2>
+<h2>4. Clôture P&L Cible (PHASE 4b)</h2>
 
 <h3>Principe</h3>
 <p>À chaque cycle de polling, le bot vérifie si le <strong>P&L flottant</strong> (lu depuis MT5 via <code>pos.profit + pos.swap</code>) atteint le <code>pnl_cible</code>. Si oui, il :</p>
@@ -333,7 +307,7 @@ Prix monte à 3321 → P&L flottant = 16.2$
 <!-- 6. SL PLAFONNÉ -->
 <!-- ============================================================ -->
 <section id="sl-capped">
-<h2>6. SL Plafonné (MAX_SL_USD)</h2>
+<h2>5. SL Plafonné (MAX_SL_USD)</h2>
 
 <h3>Principe</h3>
 <p>Le SL est capé à <code>MAX_SL_USD</code> de l'entrée. Si le SL du signal dépasse cette distance, il est réduit.</p>
@@ -355,7 +329,7 @@ MAX_SL_USD=10.0    # Distance SL maximale en $ (défaut 10$)</div>
 <!-- 7. TOLÉRANCE ZONE -->
 <!-- ============================================================ -->
 <section id="tolerance">
-<h2>7. Tolérance Zone (TOLERANCE_ZN)</h2>
+<h2>6. Tolérance Zone (TOLERANCE_ZN)</h2>
 
 <h3>Principe</h3>
 <p>La tolérance étend la zone vers le SL pour accepter les signaux dont le prix a légèrement dépassé la zone.</p>
@@ -381,7 +355,7 @@ TOLERANCE_MP=5.0    # Tolérance pour les signaux MARKET PRICE</div>
 <!-- 8. CAS D'EXÉCUTION -->
 <!-- ============================================================ -->
 <section id="execution">
-<h2>8. Cas d'exécution des signaux</h2>
+<h2>7. Cas d'exécution des signaux</h2>
 
 <h3>Signaux Zone (ZN)</h3>
 <div class="flow">
@@ -425,7 +399,7 @@ Même logique que ZN/PU → MARKET + LIMITs ou LIMITs seules ou ANNULÉ
 <!-- 9. SIGNAL CLOSE -->
 <!-- ============================================================ -->
 <section id="close-signal">
-<h2>9. Signal CLOSE &amp; Annulation LIMITs</h2>
+<h2>8. Signal CLOSE &amp; Annulation LIMITs</h2>
 
 <h3>Principe</h3>
 <p>Quand un canal envoie un signal <code>CLOSE</code>, le bot :</p>
@@ -455,7 +429,7 @@ Même logique que ZN/PU → MARKET + LIMITs ou LIMITs seules ou ANNULÉ
 <!-- 10. FILLING MODE FALLBACK -->
 <!-- ============================================================ -->
 <section id="filling">
-<h2>10. Filling Mode Fallback</h2>
+<h2>9. Filling Mode Fallback</h2>
 
 <h3>Problème (V14)</h3>
 <p>Les LIMIT orders utilisaient <code>ORDER_FILLING_RETURN</code> en dur. Certains brokers/symboles ne supportent pas ce mode → erreur <strong>10013 (Invalid Price)</strong> systématique.</p>
@@ -489,7 +463,7 @@ LIMIT utilisait <code>mt5.symbol_info()</code> direct → symbole introuvable �
 <!-- 11. RAPPORT QUOTIDIEN -->
 <!-- ============================================================ -->
 <section id="daily-report">
-<h2>11. Rapport Quotidien</h2>
+<h2>10. Rapport Quotidien</h2>
 
 <h3>Contenu</h3>
 <table>
@@ -510,7 +484,7 @@ TRADING_END_HOUR=20             # Heure de génération (UTC)</div>
 <!-- 12. CONFIGURATION -->
 <!-- ============================================================ -->
 <section id="config">
-<h2>12. Configuration (.env)</h2>
+<h2>11. Configuration (.env)</h2>
 
 <h3>Ordres MARKET + LIMIT</h3>
 <table>
@@ -556,7 +530,7 @@ TRADING_END_HOUR=20             # Heure de génération (UTC)</div>
 <!-- 13. EXEMPLES COMPLETS -->
 <!-- ============================================================ -->
 <section id="examples">
-<h2>13. Exemples complets (BUY &amp; SELL)</h2>
+<h2>12. Exemples complets (BUY &amp; SELL)</h2>
 
 <h3>Exemple 1 : BUY ZONE — Cas 1 (MARKET seul)</h3>
 <div class="signal-box"><strong>Signal :</strong> XAUUSD BUY 4000 4010, TP 4050, SL 3970
