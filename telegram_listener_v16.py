@@ -1579,11 +1579,14 @@ class TradeManager:
     # GESTION DU BE (avec whitelist)
     # =============================================================
     def _recalculate_tp(self, entry: dict):
-        """Recalcule le TP dynamique quand un LIMIT se remplit.
+        """Recalcule le TP dynamique basé sur TP_FIXED_GAIN_USD.
+
+        Cas 1: MARKET seul         → pnl_cible = TP_FIXED_GAIN_USD * 1
+        Cas 2: MARKET + LIMIT1     → pnl_cible = TP_FIXED_GAIN_USD * TP_MULTIPE1
+        Cas 3: MARKET + L1 + L2    → pnl_cible = TP_FIXED_GAIN_USD * TP_MULTIPE2
 
         Formule: TP = average_entry ± (pnl_cible / nb_positions)
-        XAUUSD: 0.01 lot = 1 oz, 1$ mouvement = 1$ P&L par position
-        Avec N positions, 1$ mouvement = N$ P&L total.
+        XAUUSD: 0.01 lot = 1 oz, 1$ mouvement = 1$ P&L par position.
         Le SL reste fixe (jamais déplacé).
         """
         signal = entry.get("signal", {})
@@ -1596,8 +1599,8 @@ class TradeManager:
             if pos:
                 active.append(t)
 
-        if len(active) <= 1:
-            return  # Pas de recalcul si seulement MARKET
+        if not active:
+            return
 
         nb = len(active)
         if entry.get("_tp_calculated_for", 0) >= nb:
@@ -1635,6 +1638,7 @@ class TradeManager:
                     updated += 1
 
         entry["_tp_calculated_for"] = nb
+        entry["_pnl_cible"] = pnl_cible
         _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
                   f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated} mis à jour")
 
@@ -1813,6 +1817,35 @@ class TradeManager:
             # ★★★ PHASE 4 : TP DYNAMIQUE (recalcul si LIMIT rempli) ★★★
             # ══════════════════════════════════════════════════════════════
             self._recalculate_tp(entry)
+
+            # ══════════════════════════════════════════════════════════════
+            # ★★★ PHASE 4b : CLÔTURE P&L CIBLE ★★★
+            # Si P&L flottant >= pnl_cible → fermer tout + annuler LIMITs
+            # ══════════════════════════════════════════════════════════════
+            pnl_cible = entry.get("_pnl_cible", 0)
+            if pnl_cible > 0 and not entry.get("_pnl_close_done"):
+                floating = 0.0
+                for t in entry.get("tickets", []):
+                    pos = self._get_pos(t["ticket"])
+                    if pos:
+                        floating += pos.profit + pos.swap
+                if floating >= pnl_cible:
+                    entry["_pnl_close_done"] = True
+                    symbol = entry.get("signal", {}).get("symbol", "?")
+                    action = entry.get("signal", {}).get("action", "?")
+                    closed = 0
+                    for t in entry.get("tickets", []):
+                        pos = self._get_pos(t["ticket"])
+                        if pos:
+                            if self.bridge.close_position(t["ticket"], comment="PNL-TARGET"):
+                                closed += 1
+                    cancelled = self.bridge.cancel_pending_limits(entry)
+                    entry["_limit_cancelled"] = True
+                    _log_mgmt(f"P&L CIBLE atteint: {floating:.2f}$ >= {pnl_cible}$ | "
+                              f"{action} {symbol} | {closed} pos fermées | {cancelled} LIMIT annulés")
+                    if ALERT_TRADE_MANAGEMENT:
+                        _alert_mgmt(f"🎯 P&L CIBLE {pnl_cible}$ atteint ({floating:.2f}$) | "
+                                    f"{action} {symbol} | {closed} fermées + {cancelled} LIMIT annulés")
 
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 5 : ANNULER LIMIT SI MARKET FERMÉ ★★★
@@ -2182,46 +2215,65 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
 
     # === LIMIT ORDERS ===
     if LIMIT_ENABLED and LIMIT_COUNT > 0:
+        # Récupérer sym_info pour digits et filling mode
+        _sym_limit = mt5.symbol_info(symbol)
+        _digits = _sym_limit.digits if _sym_limit else 2
+        _filling_modes = []
+        if _sym_limit:
+            _fm = _sym_limit.filling_mode
+            if _fm & SYMBOL_FILLING_FOK:
+                _filling_modes.append(ORDER_FILLING_FOK)
+            if _fm & SYMBOL_FILLING_IOC:
+                _filling_modes.append(ORDER_FILLING_IOC)
+        _filling_modes.append(ORDER_FILLING_RETURN)
+
         for i in range(LIMIT_COUNT):
             offset = LIMIT_OFFSET_1 if i == 0 else LIMIT_OFFSET_2
             limit_lot = LOT_LIMIT1 if i == 0 else LOT_LIMIT2
             if action == "BUY":
-                limit_price = round(current - offset, 2)
+                limit_price = round(current - offset, _digits)
             else:
-                limit_price = round(current + offset, 2)
+                limit_price = round(current + offset, _digits)
 
             mt5_comment_l = f"CH{ch_num}-{prefix}-L{i+1}"
             order_type = mt5.ORDER_TYPE_BUY_LIMIT if action == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
             expiry = datetime.now(timezone.utc) + timedelta(minutes=LIMIT_EXPIRY_MIN)
 
-            try:
-                result = mt5.order_send({
-                    "action": mt5.TRADE_ACTION_PENDING,
-                    "symbol": symbol,
-                    "volume": limit_lot,
-                    "type": order_type,
-                    "price": limit_price,
-                    "sl": round(sl, 2) if sl else 0,
-                    "tp": round(tp_final, 2) if tp_final else 0,
-                    "deviation": SLIPPAGE,
-                    "magic": MAGIC_NUMBER,
-                    "comment": mt5_comment_l,
-                    "type_time": mt5.ORDER_TIME_SPECIFIED,
-                    "type_filling": mt5.ORDER_FILLING_RETURN,
-                    "expiration": int(expiry.timestamp()),
-                })
-                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-                    tickets.append({
-                        "ticket": result.order, "lot": lot_limit, "role": "limit",
-                        "entry_price": limit_price, "tp_final": tp_final,
-                        "be_active": False, "be_sl": 0,
+            # Essayer chaque filling mode en fallback (comme pour MARKET)
+            for fill_mode in _filling_modes:
+                try:
+                    result = mt5.order_send({
+                        "action": mt5.TRADE_ACTION_PENDING,
+                        "symbol": symbol,
+                        "volume": limit_lot,
+                        "type": order_type,
+                        "price": limit_price,
+                        "sl": round(sl, _digits) if sl else 0,
+                        "tp": round(tp_final, _digits) if tp_final else 0,
+                        "deviation": SLIPPAGE,
+                        "magic": MAGIC_NUMBER,
+                        "comment": mt5_comment_l,
+                        "type_time": mt5.ORDER_TIME_SPECIFIED,
+                        "type_filling": fill_mode,
+                        "expiration": int(expiry.timestamp()),
                     })
-                    orders_desc.append(f"L{i+1}={result.order} @{limit_price}")
-                    log.debug(f"  ✓ LIMIT {i+1} #{result.order} @{limit_price}")
-                else:
-                    log.warning(f"  ✗ LIMIT {i+1} échoué: {getattr(result, 'retcode', '?')}")
-            except Exception as e:
-                log.error(f"  LIMIT {i+1} EXCEPTION: {e}")
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        tickets.append({
+                            "ticket": result.order, "lot": limit_lot, "role": "limit",
+                            "entry_price": limit_price, "tp_final": tp_final,
+                            "be_active": False, "be_sl": 0,
+                        })
+                        orders_desc.append(f"L{i+1}={result.order} @{limit_price}")
+                        log.debug(f"  ✓ LIMIT {i+1} #{result.order} @{limit_price} fill={fill_mode}")
+                        break  # Succès, pas besoin d'essayer le filling suivant
+                    else:
+                        log.debug(f"  LIMIT {i+1} fill_mode={fill_mode} retcode={getattr(result, 'retcode', '?')}")
+                except Exception as e:
+                    log.error(f"  LIMIT {i+1} EXCEPTION: {e}")
+                    break
+            else:
+                # Tous les filling modes ont échoué
+                log.warning(f"  ✗ LIMIT {i+1} échoué: tous filling modes épuisés")
 
     if not tickets:
         return False
@@ -2312,6 +2364,15 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         return
 
     avg_entry = (zone_low + zone_high) / 2
+
+    # ★ OVERRIDE : TP basé sur TP_FIXED_GAIN_USD (ignorer le TP du signal)
+    # Sera recalculé dynamiquement si des LIMIT se remplissent
+    if action == "BUY":
+        tp_final = round(avg_entry + TP_FIXED_GAIN_USD, 2)
+    else:
+        tp_final = round(avg_entry - TP_FIXED_GAIN_USD, 2)
+    _log_mgmt(f"TP initial: {tp_final} (entry={avg_entry:.2f} ± {TP_FIXED_GAIN_USD}$)")
+
     if not SignalParser._validate_sl(action, avg_entry, sl):
         log.info(msg.log_refuse(ch_num, "", msg.MOTIF_SL_INVALIDE))
         log.error(f"Signal rejeté — SL {sl} invalide pour {action} (entry={avg_entry})")
