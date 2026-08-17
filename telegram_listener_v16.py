@@ -2215,11 +2215,12 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
 
     # === LIMIT ORDERS ===
     if LIMIT_ENABLED and LIMIT_COUNT > 0:
-        # Récupérer sym_info pour digits, filling mode et stops_level
-        _sym_limit = mt5.symbol_info(symbol)
+        # Récupérer sym_info via bridge._sym() (résolution suffixes comme pour MARKET)
+        _sym_limit = bridge._sym(symbol)
         _digits = _sym_limit.digits if _sym_limit else 2
         _stops_level = getattr(_sym_limit, 'stops_level', 0) if _sym_limit else 0
-        _trade_mode = getattr(_sym_limit, 'trade_mode', '?') if _sym_limit else '?
+        _trade_mode = getattr(_sym_limit, 'trade_mode', '?') if _sym_limit else '?'
+        _resolved_symbol = _sym_limit.name if _sym_limit else symbol
         _filling_modes = []
         if _sym_limit:
             _fm = _sym_limit.filling_mode
@@ -2229,8 +2230,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                 _filling_modes.append(ORDER_FILLING_IOC)
         _filling_modes.append(ORDER_FILLING_RETURN)
 
-        # Log debug symbole
-        log.debug(f"  LIMIT sym={symbol} digits={_digits} stops_level={_stops_level} trade_mode={_trade_mode} filling_modes={_filling_modes}")
+        log.debug(f"  LIMIT sym={symbol}→{_resolved_symbol} digits={_digits} stops_level={_stops_level} trade_mode={_trade_mode} filling_modes={_filling_modes}")
 
         for i in range(LIMIT_COUNT):
             offset = LIMIT_OFFSET_1 if i == 0 else LIMIT_OFFSET_2
@@ -2250,7 +2250,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                 try:
                     result = mt5.order_send({
                         "action": mt5.TRADE_ACTION_PENDING,
-                        "symbol": symbol,
+                        "symbol": _resolved_symbol,
                         "volume": limit_lot,
                         "type": order_type,
                         "price": limit_price,
