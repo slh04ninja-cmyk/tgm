@@ -1,276 +1,276 @@
-# Version : V14.0.0 — Multi-Position A/B Testing & Parser Improvements
+# Version : V16.0.0 — MARKET + LIMIT Orders & P&L Target Close
 
-### Date : 2026-08-02
+### Date : 2026-08-18
 
 ---
 
-## 1. NOUVEAU : 5 positions par signal (A/B Testing)
+## 1. NOUVEAU : Système MARKET + LIMIT (remplace Multi-Positions V14)
 
 ### Principe
-Pour chaque signal reçu, le bot ouvre **5 positions simultanées** (même prix d'entrée, même lot 0.01$) et les gère avec des méthodes différentes pour comparer les performances.
+Chaque signal ouvre **1 ordre MARKET** (exécution immédiate) + **2 ordres LIMIT** (pullback à meilleur prix). Les LIMITs sont placés à un offset du prix actuel pour catcher un éventuel retour de prix.
 
-### Méthodes
+### Offsets
 
-| Position | Rôle | TP | Gestion |
+| Ordre | Variable | Défaut | Description |
 |---|---|---|---|
-| **P1** | `tp_fixe` | TP du signal | BE classique : quand profit ≥ `PNL_TRIGGER_USD`, SL → entry ± `BE_USD` |
-| **P2** | `be_scale` | entry ± 20$ | BE escaladé : SL progressif selon le profit (voir niveaux ci-dessous) |
-| **P3** | `trailing` | Aucun (TP lointain) | Trailing stop de `TRAILING_STOP_USD`$ qui suit le prix |
-| **P4a** | `partial_quick` | entry ± 5$ | Fermeture automatique dès +5$ de profit |
-| **P4b** | `partial_trail` | Aucun (TP lointain) | Trailing stop de `PARTIAL_TRAIL_USD`$ qui suit le prix |
+| LIMIT 1 | `LIMIT_OFFSET_1` | 3.0 | Offset du prix actuel |
+| LIMIT 2 | `LIMIT_OFFSET_2` | 6.0 | Offset du prix actuel |
 
-### Niveaux BE Escaladé (P2)
+**BUY** → LIMIT en dessous du prix actuel (achat moins cher)
+**SELL** → LIMIT au-dessus du prix actuel (vente plus cher)
 
-| Profit atteint | SL déplacé à |
-|---|---|
-| +5$ | entry (BE neutre) |
-| +10$ | entry + 3$ (sécurisé) |
-| +15$ | entry + 7$ (verrouillé) |
+### Lots
 
-### Comment MT5 identifie chaque position
+| Ordre | Variable | Défaut |
+|---|---|---|
+| MARKET | `LOT_MARKET` / `LOT_TOTAL` | 0.01 |
+| LIMIT 1 | `LOT_LIMIT1` | 0.01 |
+| LIMIT 2 | `LOT_LIMIT2` | 0.01 |
 
-Le champ `comment` de MT5 (max 31 chars) identifie la méthode :
+### Identification MT5
+
 ```
-CH1-ZN1-P1    ← canal 1, zone 1, méthode TP Fixe
-CH1-ZN1-P2    ← canal 1, zone 1, méthode BE Escaladé
-CH1-ZN1-P3    ← canal 1, zone 1, méthode Trailing
-CH1-ZN1-P4a   ← canal 1, zone 1, méthode Partial Quick
-CH1-ZN1-P4b   ← canal 1, zone 1, méthode Partial Trail
+CH20-ZN-MK     ← canal 20, zone, Market
+CH20-ZN-L1     ← canal 20, zone, Limit 1
+CH20-ZN-L2     ← canal 20, zone, Limit 2
 ```
 
-### Types de signaux concernés
+### Scénarios de remplissage
 
-Tous les types de signaux ouvrent 5 positions :
-- **ZN** (zone : prix dans la zone ou entre zone et SL)
-- **PU** (prix unique : avec tolérance)
-- **AL-MP** (quick alert : marché immédiat)
+| Cas | Positions actives | Description |
+|---|---|---|
+| Cas 1 | MARKET seul | Prix ne revient pas → LIMITs non remplis |
+| Cas 2 | MARKET + L1 | Prix revient partiellement → L1 rempli |
+| Cas 3 | MARKET + L1 + L2 | Prix revient fort → les 2 LIMITs remplis |
 
-### Implémentation
+### Configuration
 
-- `_open_multi_positions()` : fonction helper qui ouvre les 5 positions
-- `_check_all()` : dispatch par rôle (`t.get("role")`) vers les 5 méthodes de gestion
-- `_manage_tp_fixe()`, `_manage_be_scale()`, `_manage_trailing()`, `_manage_partial_quick()`, `_manage_partial_trail()` : méthodes de gestion individuelles
-
----
-
-## 2. NOUVEAU : SL plafonné (MAX_SL_USD)
-
-### Principe
-Le SL du signal est plafonné à une distance maximale en dollars. Si le SL du signal dépasse cette distance, il est capé.
-
-Pour XAUUSD avec 0.01 lot : **1$ de prix = 1$ de P&L**.
-
-### Logique
-
-```python
-def _cap_sl(action, entry_price, signal_sl, max_sl_usd):
-    distance = abs(entry_price - signal_sl)
-    if distance <= max_sl_usd:
-        return signal_sl  # gardé tel quel
-    # capé à max_sl_usd de l'entrée
-    if action == "BUY":
-        return entry_price - max_sl_usd
-    else:
-        return entry_price + max_sl_usd
+```
+LIMIT_ENABLED=true          # Activer les LIMIT orders
+LIMIT_COUNT=2               # Nombre de LIMIT orders (0, 1 ou 2)
+LIMIT_OFFSET_1=3.0          # 1er LIMIT
+LIMIT_OFFSET_2=6.0          # 2ème LIMIT
+LOT_LIMIT1=0.01             # Lot LIMIT 1
+LOT_LIMIT2=0.01             # Lot LIMIT 2
+LIMIT_EXPIRY_MIN=30         # Expiration (minutes)
 ```
 
-### Où le SL est capé
-
-Le `_cap_sl()` est appelé dans **4 endroits** :
-1. Ouverture d'une position zone (ZN1/ZN2)
-2. Ouverture d'une position prix unique (PU1/PU2)
-3. Ouverture d'une quick alert (AL-MP)
-4. Fusion d'un QA avec un signal complet (`merge_quick_alert`)
-
 ---
 
-## 3. NOUVEAU : Rapport quotidien (texte + PDF)
+## 2. NOUVEAU : TP Dynamique (TP_FIXED_GAIN_USD)
 
 ### Principe
-À `TRADING_END_HOUR`, le bot ferme toutes les positions et génère un rapport quotidien envoyé à Telegram en deux formats : message texte et fichier PDF.
+Le TP n'est **pas celui du signal**. Il est calculé dynamiquement en fonction de `TP_FIXED_GAIN_USD` et du nombre de positions actives. Recalculé à chaque fois qu'un LIMIT se remplit.
 
-### Contenu du rapport
+### Formule
 
-**Résumé global :**
-- P&L réalisé
-- Trades / Wins / Losses / Winrate
+```
+pnl_cible = TP_FIXED_GAIN_USD × multiplicateur
+price_movement = pnl_cible / nb_positions
+TP = average_entry ± price_movement
+```
 
-**Par méthode (P1-P4b) :**
-- Trades, Winrate, P&L, P&L moyen
+### Multiplicateur
 
-**Par canal (CH{x}) :**
-- Trades, Winrate, P&L
-- Triés du meilleur au pire
+| Cas | Positions | Multiplicateur | pnl_cible |
+|---|---|---|---|
+| Cas 1 | MARKET seul | 1.0 | TP_FIXED_GAIN_USD × 1 |
+| Cas 2 | MARKET + L1 | TP_MULTIPE1 | TP_FIXED_GAIN_USD × TP_MULTIPE1 |
+| Cas 3 | MARKET + L1 + L2 | TP_MULTIPE2 | TP_FIXED_GAIN_USD × TP_MULTIPE2 |
 
-**Clôtures :**
-- TP : nombre de trades + P&L
-- SL : nombre de trades + P&L
+### Average entry pondéré
 
-### PDF
-Le PDF contient les mêmes données avec en plus le **nom du canal** (pas seulement CH{x}).
+```
+average_entry = (entry_MK × lot_MK + entry_L1 × lot_L1 + entry_L2 × lot_L2) / total_lot
+```
 
-### Implémentation
-- `_collect_daily_report_data()` : collecte les données avant fermeture
-- `_generate_daily_report_pdf()` : génère le PDF avec fpdf2
-- `_send_telegram_document()` : envoie le fichier via Telethon
-- `bot_messages_v14.py` : fonctions `report_daily_summary`, `report_daily_by_method`, `report_daily_by_channel`, `report_daily_closes`, `report_daily_full`
+### Exemple (BUY, TP_FIXED_GAIN_USD=0.5, TP_MULTIPE1=1.5)
+
+```
+MK @ 4418.02, L1 @ 4415.037 (Cas 2)
+
+avg = (4418.02 + 4415.037) / 2 = 4416.5285
+pnl_cible = 0.5 × 1.5 = 0.75$
+price_movement = 0.75 / 2 = 0.375
+TP = 4416.5285 + 0.375 = 4416.90
+
+Vérification P&L (0.01 lot = 1 oz) :
+  MK : (4416.90 - 4418.02) × 1 = -1.12$
+  L1 : (4416.90 - 4415.037) × 1 = +1.86$
+  Total = +0.75$ ✅
+```
+
+### Configuration
+
+```
+TP_FIXED_GAIN_USD=8.0          # Gain cible par position
+TP_MULTIPE1=2.0                 # Multiplicateur MARKET + L1
+TP_MULTIPE2=3.0                 # Multiplicateur MARKET + L1 + L2
+```
 
 ---
 
-## 4. NOUVEAU : Fermeture automatique à TRADING_END_HOUR
+## 3. NOUVEAU : Clôture P&L Cible (PHASE 4b)
 
 ### Principe
-Le bot ferme **toutes les positions** à `TRADING_END_HOUR` pour pouvoir calculer la performance du jour.
+À chaque cycle de polling (~1s), le bot vérifie si le **P&L flottant** (depuis MT5 via `pos.profit + pos.swap`) atteint le `pnl_cible`. Si oui :
+1. Ferme **toutes les positions actives**
+2. Annule **tous les LIMITs en attente**
+3. Envoie une alerte Telegram
 
-### Comportement
+### Cycle
 
-| Heure UTC | Action |
-|---|---|
-| `TRADING_START_HOUR` | `RESET JOURNALIER` → nouveau jour, flag reset |
-| Plage horaire | Trading normal (signaux + gestion) |
-| `TRADING_END_HOUR` | **Fermeture automatique** : toutes les positions + annulation ordres + rapport |
-| Hors plage | Nouveaux signaux ignorés |
+```
+_check_all()
+  ├── PHASE 4  : _recalculate_tp(entry) → met à jour le TP
+  ├── PHASE 4b : P&L flottant >= pnl_cible ?
+  │       ├── OUI → close_all + cancel_pending_limits
+  │       └── NON → continuer
+  └── PHASE 5  : Si MARKET fermé → annuler LIMITs restants
+```
 
-### Implémentation
-- `_shutdown_end_of_day()` : ferme tout, collecte données, génère rapport, envoie PDF
-- `_end_of_day_done` : flag pour éviter les fermetures répétées
-- Reset automatique au début du nouveau jour de trading
+### Important
+Le bot ne ferme PAS au TP prix — il surveille le P&L flottant réel depuis MT5.
 
 ---
 
-## 5. NOUVEAU : Contrôle des logs et alertes
+## 4. FIX : Filling Mode Fallback (LIMIT orders)
 
-### Variables
+### Problème (V14)
+Les LIMIT orders utilisaient `ORDER_FILLING_RETURN` en dur → erreur 10013 (Invalid Price) systématique sur certains brokers.
+
+### Solution (V16)
+Fallback identique au MARKET : essayer FOK → IOC → RETURN jusqu'au succès.
+
+```
+LIMIT 1 → FOK → 10013 → IOC → SUCCÈS ✅
+LIMIT 2 → FOK → 10013 → IOC → SUCCÈS ✅
+```
+
+---
+
+## 5. FIX : Résolution symbole (bridge._sym)
+
+### Problème (V14)
+MARKET utilisait `bridge._sym(symbol)` (résout les suffixes : XAUUSD → XAUUSDm).
+LIMIT utilisait `mt5.symbol_info(symbol)` direct → symbole introuvable → 10013.
+
+### Solution (V16)
+LIMIT utilise maintenant `bridge._sym(symbol)` comme le MARKET.
+
+---
+
+## 6. FIX : Variable lot_limit → limit_lot
+
+Le ticket LIMIT enregistrait `"lot": lot_limit` (inexistant) au lieu de `"lot": limit_lot`. Corrigé.
+
+---
+
+## 7. FIX : CLOSE annule les LIMITs
+
+### Problème (V14)
+Le handler CLOSE faisait `bridge.close_all()` → ferme les positions mais PAS les LIMITs en attente.
+
+### Solution (V16)
+Après `close_all()`, le bot parcourt `manager.active` et appelle `cancel_pending_limits()` pour le canal concerné.
+
+---
+
+## 8. SL Plafonné (MAX_SL_USD) — inchangé
+
+Le SL est capé à `MAX_SL_USD` de l'entrée (défaut 10$). `_cap_sl()` appelé dans 4 endroits : ZN, PU, QA, Fusion.
+
+---
+
+## 9. Tolérance Zone — inchangé
 
 | Variable | Défaut | Description |
 |---|---|---|
-| `LOG_TRADE_MANAGEMENT` | `true` | Logs console pour P1-P4b (BE, trailing, partial) |
-| `ALERT_TRADE_MANAGEMENT` | `true` | Alertes Telegram pour P1-P4b |
-| `ALERT_DAILY_PERFORMANCE` | `true` | Rapport quotidien P&L → Telegram |
-
-### Quand `LOG_TRADE_MANAGEMENT=false`
-
-Seuls les messages **une fois par jour** restent :
-- MT5 connecté, Telegram connecté, Balance
-- NEWS HIGH IMPACT (1x/jour)
-- RESET JOURNALIER (1x/jour)
-- DAILY-LIMIT (1x/jour)
-- Banner config (1x/jour)
-- SHUTDOWN
-
-Tout le reste (signaux, clôtures, trailing, BE, fusion, conflit, news blocking...) est **exclu**.
-
-### Implémentation
-- `_log_mgmt(msg)` : wrapper qui vérifie `LOG_TRADE_MANAGEMENT` avant `log.info()`
-- `_alert_mgmt(msg)` : wrapper qui vérifie `ALERT_TRADE_MANAGEMENT` avant `send_alert_sync()`
+| `TOLERANCE_ZN` | 1.0 | Tolérance autour de la zone |
+| `TOLERANCE_PU` | 3.0 | Tolérance signaux Prix Unique |
+| `TOLERANCE_MP` | 5.0 | Tolérance MARKET PRICE |
 
 ---
 
-## 6. FIX PARSER : Fallback XAUUSD par défaut
+## 10. Architecture V16
 
-Si aucun symbole n'est détecté, le parser utilise `XAUUSD` par défaut. Impact : 92.9% → 100% de parsing.
-
----
-
-## 7. FIX PARSER : Détection des signaux à double zones
-
-Fonction `_count_zone_candidates()` qui compte les paires de nombres sur la **même ligne** du texte brut (hors TPs et SL). Si > 1 paire → signal annulé comme ambigu.
-
----
-
-## 8. FIX PARSER : Zone détectée après BUY/SELL
-
-- Règle 10 modifiée : détecte `BUY <prix1> <prix2>` ou `BUY <prix1>-<prix2>` comme zone
-- Règle 11 modifiée : vérifie les 2 premiers nombres après BUY/SELL, zone si 2 nombres consécutifs
-- `NOW` ignoré entre BUY/SELL et les prix
+```
+Telegram (canaux configurés) → Signal Parser → MT5 Bridge → MetaTrader 5
+                                        ↓
+                                  1 MARKET + 2 LIMITs
+                                        ↓
+                                  TP Dynamique (TP_FIXED_GAIN_USD)
+                                        ↓
+                                  Clôture P&L Cible (ferme tout)
+                                        ↓
+                                  CLOSE signal → annule LIMITs
+```
 
 ---
 
-## 9. FIX PARSER : @ dans les TPs ignoré
-
-`TP1 @ 4076` n'est plus matché comme entrée. Le `@` après TP/TARGET est ignoré.
-
----
-
-## 10. FIX PARSER : Décimaux préservés
-
-`4074.00` reste `4074.00` (pas transformé en `407400`). Les points parasites (`4025...`) sont supprimés sans casser les décimaux.
-
----
-
-## Fichiers du projet (v14)
+## 11. Fichiers du projet (V16)
 
 | Fichier | Lignes | Description |
 |---|---|---|
-| `telegram_listener_v14.py` | ~2700 | Cœur du bot (multi-positions + SL capé + rapport + PDF) |
-| `signal_parser_v14.py` | ~880 | Parser amélioré |
-| `bot_messages_v14.py` | ~450 | Logs + alertes + rapport quotidien |
-| `13.env` | — | Configuration |
+| `telegram_listener_v16.py` | ~3300 | Cœur du bot (MARKET+LIMIT, TP dynamique, P&L close) |
+| `signal_parser.py` | — | Parser signaux |
+| `bot_messages.py` | — | Logs, alertes |
+| `bot_documentation_v16.html` | ~640 | Documentation HTML complète |
+| `.env` | — | Configuration |
 | `CONTEXT.md` | — | Ce fichier |
 
 ---
 
-## Variables .env (v14)
+## 12. Variables .env (V16)
 
-### Nouvelles variables
-
-| Variable | Défaut | Description |
-|---|---|---|
-| `MAX_SL_USD` | 15.0 | Distance SL maximale en $ |
-| `TRAILING_STOP_USD` | 5.0 | Trailing stop pour P3 |
-| `PARTIAL_TRAIL_USD` | 3.0 | Trailing stop pour P4b |
-| `LOG_TRADE_MANAGEMENT` | true | Logs console P1-P4b |
-| `ALERT_TRADE_MANAGEMENT` | true | Alertes Telegram P1-P4b |
-| `ALERT_DAILY_PERFORMANCE` | true | Rapport quotidien → Telegram |
-
-### Variables existantes (inchangées)
+### MARKET + LIMIT
 
 | Variable | Défaut | Description |
 |---|---|---|
-| `TP_FIXED_GAIN_USD` | 10.0 | Gain cible pour P1 |
-| `PNL_TRIGGER_USD` | 7.0 | Seuil BE pour P1 |
-| `BE_USD` | 3.0 | Marge de sécurité SL pour P1 |
-| `QUICK_ALERT_SL_OFFSET` | 10.0 | Offset SL par défaut |
-| `RR_RATIO_DEFAULT` | 1.5 | Ratio risk/reward |
+| `LIMIT_ENABLED` | true | Activer LIMIT orders |
+| `LIMIT_COUNT` | 2 | Nombre de LIMITs |
+| `LIMIT_OFFSET_1` | 3.0 | Offset LIMIT 1 |
+| `LIMIT_OFFSET_2` | 6.0 | Offset LIMIT 2 |
+| `LOT_MARKET` | 0.01 | Lot MARKET |
+| `LOT_LIMIT1` | 0.01 | Lot LIMIT 1 |
+| `LOT_LIMIT2` | 0.01 | Lot LIMIT 2 |
+| `LIMIT_EXPIRY_MIN` | 30 | Expiration LIMITs (minutes) |
+
+### TP Dynamique
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `TP_FIXED_GAIN_USD` | 8.0 | Gain cible par position |
+| `TP_MULTIPE1` | 2.0 | Multiplicateur MARKET + L1 |
+| `TP_MULTIPE2` | 3.0 | Multiplicateur MARKET + L1 + L2 |
+
+### SL & Tolérances
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `MAX_SL_USD` | 10.0 | Distance SL maximale |
+| `TOLERANCE_ZN` | 1.0 | Tolérance zone |
+| `TOLERANCE_PU` | 3.0 | Tolérance prix unique |
+| `TOLERANCE_MP` | 5.0 | Tolérance MARKET PRICE |
+
+### Général
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `MAGIC_NUMBER` | 20250226 | Identifiant bot MT5 |
+| `MAX_POSITIONS` | 3 | Max signaux actifs |
+| `SLIPPAGE` | 20 | Slippage autorisé |
+| `MAX_SPREAD_POINTS` | 50 | Spread max |
 
 ---
 
-## Architecture v14
+## 13. Commits V16
 
-```
-Telegram (52 canaux) → Signal Parser V14 → MT5 Bridge → MetaTrader 5 (Exness)
-                              ↓                    ↓
-                        Fallback XAUUSD      5 positions × signal
-                        Double zone check    ↓
-                        SL plafonné     ┌──── P1: TP Fixe (BE classique)
-                                        ├──── P2: BE Escaladé
-                                        ├──── P3: Trailing Stop
-                                        ├──── P4a: Partial Quick (+5$)
-                                        └──── P4b: Partial Trail (3$)
-                                                ↓
-                                        Fin de journée (20h UTC)
-                                                ↓
-                                        Rapport texte + PDF → Telegram
-```
-
----
-
-## Fichiers du projet
-
-| Fichier | Description |
+| Hash | Message |
 |---|---|
-| `telegram_listener_v14.py` | Cœur du bot |
-| `signal_parser_v14.py` | Parser signaux |
-| `bot_messages_v14.py` | Logs, alertes, rapport |
-| `telegram_listener_v13.py` | Version précédente (conservée) |
-| `signal_parser_v13.py` | Version précédente (conservée) |
-| `signal_parser.py` | Copie de v14 (importé par v13) |
-| `bot_messages.py` | Version précédente (conservée) |
-| `13.env` | Configuration |
-| `CONTEXT.md` | Ce fichier |
-
----
-
-## Token GitHub
-
-Le token fonctionne pour les pushes. Utiliser `git remote set-url origin https://<TOKEN>@github.com/slh04ninja-cmyk/tgm.git` puis `git push origin main`.
+| `7c405e7` | fix(v16): LIMIT orders filling fallback + TP_FIXED_GAIN_USD P&L close |
+| `69c6330` | debug(v16): add detailed logging for LIMIT order failures |
+| `4903c17` | fix(v16): resolve symbol for LIMIT orders (bridge._sym) |
+| `a4aca1f` | fix(v16): debug log f-string escaping |
+| `3721e0b` | fix(v16): CLOSE signal now also cancels pending LIMIT orders |
+| `8ad7cdb` | docs(v16): HTML documentation |
