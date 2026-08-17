@@ -1803,6 +1803,47 @@ class TradeManager:
                         self.active.remove(entry)
                 continue
 
+            # ★★★ DÉTECTION LIMITS EXPIRÉS ★★★
+            # Un LIMIT expire s'il n'est plus dans mt5.orders_get() et n'a jamais été rempli
+            if not entry.get("_limit_expired_logged"):
+                # Récupérer les ordres en attente
+                pending_orders = mt5.orders_get()
+                pending_tickets = {o.ticket for o in pending_orders} if pending_orders else set()
+
+                expired_limits = []
+                for t in entry.get("tickets", []):
+                    if t.get("role") != "limit":
+                        continue
+                    if t.get("_reported") or t.get("_expired_logged"):
+                        continue
+                    # Si le LIMIT n'est plus en attente et n'a pas de position → expiré
+                    if t["ticket"] not in pending_tickets and not self._get_pos(t["ticket"]):
+                        expired_limits.append(t)
+                        t["_expired_logged"] = True
+
+                if expired_limits:
+                    canal = entry.get("signal", {}).get("source_channel", "?")
+                    ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+                    prefix = entry.get("_mt5_comment", "").split("-")[-1] if "-" in entry.get("_mt5_comment", "") else "?"
+                    # Identifier quels LIMITs ont expiré
+                    limit_names = []
+                    for t in expired_limits:
+                        comment = entry.get("_mt5_comment", "")
+                        for tk in entry.get("tickets", []):
+                            if tk is t:
+                                idx = entry["tickets"].index(t)
+                                # Trouver le numéro du LIMIT (L1, L2...)
+                                limit_count = 0
+                                for tk2 in entry["tickets"][:idx+1]:
+                                    if tk2.get("role") == "limit":
+                                        limit_count += 1
+                                limit_names.append(f"L{limit_count}")
+                                break
+                    if limit_names:
+                        names_str = " et ".join(limit_names)
+                        _log_mgmt(f"CH{ch_num}-{prefix} | {names_str} ANNULE{'S' if len(limit_names) > 1 else ''} (expiration)")
+                    entry["_limit_expired_logged"] = len([t for t in entry["tickets"] if t.get("role") == "limit"]) == len([t for t in entry["tickets"] if t.get("role") == "limit" and t.get("_expired_logged")])
+
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 3 : GESTION BE ★★★
             # ══════════════════════════════════════════════════════════════
@@ -2430,14 +2471,20 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         prefix = "ZN"
         avg_entry = (zone_low + zone_high) / 2
         sl = _cap_sl(action, avg_entry, sl, MAX_SL_USD)
-        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | prix={current}")
+        # Calculer les prix LIMIT pour le log
+        if action == "BUY":
+            l1_price = round(current - LIMIT_OFFSET_1, 2)
+            l2_price = round(current - LIMIT_OFFSET_2, 2)
+        else:
+            l1_price = round(current + LIMIT_OFFSET_1, 2)
+            l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-        # Si prix dans zone → MARKET + LIMITS, sinon LIMITS seules
         if in_zone:
+            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
                               sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         else:
-            # Prix légèrement au-dessus → LIMITS seules (pas de MARKET)
+            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}")
             signal_limits_only = dict(signal)
             _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
                               sl, tp_final, 0, ch_num, canal, prefix)
@@ -2465,12 +2512,21 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             return
 
         sl = _cap_sl(action, entry_price, sl, MAX_SL_USD)
-        log.info(f"CH{ch_num}-PU | ACCEPTE | prix={current} | entry={entry_price}")
+
+        # Calculer les prix LIMIT pour le log
+        if action == "BUY":
+            l1_price = round(current - LIMIT_OFFSET_1, 2)
+            l2_price = round(current - LIMIT_OFFSET_2, 2)
+        else:
+            l1_price = round(current + LIMIT_OFFSET_1, 2)
+            l2_price = round(current + LIMIT_OFFSET_2, 2)
 
         if in_zone:
+            log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
                               sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         else:
+            log.info(f"CH{ch_num}-PU | ACCEPTE | L1={l1_price} | L2={l2_price}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
                               sl, tp_final, 0, ch_num, canal, prefix)
         return
@@ -2651,7 +2707,18 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         log.info(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
         return
 
-    log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | prix={current}")
+    # Calculer les prix LIMIT pour le log
+    if action == "BUY":
+        l1_price = round(current - LIMIT_OFFSET_1, 2)
+        l2_price = round(current - LIMIT_OFFSET_2, 2)
+    else:
+        l1_price = round(current + LIMIT_OFFSET_1, 2)
+        l2_price = round(current + LIMIT_OFFSET_2, 2)
+
+    if in_zone:
+        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+    else:
+        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}")
 
     # SL plafonné
     entry_for_sl = entry_price if entry_price else current
