@@ -2215,9 +2215,11 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
 
     # === LIMIT ORDERS ===
     if LIMIT_ENABLED and LIMIT_COUNT > 0:
-        # Récupérer sym_info pour digits et filling mode
+        # Récupérer sym_info pour digits, filling mode et stops_level
         _sym_limit = mt5.symbol_info(symbol)
         _digits = _sym_limit.digits if _sym_limit else 2
+        _stops_level = getattr(_sym_limit, 'stops_level', 0) if _sym_limit else 0
+        _trade_mode = getattr(_sym_limit, 'trade_mode', '?') if _sym_limit else '?
         _filling_modes = []
         if _sym_limit:
             _fm = _sym_limit.filling_mode
@@ -2226,6 +2228,9 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
             if _fm & SYMBOL_FILLING_IOC:
                 _filling_modes.append(ORDER_FILLING_IOC)
         _filling_modes.append(ORDER_FILLING_RETURN)
+
+        # Log debug symbole
+        log.debug(f"  LIMIT sym={symbol} digits={_digits} stops_level={_stops_level} trade_mode={_trade_mode} filling_modes={_filling_modes}")
 
         for i in range(LIMIT_COUNT):
             offset = LIMIT_OFFSET_1 if i == 0 else LIMIT_OFFSET_2
@@ -2240,6 +2245,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
             expiry = datetime.now(timezone.utc) + timedelta(minutes=LIMIT_EXPIRY_MIN)
 
             # Essayer chaque filling mode en fallback (comme pour MARKET)
+            log.debug(f"  LIMIT {i+1}: price={limit_price} current={current} offset={offset} stops_level={_stops_level}")
             for fill_mode in _filling_modes:
                 try:
                     result = mt5.order_send({
@@ -2267,13 +2273,15 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                         log.debug(f"  ✓ LIMIT {i+1} #{result.order} @{limit_price} fill={fill_mode}")
                         break  # Succès, pas besoin d'essayer le filling suivant
                     else:
-                        log.debug(f"  LIMIT {i+1} fill_mode={fill_mode} retcode={getattr(result, 'retcode', '?')}")
+                        _ret = getattr(result, 'retcode', '?')
+                        _comment = getattr(result, 'comment', '')
+                        log.debug(f"  LIMIT {i+1} fill_mode={fill_mode} retcode={{_ret}} comment='{_comment}' price={limit_price} symbol={symbol}")
                 except Exception as e:
                     log.error(f"  LIMIT {i+1} EXCEPTION: {e}")
                     break
             else:
                 # Tous les filling modes ont échoué
-                log.warning(f"  ✗ LIMIT {i+1} échoué: tous filling modes épuisés")
+                log.warning(f"  ✗ LIMIT {i+1} échoué: tous filling modes épuisés | price={limit_price} symbol={symbol} sl={sl} tp={tp_final}")
 
     if not tickets:
         return False
