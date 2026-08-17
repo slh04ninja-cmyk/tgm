@@ -2275,7 +2275,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                     else:
                         _ret = getattr(result, 'retcode', '?')
                         _comment = getattr(result, 'comment', '')
-                        log.debug(f"  LIMIT {i+1} fill_mode={fill_mode} retcode={{_ret}} comment='{_comment}' price={limit_price} symbol={symbol}")
+                        log.debug(f"  LIMIT {i+1} fill_mode={fill_mode} retcode={_ret} comment='{_comment}' price={limit_price} symbol={_resolved_symbol}")
                 except Exception as e:
                     log.error(f"  LIMIT {i+1} EXCEPTION: {e}")
                     break
