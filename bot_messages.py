@@ -85,6 +85,20 @@ def log_signal_detected(mt5_comment: str, action: str, entry_price) -> str:
     return f"=== || {mt5_comment} | {action} | {entry_price} || ==="
 
 
+def log_signal_detected_zone(mt5_comment: str, action: str, zone_low: float, zone_high: float) -> str:
+    return f"=== || {mt5_comment} | {action} | zone [{zone_low}, {zone_high}] || ==="
+
+
+def alert_trend_blocked(action: str, symbol: str, ch_num: int, direction: str,
+                        consensus: str, buy_count: int, sell_count: int) -> str:
+    return (
+        f"🚫 {symbol} | {action} | CH{ch_num}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"TradingView opposé: {consensus}\n"
+        f"Votes: {buy_count} BUY / {sell_count} SELL"
+    )
+
+
 def log_order_placed(mt5_comment: str, order_type: str, ticket: int, price, sl) -> str:
     return f">>> | {mt5_comment} | {order_type} #{ticket} @{price} | SL: {sl}"
 
