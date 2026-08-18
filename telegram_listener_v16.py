@@ -2270,8 +2270,8 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
 
 
 def _export_daily_xlsx(date_str: str) -> str:
-    """Exporte les deals du jour en XLSX depuis l'historique MT5.
-    Retourne le chemin du fichier ou "" si erreur."""
+    """Exporte les deals du jour en XLSX au format MT5.
+    Reproduit le format Trade History Report avec sections Positions et Deals."""
     try:
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -2293,7 +2293,7 @@ def _export_daily_xlsx(date_str: str) -> str:
             log.warning("Export XLSX: aucun deal trouvé")
             return ""
 
-        # Filtrer les deals du bot (magic number ou comment bot)
+        # Filtrer les deals du bot
         bot_deals = []
         for d in deals:
             if d.magic == MAGIC_NUMBER:
@@ -2305,14 +2305,9 @@ def _export_daily_xlsx(date_str: str) -> str:
             log.warning("Export XLSX: aucun deal bot trouvé")
             return ""
 
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Deals"
-
         # Styles
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="2D2D2D", end_color="2D2D2D", fill_type="solid")
-        header_align = Alignment(horizontal="center")
+        header_font = Font(bold=True)
+        section_font = Font(bold=True, size=12)
         thin_border = Border(
             left=Side(style='thin'), right=Side(style='thin'),
             top=Side(style='thin'), bottom=Side(style='thin')
@@ -2320,64 +2315,156 @@ def _export_daily_xlsx(date_str: str) -> str:
         profit_font = Font(color="00B050")
         loss_font = Font(color="FF0000")
 
-        # En-têtes
-        headers = ["Time", "Deal", "Symbol", "Type", "Direction", "Volume",
-                   "Price", "Order", "Commission", "Swap", "Profit", "Comment"]
-        for col, h in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=h)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_align
-            cell.border = thin_border
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Trade History Report"
 
-        # Données
-        for row_idx, d in enumerate(bot_deals, 2):
-            direction = "in" if d.entry == mt5.DEAL_ENTRY_IN else "out"
-            values = [
-                datetime.fromtimestamp(d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S"),
-                d.deal,
-                d.symbol,
-                d.type_name if hasattr(d, 'type_name') else str(d.type),
-                direction,
-                d.volume,
-                d.price,
-                d.order,
-                d.commission,
-                d.swap,
-                d.profit,
-                getattr(d, 'comment', ''),
-            ]
+        # ── En-tête du rapport (comme MT5) ──
+        ws.cell(row=1, column=1, value="Trade History Report")
+        ws.cell(row=2, column=1, value="Name:")
+        ws.cell(row=2, column=4, value="GZL TradingBot V16")
+        ws.cell(row=3, column=1, value="Account:")
+        ws.cell(row=3, column=4, value=f"{MT5_LOGIN} (USD, {MT5_SERVER}, demo, Hedge)")
+        ws.cell(row=4, column=1, value="Company:")
+        ws.cell(row=4, column=4, value="Exness Technologies Ltd")
+        ws.cell(row=5, column=1, value="Date:")
+        ws.cell(row=5, column=4, value=now.strftime("%Y.%m.%d %H:%M"))
+
+        row = 7
+
+        # ── SECTION POSITIONS ──
+        ws.cell(row=row, column=1, value="Positions").font = section_font
+        row += 1
+
+        pos_headers = ["Time", "Position", "Symbol", "Type", "Volume", "Price",
+                       "S / L", "T / P", "Time", "Price", "Commission", "Swap", "Profit"]
+        for col, h in enumerate(pos_headers, 1):
+            cell = ws.cell(row=row, column=col, value=h)
+            cell.font = header_font
+            cell.border = thin_border
+        row += 1
+
+        # Construire les positions depuis les deals IN/OUT
+        # Indexer les deals IN par position_id
+        open_positions = {}  # position_id -> deal IN
+        close_positions = {}  # position_id -> deal OUT
+        for d in bot_deals:
+            if d.entry == mt5.DEAL_ENTRY_IN:
+                open_positions[d.position_id] = d
+            elif d.entry == mt5.DEAL_ENTRY_OUT:
+                close_positions[d.position_id] = d
+
+        pos_data = []
+        for pos_id, open_d in open_positions.items():
+            close_d = close_positions.get(pos_id)
+            open_time = datetime.fromtimestamp(open_d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S")
+            close_time = datetime.fromtimestamp(close_d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S") if close_d else ""
+            close_price = close_d.price if close_d else 0
+            profit = close_d.profit if close_d else 0
+            commission = (open_d.commission or 0) + (close_d.commission if close_d else 0)
+            swap = (open_d.swap or 0) + (close_d.swap if close_d else 0)
+            pos_type = "buy" if open_d.type == mt5.DEAL_TYPE_BUY else "sell"
+            # SL/TP depuis l'ordre d'ouverture
+            sl = 0
+            tp = 0
+            if open_d.order:
+                orders = mt5.history_orders_get(ticket=open_d.order)
+                if orders:
+                    sl = orders[0].sl if orders[0].sl else 0
+                    tp = orders[0].tp if orders[0].tp else 0
+            pos_data.append({
+                'open_time': open_time, 'pos_id': pos_id, 'symbol': open_d.symbol,
+                'type': pos_type, 'volume': open_d.volume, 'open_price': open_d.price,
+                'sl': sl, 'tp': tp, 'close_time': close_time, 'close_price': close_price,
+                'commission': commission, 'swap': swap, 'profit': profit,
+            })
+
+        for p in pos_data:
+            values = [p['open_time'], p['pos_id'], p['symbol'], p['type'], p['volume'],
+                      p['open_price'], p['sl'], p['tp'], p['close_time'], p['close_price'],
+                      p['commission'], p['swap'], p['profit']]
             for col, val in enumerate(values, 1):
-                cell = ws.cell(row=row_idx, column=col, value=val)
+                cell = ws.cell(row=row, column=col, value=val)
                 cell.border = thin_border
-                if col == 11:  # Profit
+                if col == 13:  # Profit
                     cell.font = profit_font if val >= 0 else loss_font
                     cell.number_format = '+#,##0.00;-#,##0.00'
+            row += 1
+
+        row += 1
+
+        # ── SECTION DEALS ──
+        ws.cell(row=row, column=1, value="Deals").font = section_font
+        row += 1
+
+        deal_headers = ["Time", "Deal", "Symbol", "Type", "Direction", "Volume",
+                        "Price", "Order", "Commission", "Fee", "Swap", "Profit", "Balance", "Comment"]
+        for col, h in enumerate(deal_headers, 1):
+            cell = ws.cell(row=row, column=col, value=h)
+            cell.font = header_font
+            cell.border = thin_border
+        row += 1
+
+        running_balance = 0
+        for d in sorted(bot_deals, key=lambda x: x.time):
+            direction = "in" if d.entry == mt5.DEAL_ENTRY_IN else "out"
+            deal_type = "buy" if d.type == mt5.DEAL_TYPE_BUY else "sell"
+            running_balance += d.profit + (d.commission or 0) + (d.swap or 0)
+            values = [
+                datetime.fromtimestamp(d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S"),
+                d.deal, d.symbol, deal_type, direction, d.volume,
+                d.price, d.order, d.commission or 0, 0, d.swap or 0,
+                d.profit, running_balance, getattr(d, 'comment', ''),
+            ]
+            for col, val in enumerate(values, 1):
+                cell = ws.cell(row=row, column=col, value=val)
+                cell.border = thin_border
+                if col == 12:  # Profit
+                    cell.font = profit_font if val >= 0 else loss_font
+                    cell.number_format = '+#,##0.00;-#,##0.00'
+            row += 1
+
+        row += 1
+
+        # ── SECTION RESULTS ──
+        ws.cell(row=row, column=1, value="Results").font = section_font
+        row += 1
+
+        total_pnl = sum(p['profit'] for p in pos_data)
+        gross_profit = sum(p['profit'] for p in pos_data if p['profit'] > 0)
+        gross_loss = sum(p['profit'] for p in pos_data if p['profit'] < 0)
+        total_trades = len(pos_data)
+        short_trades = [p for p in pos_data if p['type'] == 'sell']
+        long_trades = [p for p in pos_data if p['type'] == 'buy']
+        short_won = len([p for p in short_trades if p['profit'] > 0])
+        long_won = len([p for p in long_trades if p['profit'] > 0])
+        profit_trades = [p for p in pos_data if p['profit'] > 0]
+        loss_trades = [p for p in pos_data if p['profit'] < 0]
+        winrate = len(profit_trades) / total_trades * 100 if total_trades > 0 else 0
+        avg_win = sum(p['profit'] for p in profit_trades) / len(profit_trades) if profit_trades else 0
+        avg_loss = sum(p['profit'] for p in loss_trades) / len(loss_trades) if loss_trades else 0
+        largest_win = max((p['profit'] for p in pos_data), default=0)
+        largest_loss = min((p['profit'] for p in pos_data), default=0)
+        pf = abs(gross_profit / gross_loss) if gross_loss != 0 else 0
+
+        results = [
+            ("Total Net Profit:", total_pnl, "Gross Profit:", gross_profit, "Gross Loss:", gross_loss),
+            ("Profit Factor:", round(pf, 6), "Expected Payoff:", round(total_pnl / total_trades, 6) if total_trades else 0),
+            (f"Total Trades:", total_trades, f"Short Trades (won %):", f"{len(short_trades)} ({short_won/len(short_trades)*100:.2f}%)" if short_trades else "0", f"Long Trades (won %):", f"{len(long_trades)} ({long_won/len(long_trades)*100:.2f}%)" if long_trades else "0"),
+            ("Profit Trades (% of total):", f"{len(profit_trades)} ({winrate:.2f}%)", "Loss Trades (% of total):", f"{len(loss_trades)} ({100-winrate:.2f}%)") if total_trades > 0 else ("Profit Trades:", 0, "Loss Trades:", 0),
+            ("Largest profit trade:", largest_win, "Largest loss trade:", largest_loss),
+            ("Average profit trade:", round(avg_win, 6), "Average loss trade:", round(avg_loss, 6)),
+        ]
+        for r in results:
+            for col, val in enumerate(r, 1):
+                if val is not None:
+                    ws.cell(row=row, column=col, value=val)
+            row += 1
 
         # Largeurs colonnes
-        widths = [20, 12, 12, 10, 10, 8, 12, 12, 10, 8, 12, 25]
-        for col, w in enumerate(widths, 1):
+        col_widths = [20, 14, 12, 8, 10, 8, 12, 12, 10, 8, 8, 12, 12, 25]
+        for col, w in enumerate(col_widths, 1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = w
-
-        # Résumé
-        summary_row = len(bot_deals) + 3
-        total_pnl = sum(d.profit for d in bot_deals)
-        total_trades = len([d for d in bot_deals if d.entry == mt5.DEAL_ENTRY_IN])
-        wins = len([d for d in bot_deals if d.entry == mt5.DEAL_ENTRY_OUT and d.profit > 0])
-        losses = len([d for d in bot_deals if d.entry == mt5.DEAL_ENTRY_OUT and d.profit < 0])
-
-        ws.cell(row=summary_row, column=1, value="Résumé").font = Font(bold=True)
-        ws.cell(row=summary_row + 1, column=1, value="P&L total")
-        ws.cell(row=summary_row + 1, column=2, value=total_pnl).font = profit_font if total_pnl >= 0 else loss_font
-        ws.cell(row=summary_row + 2, column=1, value="Trades")
-        ws.cell(row=summary_row + 2, column=2, value=total_trades)
-        ws.cell(row=summary_row + 3, column=1, value="Wins")
-        ws.cell(row=summary_row + 3, column=2, value=wins)
-        ws.cell(row=summary_row + 4, column=1, value="Losses")
-        ws.cell(row=summary_row + 4, column=2, value=losses)
-        wr = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0
-        ws.cell(row=summary_row + 5, column=1, value="Winrate")
-        ws.cell(row=summary_row + 5, column=2, value=f"{wr:.1f}%")
 
         filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"deals_{date_str}.xlsx")
         wb.save(filepath)
