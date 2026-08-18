@@ -1790,6 +1790,18 @@ class TradeManager:
             all_reported = all(t.get("_reported") for t in entry.get("tickets", []))
 
             if not active_tickets and all_reported:
+                # ★ FIX (v16) : annuler les LIMITs restants AVANT de supprimer l'entrée.
+                # Sans ça, quand toutes les positions (MK+L1 ou MK seul) sont fermées
+                # au même cycle (TP/SL/CLOSE), l'entrée est retirée et PHASE 5 ne
+                # s'exécute jamais → les LIMITs non remplis restent orphelins dans MT5
+                # pendant LIMIT_EXPIRY_MIN. Si le prix revient, ils se remplissent en
+                # créant des positions non gérées par le bot.
+                if not entry.get("_limit_cancelled"):
+                    cancelled = self.bridge.cancel_pending_limits(entry)
+                    if cancelled > 0:
+                        _log_mgmt(f"Trade terminé ({symbol}) → {cancelled} LIMIT orphelins annulés")
+                    entry["_limit_cancelled"] = True
+
                 total_pnl = sum(t.get("_last_pnl", 0.0) for t in entry.get("tickets", []))
                 log.debug(f"Trade terminé ({symbol}) | Canal: {canal} | P&L total: {total_pnl:+.2f}")
                 # ★ Sauvegarder l'entrée terminée pour le rapport de fin de journée
