@@ -1283,6 +1283,11 @@ class TradeManager:
             if pdf_path:
                 _send_telegram_document(pdf_path, f"📊 Rapport {today}")
 
+            # ★ Générer et envoyer le XLSX des deals du jour
+            xlsx_path = _export_daily_xlsx(today)
+            if xlsx_path:
+                _send_telegram_document(xlsx_path, f"📋 Deals {today}")
+
         else:
             log.info(msg.log_daily_limit_header())
             log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
@@ -2263,6 +2268,125 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         log.error(f"Erreur génération PDF: {e}")
         return ""
 
+
+def _export_daily_xlsx(date_str: str) -> str:
+    """Exporte les deals du jour en XLSX depuis l'historique MT5.
+    Retourne le chemin du fichier ou "" si erreur."""
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    except ImportError:
+        try:
+            import subprocess, sys
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl", "-q"])
+            import openpyxl
+            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        except Exception as e:
+            log.error(f"openpyxl non disponible: {e}")
+            return ""
+
+    try:
+        start = get_trading_day_start()
+        now = datetime.now(timezone.utc)
+        deals = mt5.history_deals_get(start, now)
+        if deals is None or len(deals) == 0:
+            log.warning("Export XLSX: aucun deal trouvé")
+            return ""
+
+        # Filtrer les deals du bot (magic number ou comment bot)
+        bot_deals = []
+        for d in deals:
+            if d.magic == MAGIC_NUMBER:
+                bot_deals.append(d)
+            elif hasattr(d, 'comment') and d.comment and re.match(r'CH\d+-', d.comment):
+                bot_deals.append(d)
+
+        if not bot_deals:
+            log.warning("Export XLSX: aucun deal bot trouvé")
+            return ""
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Deals"
+
+        # Styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="2D2D2D", end_color="2D2D2D", fill_type="solid")
+        header_align = Alignment(horizontal="center")
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
+        )
+        profit_font = Font(color="00B050")
+        loss_font = Font(color="FF0000")
+
+        # En-têtes
+        headers = ["Time", "Deal", "Symbol", "Type", "Direction", "Volume",
+                   "Price", "Order", "Commission", "Swap", "Profit", "Comment"]
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = thin_border
+
+        # Données
+        for row_idx, d in enumerate(bot_deals, 2):
+            direction = "in" if d.entry == mt5.DEAL_ENTRY_IN else "out"
+            values = [
+                datetime.fromtimestamp(d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S"),
+                d.deal,
+                d.symbol,
+                d.type_name if hasattr(d, 'type_name') else str(d.type),
+                direction,
+                d.volume,
+                d.price,
+                d.order,
+                d.commission,
+                d.swap,
+                d.profit,
+                getattr(d, 'comment', ''),
+            ]
+            for col, val in enumerate(values, 1):
+                cell = ws.cell(row=row_idx, column=col, value=val)
+                cell.border = thin_border
+                if col == 11:  # Profit
+                    cell.font = profit_font if val >= 0 else loss_font
+                    cell.number_format = '+#,##0.00;-#,##0.00'
+
+        # Largeurs colonnes
+        widths = [20, 12, 12, 10, 10, 8, 12, 12, 10, 8, 12, 25]
+        for col, w in enumerate(widths, 1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = w
+
+        # Résumé
+        summary_row = len(bot_deals) + 3
+        total_pnl = sum(d.profit for d in bot_deals)
+        total_trades = len([d for d in bot_deals if d.entry == mt5.DEAL_ENTRY_IN])
+        wins = len([d for d in bot_deals if d.entry == mt5.DEAL_ENTRY_OUT and d.profit > 0])
+        losses = len([d for d in bot_deals if d.entry == mt5.DEAL_ENTRY_OUT and d.profit < 0])
+
+        ws.cell(row=summary_row, column=1, value="Résumé").font = Font(bold=True)
+        ws.cell(row=summary_row + 1, column=1, value="P&L total")
+        ws.cell(row=summary_row + 1, column=2, value=total_pnl).font = profit_font if total_pnl >= 0 else loss_font
+        ws.cell(row=summary_row + 2, column=1, value="Trades")
+        ws.cell(row=summary_row + 2, column=2, value=total_trades)
+        ws.cell(row=summary_row + 3, column=1, value="Wins")
+        ws.cell(row=summary_row + 3, column=2, value=wins)
+        ws.cell(row=summary_row + 4, column=1, value="Losses")
+        ws.cell(row=summary_row + 4, column=2, value=losses)
+        wr = wins / (wins + losses) * 100 if (wins + losses) > 0 else 0
+        ws.cell(row=summary_row + 5, column=1, value="Winrate")
+        ws.cell(row=summary_row + 5, column=2, value=f"{wr:.1f}%")
+
+        filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"deals_{date_str}.xlsx")
+        wb.save(filepath)
+        log.info(f"Export XLSX: {filepath} ({len(bot_deals)} deals)")
+        return filepath
+
+    except Exception as e:
+        log.error(f"Erreur export XLSX: {e}")
+        return ""
 
 def _send_telegram_document(filepath: str, caption: str):
     """Envoie un fichier document à Telegram via l'alert client."""
