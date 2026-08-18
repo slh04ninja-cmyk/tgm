@@ -1614,6 +1614,9 @@ class TradeManager:
 
         # Average entry pondéré
         total_lot = sum(t["lot"] for t in active)
+        if total_lot == 0:
+            log.warning(f"TP dynamique: total_lot=0 pour {entry.get('_mt5_comment', '?')}, skip")
+            return
         weighted_entry = sum(t["entry_price"] * t["lot"] for t in active) / total_lot
 
         # Multiplicateur selon le nombre de positions
