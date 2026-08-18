@@ -1637,10 +1637,13 @@ class TradeManager:
                     t["tp_final"] = tp_price
                     updated += 1
 
-        entry["_tp_calculated_for"] = nb
+        # ★ FIX : ne marquer comme calculé QUE si au moins un TP a été mis à jour.
+        # Sinon, le retry ne se fera jamais si modify_sl_tp échoue.
+        if updated > 0:
+            entry["_tp_calculated_for"] = nb
         entry["_pnl_cible"] = pnl_cible
         _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
-                  f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated} mis à jour")
+                  f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated}/{len(active)} mis à jour")
 
     # =============================================================
     # MÉTHODES UTILITAIRES
