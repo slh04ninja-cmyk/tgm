@@ -3412,7 +3412,7 @@ async def main():
                                     entry_qa["_is_quick_alert"] = False
                                 updated_qa = True
                                 log.info(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
-                                _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], ch_num, ticket, real_sl, tp_final_fusion))
+                                _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], _sig_ch_num, ticket, real_sl, tp_final_fusion))
                                 break
                             else:
                                 # QA déjà fermé → ignorer le signal complet
