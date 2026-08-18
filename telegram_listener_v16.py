@@ -449,7 +449,7 @@ class NewsManager:
                         else:
                             formatted = raw_date
                         country = n.get('country', '?')
-                        _log_mgmt(f"NEWS: {n.get('title', '?')} @ {formatted} ({country})")
+                        log.info(f"NEWS: {n.get('title', '?')} @ {formatted} ({country})")
         except Exception as e:
             log.error(msg.log_news_fetch_error(str(e)))
 
@@ -489,17 +489,17 @@ class NewsManager:
 
         if should_close:
             if not self._blocked:
-                _log_mgmt(msg.log_news_closing_positions(active_title, active_diff))
+                log.info(msg.log_news_closing_positions(active_title, active_diff))
                 if self.manager:
                     self._close_all()
             self._blocked = True
         elif should_block:
             if not self._blocked:
-                _log_mgmt(msg.log_news_blocking_signals(active_title, active_diff))
+                log.info(msg.log_news_blocking_signals(active_title, active_diff))
             self._blocked = True
         else:
             if self._blocked:
-                _log_mgmt(msg.log_news_resumed(active_title or "Fenêtre news"))
+                log.info(msg.log_news_resumed(active_title or "Fenêtre news"))
             self._blocked = False
 
     def _close_all(self):
@@ -885,7 +885,7 @@ class MT5Bridge:
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 updated += 1
                 log.debug(f"SL modifié #{pos.ticket} (canal CH{channel_num}) → {new_sl}")
-        _log_mgmt(f"SL MOVE canal {channel_num} → {new_sl} sur {updated} positions")
+        log.info(f"SL MOVE canal {channel_num} → {new_sl} sur {updated} positions")
 
 
     def close_all(self, symbol: str | None = None, channel_num: int | None = None):
@@ -1830,7 +1830,7 @@ class TradeManager:
                                 break
                     if limit_names:
                         names_str = " et ".join(limit_names)
-                        _log_mgmt(f"CH{ch_num}-{prefix} | {names_str} EXPIRE{'S' if len(limit_names) > 1 else ''}")
+                        log.info(f"CH{ch_num}-{prefix} | {names_str} EXPIRE{'S' if len(limit_names) > 1 else ''}")
                     entry["_limit_expired_logged"] = len([t for t in entry["tickets"] if t.get("role") == "limit"]) == len([t for t in entry["tickets"] if t.get("role") == "limit" and t.get("_expired_logged")])
 
             # ══════════════════════════════════════════════════════════════
@@ -1878,7 +1878,7 @@ class TradeManager:
                     entry["_limit_cancelled"] = True
                     cancelled = self.bridge.cancel_pending_limits(entry)
                     if cancelled > 0:
-                        _log_mgmt(f"MARKET #{market_ticket} fermé -> {cancelled} LIMIT annulés")
+                        log.info(f"MARKET #{market_ticket} fermé -> {cancelled} LIMIT annulés")
 
 # =============================================================
 # CONFLIT & EXÉCUTION (avec SL paramétrable)
@@ -1965,7 +1965,7 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                     cancelled = bridge.cancel_pending_limits(entry)
                     entry["_limit_cancelled"] = True
                     if cancelled > 0:
-                        _log_mgmt(f"CH{ch_num}-{sig_type} | {cancelled} LIMIT annulés (nouveau signal)")
+                        log.info(f"CH{ch_num}-{sig_type} | {cancelled} LIMIT annulés (nouveau signal)")
                 # Fermer les positions ouvertes
                 closed_any = False
                 for t in entry.get("tickets", []):
@@ -1974,7 +1974,7 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                         ticket = t["ticket"]
                         if bridge.close_position(ticket, "NEW-SIGNAL"):
                             closed_any = True
-                            _log_mgmt(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
+                            log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
                             time.sleep(0.3)
                             pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
                             manager._update_daily_pnl(pnl)
@@ -2694,7 +2694,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             below_zone = zone_low - TOLERANCE_ZN <= current < zone_low
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            _log_mgmt(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
+            log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
             return
 
         prefix = "ZN"
@@ -2709,11 +2709,11 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
         if in_zone:
-            _log_mgmt(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
                               sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         else:
-            _log_mgmt(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}")
+            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}")
             signal_limits_only = dict(signal)
             _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
                               sl, tp_final, 0, ch_num, canal, prefix)
@@ -2737,7 +2737,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             below_zone = zone_low_pu - TOLERANCE_ZN <= current < zone_low_pu
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            _log_mgmt(f"CH{ch_num}-PU | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
+            log.info(f"CH{ch_num}-PU | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
             return
 
         sl = _cap_sl(action, entry_price, sl, MAX_SL_USD)
@@ -2878,7 +2878,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             # Défavorable: prix < entry - tolerance (le prix descend trop contre le SELL)
             is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
         if is_unfavorable:
-            _log_mgmt(f"CH{ch_num}-AL | Quick Alert ANNULE | prix={current} | entry={entry_price}")
+            log.info(f"CH{ch_num}-AL | Quick Alert ANNULE | prix={current} | entry={entry_price}")
             _alert_mgmt(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
             return
 
@@ -2938,7 +2938,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
 
     # Vérifier si le prix est acceptable
     if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-        _log_mgmt(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
+        log.info(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
         return
 
     # Calculer les prix LIMIT pour le log
@@ -2950,9 +2950,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         l2_price = round(current + LIMIT_OFFSET_2, 2)
 
     if in_zone:
-        _log_mgmt(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
     else:
-        _log_mgmt(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}")
+        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}")
 
     # SL plafonné
     entry_for_sl = entry_price if entry_price else current
@@ -3021,14 +3021,14 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                         elif deal.reason == mt5.DEAL_REASON_TP:
                             close_reason = "TP"
                         break
-        _log_mgmt(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
+        log.info(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
         _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
         # QA actif -> mettre a jour SL et TP avec ceux du signal complet
         # ★ SL plafonné aussi lors de la fusion
         qa_entry_price = qa.get("entry_price", 0)
         real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
-        _log_mgmt(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final}")
+        log.info(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final}")
         bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[FUSION-SL-TP]")
         for t in entry["tickets"]:
             if t["ticket"] == qa_ticket:
@@ -3481,7 +3481,7 @@ async def main():
                                 cancelled_limits += c
                             entry["_limit_cancelled"] = True
                 if cancelled_limits > 0:
-                    _log_mgmt(f"CLOSE: {cancelled_limits} ordres LIMIT annulés pour CH{ch_num}")
+                    log.info(f"CLOSE: {cancelled_limits} ordres LIMIT annulés pour CH{ch_num}")
 
                 # Mettre à jour le P&L quotidien
                 time.sleep(0.3)
