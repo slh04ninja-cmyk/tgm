@@ -201,53 +201,13 @@ REALISED_GRADE = float(os.getenv("REALISED_GRADE", "3.0"))
 MAX_GRADE_POSITIONS = int(os.getenv("MAX_GRADE_POSITIONS", "10"))
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
 NEWS_ENABLED = os.getenv("NEWS_FILTER_ENABLED", "false").lower() == "true"
-# Fenêtres par défaut (tier "High" standard : Jobless Claims, Philly Fed, Consumer Confidence, etc.)
 NEWS_BLOCK_MIN = int(os.getenv("NEWS_WINDOW_BEFORE_BLOCK", "15"))
 NEWS_CLOSE_MIN = int(os.getenv("NEWS_WINDOW_BEFORE_CLOSE", "5"))
 NEWS_AFTER_MIN = int(os.getenv("NEWS_WINDOW_AFTER", "15"))
-# Tier NFP / CPI
-NEWS_BLOCK_MIN_NFPCPI = int(os.getenv("NEWS_WINDOW_BEFORE_BLOCK_NFPCPI", "20"))
-NEWS_CLOSE_MIN_NFPCPI = int(os.getenv("NEWS_WINDOW_BEFORE_CLOSE_NFPCPI", "10"))
-NEWS_AFTER_MIN_NFPCPI = int(os.getenv("NEWS_WINDOW_AFTER_NFPCPI", "30"))
-# Tier FOMC
-NEWS_BLOCK_MIN_FOMC = int(os.getenv("NEWS_WINDOW_BEFORE_BLOCK_FOMC", "20"))
-NEWS_CLOSE_MIN_FOMC = int(os.getenv("NEWS_WINDOW_BEFORE_CLOSE_FOMC", "15"))
-NEWS_AFTER_MIN_FOMC = int(os.getenv("NEWS_WINDOW_AFTER_FOMC", "45"))
-# Tier "spike" (PCE, PPI, GDP, ADP, ISM PMI, Retail Sales, Unemployment Rate...)
-NEWS_BLOCK_MIN_SPIKE = int(os.getenv("NEWS_WINDOW_BEFORE_BLOCK_SPIKE", "20"))
-NEWS_CLOSE_MIN_SPIKE = int(os.getenv("NEWS_WINDOW_BEFORE_CLOSE_SPIKE", "10"))
-NEWS_AFTER_MIN_SPIKE = int(os.getenv("NEWS_WINDOW_AFTER_SPIKE", "20"))
-# Niveau d'impact minimum pour filtrer les news ("high" ou "medium")
 NEWS_MIN_IMPACT = os.getenv("NEWS_MIN_IMPACT", "high").lower()
 
-# Mots-clés (titre en minuscules) pour classer chaque news dans le bon tier
-_NEWS_KEYWORDS_NFPCPI = [
-    "non-farm payrolls", "nonfarm payrolls", "non farm payrolls", "nfp",
-    "cpi", "consumer price index",
-]
-_NEWS_KEYWORDS_FOMC = [
-    "fomc", "federal funds rate", "fed interest rate", "interest rate decision",
-    "powell", "federal reserve",
-]
-_NEWS_KEYWORDS_SPIKE = [
-    "pce price index", "core pce", "personal consumption expenditures",
-    "ppi", "producer price index",
-    "gdp",
-    "unemployment rate",
-    "adp non-farm", "adp employment", "adp non farm",
-    "ism manufacturing", "ism services",
-    "retail sales",
-]
-
 def _get_news_window(title: str) -> tuple:
-    """Retourne (block_min, close_min, after_min) selon le tier de la news."""
-    t = (title or "").lower()
-    if any(k in t for k in _NEWS_KEYWORDS_NFPCPI):
-        return NEWS_BLOCK_MIN_NFPCPI, NEWS_CLOSE_MIN_NFPCPI, NEWS_AFTER_MIN_NFPCPI
-    if any(k in t for k in _NEWS_KEYWORDS_FOMC):
-        return NEWS_BLOCK_MIN_FOMC, NEWS_CLOSE_MIN_FOMC, NEWS_AFTER_MIN_FOMC
-    if any(k in t for k in _NEWS_KEYWORDS_SPIKE):
-        return NEWS_BLOCK_MIN_SPIKE, NEWS_CLOSE_MIN_SPIKE, NEWS_AFTER_MIN_SPIKE
+    """Retourne (block_min, close_min, after_min) — même fenêtre pour toutes les news."""
     return NEWS_BLOCK_MIN, NEWS_CLOSE_MIN, NEWS_AFTER_MIN
 
 POLL_INTERVAL_SEC = float(os.getenv("POLL_INTERVAL_SEC", "1"))
@@ -3653,10 +3613,7 @@ async def main():
         log.info(f" Filtre news : {'ON' if NEWS_ENABLED else 'OFF'}")
         if NEWS_ENABLED:
             log.info(f"   Impact min : {NEWS_MIN_IMPACT.upper()}")
-            log.info(f"   Défaut    : {NEWS_BLOCK_MIN}/{NEWS_CLOSE_MIN}/{NEWS_AFTER_MIN} min (avant-bloc/avant-close/après)")
-            log.info(f"   NFP/CPI   : {NEWS_BLOCK_MIN_NFPCPI}/{NEWS_CLOSE_MIN_NFPCPI}/{NEWS_AFTER_MIN_NFPCPI} min")
-            log.info(f"   FOMC      : {NEWS_BLOCK_MIN_FOMC}/{NEWS_CLOSE_MIN_FOMC}/{NEWS_AFTER_MIN_FOMC} min")
-            log.info(f"   Spike     : {NEWS_BLOCK_MIN_SPIKE}/{NEWS_CLOSE_MIN_SPIKE}/{NEWS_AFTER_MIN_SPIKE} min")
+            log.info(f"   Fenêtres  : bloc={NEWS_BLOCK_MIN}min / close={NEWS_CLOSE_MIN}min / après={NEWS_AFTER_MIN}min")
         log.info(f" Max signaux actifs : {MAX_POSITIONS}")
         log.info(f" {tv_filter.get_status()}")
         log.info("=" * 55)
