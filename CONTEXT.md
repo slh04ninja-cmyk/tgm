@@ -1,6 +1,6 @@
 # Version : V16.0.0 — MARKET + LIMIT Orders & P&L Target Close
 
-### Date : 2026-08-18
+### Date : 2026-08-19 (mis à jour)
 
 ---
 
@@ -104,8 +104,8 @@ Vérification P&L (0.01 lot = 1 oz) :
 
 ```
 TP_FIXED_GAIN_USD=8.0          # Gain cible par position
-TP_MULTIPE1=2.0                 # Multiplicateur MARKET + L1
-TP_MULTIPE2=3.0                 # Multiplicateur MARKET + L1 + L2
+TP_MULTIPE1=1.5                 # Multiplicateur MARKET + L1
+TP_MULTIPE2=2.0                 # Multiplicateur MARKET + L1 + L2
 ```
 
 ---
@@ -241,8 +241,8 @@ Telegram (canaux configurés) → Signal Parser → MT5 Bridge → MetaTrader 5
 | Variable | Défaut | Description |
 |---|---|---|
 | `TP_FIXED_GAIN_USD` | 8.0 | Gain cible par position |
-| `TP_MULTIPE1` | 2.0 | Multiplicateur MARKET + L1 |
-| `TP_MULTIPE2` | 3.0 | Multiplicateur MARKET + L1 + L2 |
+| `TP_MULTIPE1` | 1.5 | Multiplicateur MARKET + L1 |
+| `TP_MULTIPE2` | 2.0 | Multiplicateur MARKET + L1 + L2 |
 
 ### SL & Tolérances
 
@@ -274,3 +274,58 @@ Telegram (canaux configurés) → Signal Parser → MT5 Bridge → MetaTrader 5
 | `a4aca1f` | fix(v16): debug log f-string escaping |
 | `3721e0b` | fix(v16): CLOSE signal now also cancels pending LIMIT orders |
 | `8ad7cdb` | docs(v16): HTML documentation |
+| `35bcdde` | fix(v16): annuler LIMITs orphelins quand trade terminé |
+| `ae15c95` | fix(v16): TP dynamique retry + MULTIPE corrects |
+| `24f0603` | fix(v16): 6 bugs corrigés (NewsManager, check_conflict, etc.) |
+| `9402430` | fix(v16): ch_num non défini dans fusion OOT |
+| `5ebf848` | fix(v16): retirer QA après mise à jour OOT |
+| `e132f46` | fix(v16): guard total_lot=0 dans _recalculate_tp |
+| `f7b368e` | feat(v16): export XLSX automatique des deals du jour |
+| `90954cf` | feat(v16): XLSX au format MT5 (Positions + Deals + Results) |
+| `f25bd2c` | refactor(v16): unifier filtre news — même fenêtre pour toutes |
+| `ee0086a` | docs(v16): mise à jour documentation HTML |
+
+---
+
+## 14. Fixes appliqués (2026-08-19)
+
+| # | Bug | Impact | Fix |
+|---|---|---|---|
+| 1 | `_tp_calculated_for` bloquait le retry | TP dynamique ne se recalculait pas | Flag mis à jour seulement si `updated > 0` |
+| 2 | NewsManager ne cancel pas les LIMITs | Positions orphelines post-news | `cancel_pending_limits()` ajouté dans `_close_all()` |
+| 3 | `check_conflict` supprimait entries avant fermeture | Entrées perdues si close échoue | `remove()` APRÈS fermeture |
+| 4 | `_close_previous_signal` même bug | Idem | Cancel LIMITs + close AVANT remove |
+| 5 | PHASE 3 (BE) = code mort | Pollution du code | Supprimé |
+| 6 | `execute_quick_alert` utilisait TP du parser | TP non override par FIXED_GAIN | Utilise `TP_FIXED_GAIN_USD` |
+| 7 | `ch_num` non défini dans fusion OOT | NameError | Remplacé par `_sig_ch_num` |
+| 8 | QA OOT non retiré de `qa_list` | Mises à jour multiples | `qa_list.pop(idx)` après modification |
+| 9 | `total_lot=0` dans `_recalculate_tp` | float division by zero | Guard `if total_lot == 0: return` |
+| 10 | Tiers news (NFP/CPI/FOMC/Spike) | Complexité inutile | Unifié : même fenêtre pour toutes |
+
+## 15. Filtre News (simplifié)
+
+Toutes les news haute impact utilisent les mêmes fenêtres :
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `NEWS_FILTER_ENABLED` | true | Activer le filtre |
+| `NEWS_MIN_IMPACT` | high | Impact minimum |
+| `NEWS_WINDOW_BEFORE_BLOCK` | 15 | Bloquer signaux X min avant |
+| `NEWS_WINDOW_BEFORE_CLOSE` | 5 | Fermer positions X min avant |
+| `NEWS_WINDOW_AFTER` | 15 | Reprendre X min après |
+
+Plus aucune distinction par tier.
+
+## 16. Valeurs .env correctes (V16)
+
+| Variable | Valeur |
+|---|---|
+| `TP_FIXED_GAIN_USD` | 7.0 |
+| `TP_MULTIPE1` | 1.5 |
+| `TP_MULTIPE2` | 2.0 |
+| `MAX_SL_USD` | 10.0 |
+| `LIMIT_OFFSET_1` | 3.0 |
+| `LIMIT_OFFSET_2` | 6.0 |
+| `LOT_MARKET` | 0.01 |
+| `LOT_LIMIT1` | 0.01 |
+| `LOT_LIMIT2` | 0.01 |

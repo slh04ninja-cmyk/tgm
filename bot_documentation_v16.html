@@ -379,7 +379,7 @@ Même logique que ZN/PU → MARKET + LIMITs ou LIMITs seules ou ANNULÉ
 <tr><th>Filtre</th><th>Variable</th><th>Comportement</th></tr>
 <tr><td>Conflit de position</td><td>CONFLIT_FILTER_ENABLED</td><td>Même canal + même symbole + direction opposée → annulé</td></tr>
 <tr><td>Filtre horaire</td><td>TIME_FILTER_ENABLED</td><td>En dehors TRADING_START_HOUR - TRADING_END_HOUR → ignoré</td></tr>
-<tr><td>News (haute impact)</td><td>NEWS_FILTER_ENABLED</td><td>Fenêtre avant/pendant/après news → bloqué ou positions fermées</td></tr>
+<tr><td>News (haute impact)</td><td>NEWS_FILTER_ENABLED</td><td>Block 15min avant / Close 5min avant / After 15min après → même fenêtre pour toutes les news</td></tr>
 <tr><td>Limite quotidienne</td><td>DAILY_PROFIT_LIMIT</td><td>P&amp;L total ≥ limite → arrêt trading</td></tr>
 <tr><td>Max signaux</td><td>MAX_POSITIONS</td><td>Trop de signaux actifs → ignoré</td></tr>
 <tr><td>Spread trop large</td><td>MAX_SPREAD_POINTS</td><td>Spread > max → ignoré</td></tr>
@@ -535,7 +535,7 @@ TRADING_END_HOUR=20             # Heure de génération (UTC)</div>
 <tr><td><code>TIME_FILTER_ENABLED</code></td><td>true</td><td>Filtre horaire</td></tr>
 <tr><td><code>TRADING_START_HOUR</code></td><td>2</td><td>Heure début (UTC)</td></tr>
 <tr><td><code>TRADING_END_HOUR</code></td><td>20</td><td>Heure fin (UTC)</td></tr>
-<tr><td><code>NEWS_FILTER_ENABLED</code></td><td>true</td><td>Filtre news haute impact</td></tr>
+<tr><td><code>NEWS_FILTER_ENABLED</code></td><td>true</td><td>Filtre news haute impact (même fenêtre pour toutes)</td></tr>
 <tr><td><code>DAILY_PROFIT_LIMIT</code></td><td>200.0</td><td>Objectif quotidien en $ (0=désactivé)</td></tr>
 <tr><td><code>CONFLIT_FILTER_ENABLED</code></td><td>true</td><td>Filtre conflit même canal</td></tr>
 <tr><td><code>TV_FILTER_ENABLED</code></td><td>false</td><td>Filtre TradingView (consensus)</td></tr>
@@ -656,6 +656,10 @@ TRADING_END_HOUR=20             # Heure de génération (UTC)</div>
 <tr><td>4</td><td><code>_close_previous_signal</code> même bug</td><td>Idem</td><td>Cancel LIMITs + close AVANT remove + vérif retour</td></tr>
 <tr><td>5</td><td>PHASE 3 (BE) = code mort</td><td>Pollution du code</td><td>Supprimé</td></tr>
 <tr><td>6</td><td><code>execute_quick_alert</code> utilisait TP du parser</td><td>TP non override par <code>TP_FIXED_GAIN_USD</code></td><td>Utilise <code>TP_FIXED_GAIN_USD</code> comme <code>execute_signal</code></td></tr>
+<tr><td>7</td><td><code>ch_num</code> non défini dans fusion OOT</td><td>NameError à l'exécution</td><td>Remplacé par <code>_sig_ch_num</code></td></tr>
+<tr><td>8</td><td>QA OOT non retiré de <code>qa_list</code></td><td>Mises à jour multiples du même QA</td><td><code>qa_list.pop(idx)</code> après modification</td></tr>
+<tr><td>9</td><td><code>total_lot=0</code> dans <code>_recalculate_tp</code></td><td>float division by zero</td><td>Guard <code>if total_lot == 0: return</code></td></tr>
+<tr><td>10</td><td>Tiers news (NFP/CPI/FOMC/Spike)</td><td>Complexité inutile, valeurs différentes</td><td>Unifié : même fenêtre pour toutes les news</td></tr>
 </table>
 
 <h3>Avant les fixes — P&amp;L observé vs attendu</h3>
