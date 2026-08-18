@@ -2078,6 +2078,23 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
             log.error(f"Impossible d'installer fpdf2: {install_err}")
             return ""
 
+    # ── Helpers ──
+    def _sanitize(text: str, max_len: int = 0) -> str:
+        """Supprime les caractères non-ASCII et tronque."""
+        clean = re.sub(r'[^\x00-\x7F]+', '', str(text)).strip()
+        if max_len > 0:
+            clean = clean[:max_len]
+        return clean or "?"
+
+    def _table_header(pdf, headers, font_name="Helvetica", font_size=9):
+        """Écrit les headers d'un tableau avec style gras + fond gris."""
+        pdf.set_font(font_name, "B", font_size)
+        pdf.set_fill_color(230, 230, 230)
+        for txt, w, align in headers:
+            pdf.cell(w, 7, txt, border=1, align=align, fill=True)
+        pdf.ln()
+        pdf.set_font(font_name, "", font_size)
+
     class DailyReportPDF(FPDF):
         """PDF avec répétition automatique des headers de table sur page break."""
         _current_table_headers = None
@@ -2086,8 +2103,9 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
             if self.page_no() > 1 and self._current_table_headers:
                 headers, font_info = self._current_table_headers
                 self.set_font(*font_info)
+                self.set_fill_color(230, 230, 230)
                 for txt, w, align in headers:
-                    self.cell(w, 6, txt, border=1, align=align)
+                    self.cell(w, 7, txt, border=1, align=align, fill=True)
                 self.ln()
 
         def footer(self):
@@ -2100,123 +2118,138 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
 
-    # Titre
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, f"Performance du {date_str}", new_x="LMARGIN", new_y="NEXT", align="C")
-    pdf.ln(5)
-
-    # Résumé
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Resume Global", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10)
-    trades = report_data['trades']
-    wins = report_data['wins']
-    losses = report_data['losses']
-    winrate = report_data['winrate']
+    # ── Données ──
+    trades = report_data.get('trades', 0)
+    wins = report_data.get('wins', 0)
+    losses = report_data.get('losses', 0)
+    winrate = report_data.get('winrate', 0.0)
     total_signals = report_data.get('total_signals', 0)
     max_dd = report_data.get('max_drawdown', 0.0)
-    pdf.cell(0, 6, f"P&L realise : {daily_pnl:+.2f}$", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Total signaux : {total_signals} | Total trades : {trades}", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Wins : {wins} | Losses : {losses} | Winrate : {winrate:.1f}%", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"Max Drawdown : {max_dd:.2f}$", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    signal_types = report_data.get('signal_types', []) or []
+    channels = report_data.get('channels', []) or []
 
-    # ── Par methode ──
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Performance par methode", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "B", 9)
-    for txt, w, align in [("Methode", 35, "L"), ("P&L", 25, "C"), ("Trades", 18, "C"),
-                          ("Win", 15, "C"), ("Loss", 15, "C"), ("Winrate", 18, "C")]:
-        pdf.cell(w, 6, txt, border=1, align=align)
-    pdf.ln()
-    pdf.set_font("Helvetica", "", 9)
-    for m in report_data['methods']:
-        wr = m['wins'] / m['trades'] * 100 if m['trades'] > 0 else 0
-        m_losses = m.get('losses', m['trades'] - m['wins'])
-        pdf.cell(35, 6, m['name'], border=1)
-        pdf.cell(25, 6, f"{m['pnl']:+.2f}$", border=1, align="C")
-        pdf.cell(18, 6, str(m['trades']), border=1, align="C")
-        pdf.cell(15, 6, str(m['wins']), border=1, align="C")
-        pdf.cell(15, 6, str(m_losses), border=1, align="C")
-        pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
-        pdf.ln()
-    pdf.ln(5)
+    # ══════════════════════════════════════════════════════════════
+    # TITRE
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 12, f"Rapport Quotidien - {date_str}", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(6)
 
-    # ── Par type de signal ──
-    if report_data.get('signal_types'):
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, "Performance par type de signal", new_x="LMARGIN", new_y="NEXT")
-        sig_headers = [("Signal", 18, "L"), ("Canaux", 16, "C"), ("P&L", 22, "C"),
-                       ("Trades", 14, "C"), ("Win", 12, "C"), ("Loss", 12, "C"),
-                       ("WR", 14, "C"), ("Gain", 18, "C"), ("Perte", 18, "C")]
-        pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 8))
-        pdf.set_font("Helvetica", "B", 8)
-        for txt, w, align in sig_headers:
-            pdf.cell(w, 6, txt, border=1, align=align)
-        pdf.ln()
-        pdf.set_font("Helvetica", "", 8)
-        for st in report_data['signal_types']:
-            wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
-            pdf.cell(18, 6, st['type'], border=1)
-            pdf.cell(16, 6, str(st['channels']), border=1, align="C")
-            pdf.cell(22, 6, f"{st['pnl']:+.2f}$", border=1, align="C")
-            pdf.cell(14, 6, str(st['trades']), border=1, align="C")
-            pdf.cell(12, 6, str(st['wins']), border=1, align="C")
-            pdf.cell(12, 6, str(st['losses']), border=1, align="C")
-            pdf.cell(14, 6, f"{wr:.0f}%", border=1, align="C")
-            pdf.cell(18, 6, f"{st.get('avg_win', 0):+.1f}$", border=1, align="C")
-            pdf.cell(18, 6, f"{st.get('avg_loss', 0):+.1f}$", border=1, align="C")
+    # ══════════════════════════════════════════════════════════════
+    # RESUME GLOBAL
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(45, 45, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 9, "  Resume Global", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"P&L realise : {daily_pnl:+.2f}$", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"Total signaux : {total_signals}  |  Total trades : {trades}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"Wins : {wins}  |  Losses : {losses}  |  Winrate : {winrate:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"Max Drawdown : {max_dd:.2f}$", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(6)
+
+    # ══════════════════════════════════════════════════════════════
+    # TABLEAU 1 : PERFORMANCE PAR TYPE DE SIGNAL
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(45, 45, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 9, "  Performance par type de signal", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    sig_headers = [
+        ("Signal", 22, "L"),
+        ("P&L", 28, "C"),
+        ("Nb signaux", 22, "C"),
+        ("Win", 16, "C"),
+        ("Loss", 16, "C"),
+        ("Winrate", 20, "C"),
+    ]
+    pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 9))
+    _table_header(pdf, sig_headers, font_size=9)
+
+    if not signal_types:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 7, "Aucun trade enregistre", new_x="LMARGIN", new_y="NEXT")
+    else:
+        for st in signal_types:
+            st_trades = st.get('trades', 0)
+            st_wins = st.get('wins', 0)
+            st_losses = st.get('losses', st_trades - st_wins)
+            st_pnl = st.get('pnl', 0.0)
+            st_wr = st_wins / st_trades * 100 if st_trades > 0 else 0
+            pdf.cell(22, 7, _sanitize(st.get('type', '?'), 10), border=1)
+            pdf.cell(28, 7, f"{st_pnl:+.2f}$", border=1, align="C")
+            pdf.cell(22, 7, str(st_trades), border=1, align="C")
+            pdf.cell(16, 7, str(st_wins), border=1, align="C")
+            pdf.cell(16, 7, str(st_losses), border=1, align="C")
+            pdf.cell(20, 7, f"{st_wr:.1f}%", border=1, align="C")
             pdf.ln()
-        pdf._current_table_headers = None
-        pdf.ln(5)
+    pdf._current_table_headers = None
+    pdf.ln(6)
 
-    # ── Par canal ──
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Performance par canal", new_x="LMARGIN", new_y="NEXT")
-    channel_headers = [("Canal", 18, "L"), ("Nom", 48, "L"), ("P&L", 25, "C"),
-                       ("Trades", 18, "C"), ("Win", 15, "C"), ("Loss", 15, "C"),
-                       ("Winrate", 18, "C")]
-    pdf._current_table_headers = (channel_headers, ("Helvetica", "B", 9))
-    pdf.set_font("Helvetica", "B", 9)
-    for txt, w, align in channel_headers:
-        pdf.cell(w, 6, txt, border=1, align=align)
-    pdf.ln()
-    pdf.set_font("Helvetica", "", 9)
-    channels_sorted = sorted(report_data['channels'], key=lambda x: x['pnl'], reverse=True)
+    # ══════════════════════════════════════════════════════════════
+    # TABLEAU 2 : PERFORMANCE PAR CANAL
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(45, 45, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 9, "  Performance par canal", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    ch_headers = [
+        ("Canal", 18, "L"),
+        ("Nom", 42, "L"),
+        ("P&L", 25, "C"),
+        ("Nb signaux", 22, "C"),
+        ("Win", 16, "C"),
+        ("Loss", 16, "C"),
+        ("Winrate", 20, "C"),
+    ]
+    pdf._current_table_headers = (ch_headers, ("Helvetica", "B", 9))
+    _table_header(pdf, ch_headers, font_size=9)
+
+    channels_sorted = sorted(channels, key=lambda x: x.get('pnl', 0), reverse=True)
     if not channels_sorted:
         pdf.set_font("Helvetica", "I", 9)
-        pdf.cell(0, 6, "Aucune activite sur les canaux", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 7, "Aucun trade sur les canaux", new_x="LMARGIN", new_y="NEXT")
     else:
         for c in channels_sorted:
-            wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
-            c_losses = c.get('losses', c['trades'] - c['wins'])
-            import re as _re
-            raw_name = c.get('name', '')
-            name = _re.sub(r'[^\x00-\x7F]+', '', raw_name).strip()[:22]
-            if not name:
-                name = f"CH{c['ch_num']}"
-            pdf.cell(18, 6, f"CH{c['ch_num']}", border=1)
-            pdf.cell(48, 6, name, border=1)
-            pdf.cell(25, 6, f"{c['pnl']:+.2f}$", border=1, align="C")
-            pdf.cell(18, 6, str(c['trades']), border=1, align="C")
-            pdf.cell(15, 6, str(c['wins']), border=1, align="C")
-            pdf.cell(15, 6, str(c_losses), border=1, align="C")
-            pdf.cell(18, 6, f"{wr:.1f}%", border=1, align="C")
+            c_trades = c.get('trades', 0)
+            c_wins = c.get('wins', 0)
+            c_losses = c.get('losses', c_trades - c_wins)
+            c_pnl = c.get('pnl', 0.0)
+            c_wr = c_wins / c_trades * 100 if c_trades > 0 else 0
+            c_name = _sanitize(c.get('name', ''), 20)
+            if not c_name or c_name == '?':
+                c_name = f"CH{c.get('ch_num', '?')}"
+            pdf.cell(18, 7, f"CH{c.get('ch_num', '?')}", border=1)
+            pdf.cell(42, 7, c_name, border=1)
+            pdf.cell(25, 7, f"{c_pnl:+.2f}$", border=1, align="C")
+            pdf.cell(22, 7, str(c_trades), border=1, align="C")
+            pdf.cell(16, 7, str(c_wins), border=1, align="C")
+            pdf.cell(16, 7, str(c_losses), border=1, align="C")
+            pdf.cell(20, 7, f"{c_wr:.1f}%", border=1, align="C")
             pdf.ln()
     pdf._current_table_headers = None
     pdf.ln(5)
 
-    # ── Clotures ──
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Clotures", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"TP : {report_data['tp_count']} trades | {report_data['tp_pnl']:+.2f}$", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"SL : {report_data['sl_count']} trades | {report_data['sl_pnl']:+.2f}$", new_x="LMARGIN", new_y="NEXT")
-
+    # ── Sauvegarde ──
     filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"daily_report_{date_str}.pdf")
-    pdf.output(filepath)
-    log.info(f"PDF rapport généré: {filepath}")
-    return filepath
+    try:
+        pdf.output(filepath)
+        file_size = os.path.getsize(filepath)
+        log.info(f"PDF rapport généré: {filepath} ({file_size} octets)")
+        return filepath
+    except Exception as e:
+        log.error(f"Erreur génération PDF: {e}")
+        return ""
 
 
 def _send_telegram_document(filepath: str, caption: str):
