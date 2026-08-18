@@ -548,6 +548,12 @@ class NewsManager:
             positions_before = mt5.positions_get()
             tickets_before = {p.ticket: p for p in positions_before if p.magic == MAGIC_NUMBER} if positions_before else {}
             self.bridge.close_all()
+            # ★ FIX : annuler aussi les ordres LIMIT en attente
+            with self.manager._lock:
+                for entry in self.manager.active:
+                    if not entry.get("_limit_cancelled"):
+                        self.bridge.cancel_pending_limits(entry)
+                        entry["_limit_cancelled"] = True
             # Mettre à jour le P&L quotidien pour chaque position fermée
             time.sleep(0.3)
             for ticket, pos in tickets_before.items():
@@ -1860,16 +1866,6 @@ class TradeManager:
                     entry["_limit_expired_logged"] = len([t for t in entry["tickets"] if t.get("role") == "limit"]) == len([t for t in entry["tickets"] if t.get("role") == "limit" and t.get("_expired_logged")])
 
             # ══════════════════════════════════════════════════════════════
-            # ★★★ PHASE 3 : GESTION BE ★★★
-            # ══════════════════════════════════════════════════════════════
-            for t in entry.get("tickets", []):
-                pos = self._get_pos(t["ticket"])
-                if not pos:
-                    continue
-                entry_price = t.get("entry_price", 0)
-                if entry_price == 0:
-                    continue
-            # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 4 : TP DYNAMIQUE (recalcul si LIMIT rempli) ★★★
             # ══════════════════════════════════════════════════════════════
             self._recalculate_tp(entry)
@@ -1971,8 +1967,8 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
                 if ch_num is None or p.comment.startswith(f"CH{ch_num}-"):
                     conflict_tickets[p.ticket] = p.profit
     for e in to_remove:
-        if e in manager.active:
-            manager.active.remove(e)
+        # ★ FIX : ne supprimer l'entrée qu'APRÈS la fermeture réussie
+        pass
     bridge.close_all(symbol=symbol, channel_num=ch_num)
     # Mettre à jour le P&L quotidien
     time.sleep(0.3)
@@ -1981,6 +1977,10 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
         if deals:
             pnl = sum(d.profit for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT)
             manager._update_daily_pnl(pnl)
+    # ★ FIX : supprimer les entrées APRÈS la fermeture
+    for e in to_remove:
+        if e in manager.active:
+            manager.active.remove(e)
     return True
 
 def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager) -> bool:
@@ -1991,19 +1991,25 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
             entry_canal = sig.get("source_channel", "Inconnu")
             if entry_canal == canal:
                 # Trouver les positions ouvertes
+                closed_any = False
                 for t in entry.get("tickets", []):
                     pos = manager._get_pos(t["ticket"])
                     if pos:
                         ticket = t["ticket"]
                         sig_type = sig.get("type", "PU")
                         ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-                        bridge.close_position(ticket, "NEW-SIGNAL")
-                        log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
-                        # Mettre à jour le P&L quotidien (attendre que le deal apparaisse)
-                        time.sleep(0.3)
-                        pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
-                        manager._update_daily_pnl(pnl)
-                # Retirer l'entrée
+                        # ★ FIX : annuler les LIMITs AVANT de fermer
+                        if not entry.get("_limit_cancelled"):
+                            bridge.cancel_pending_limits(entry)
+                            entry["_limit_cancelled"] = True
+                        if bridge.close_position(ticket, "NEW-SIGNAL"):
+                            closed_any = True
+                            log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
+                            # Mettre à jour le P&L quotidien (attendre que le deal apparaisse)
+                            time.sleep(0.3)
+                            pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
+                            manager._update_daily_pnl(pnl)
+                # Retirer l'entrée APRÈS la fermeture
                 manager.active.remove(entry)
                 return True
     return False
@@ -2641,10 +2647,15 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
     _close_previous_signal(canal, bridge, manager)
 
-    # TP : signal TP ou TP_PAR_DEFAUT
+    # TP : signal TP ou TP_FIXED_GAIN_USD
     if signal.get("tps") and len(signal["tps"]) > 0:
-        default_tp = signal["tps"][-1]
-        log.debug(f"Quick Alert : TP fourni par le parser = {default_tp}")
+        # ★ FIX : ignorer le TP du parser, utiliser TP_FIXED_GAIN_USD comme execute_signal
+        # Le TP sera recalculé dynamiquement par _recalculate_tp si LIMIT se remplit
+        if action == "BUY":
+            default_tp = round(entry_price + TP_FIXED_GAIN_USD, 2)
+        else:
+            default_tp = round(entry_price - TP_FIXED_GAIN_USD, 2)
+        log.debug(f"Quick Alert : TP override = {default_tp} (TP_FIXED_GAIN_USD={TP_FIXED_GAIN_USD})")
     else:
         if action == "BUY":
             default_tp = round(entry_price + TP_PAR_DEFAUT, 2)
