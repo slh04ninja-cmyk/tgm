@@ -1580,7 +1580,7 @@ class TradeManager:
         # Average entry pondéré
         total_lot = sum(t["lot"] for t in active)
         if total_lot == 0:
-            log.warning(f"TP dynamique: total_lot=0 pour {entry.get('_mt5_comment', '?')}, skip")
+            _log_mgmt(f"TP dynamique: total_lot=0 pour {entry.get('_mt5_comment', '?')}, skip")
             return
         weighted_entry = sum(t["entry_price"] * t["lot"] for t in active) / total_lot
 
@@ -1965,7 +1965,7 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                     cancelled = bridge.cancel_pending_limits(entry)
                     entry["_limit_cancelled"] = True
                     if cancelled > 0:
-                        log.info(f"CH{ch_num}-{sig_type} | {cancelled} LIMIT annulés (nouveau signal)")
+                        _log_mgmt(f"CH{ch_num}-{sig_type} | {cancelled} LIMIT annulés (nouveau signal)")
                 # Fermer les positions ouvertes
                 closed_any = False
                 for t in entry.get("tickets", []):
@@ -1974,7 +1974,7 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                         ticket = t["ticket"]
                         if bridge.close_position(ticket, "NEW-SIGNAL"):
                             closed_any = True
-                            log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
+                            _log_mgmt(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
                             time.sleep(0.3)
                             pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
                             manager._update_daily_pnl(pnl)
@@ -2626,18 +2626,18 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
     sl = signal["sl"]
 
     if check_conflict(signal, bridge, manager):
-        log.info(msg.log_refuse(ch_num, "", msg.MOTIF_CONFLIT))
+        _log_mgmt(msg.log_refuse(ch_num, "", msg.MOTIF_CONFLIT))
         return
 
     sym_info = bridge._sym(symbol)
     if sym_info is None:
-        log.info(msg.log_refuse(ch_num, "", msg.MOTIF_SYMBOLE_INTROUVABLE))
+        _log_mgmt(msg.log_refuse(ch_num, "", msg.MOTIF_SYMBOLE_INTROUVABLE))
         log.error(f"Signal rejeté — symbole introuvable dans MT5: {symbol}")
         return
 
     current = bridge.current_price(sym_info.name, action)
     if current is None:
-        log.info(msg.log_refuse(ch_num, "", msg.MOTIF_PRIX_INDISPONIBLE))
+        _log_mgmt(msg.log_refuse(ch_num, "", msg.MOTIF_PRIX_INDISPONIBLE))
         log.error(f"Signal rejeté — prix indisponible pour {sym_info.name} (action={action})")
         return
 
@@ -2652,7 +2652,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
     _log_mgmt(f"TP initial: {tp_final} (entry={avg_entry:.2f} ± {TP_FIXED_GAIN_USD}$)")
 
     if not SignalParser._validate_sl(action, avg_entry, sl):
-        log.info(msg.log_refuse(ch_num, "", msg.MOTIF_SL_INVALIDE))
+        _log_mgmt(msg.log_refuse(ch_num, "", msg.MOTIF_SL_INVALIDE))
         log.error(f"Signal rejeté — SL {sl} invalide pour {action} (entry={avg_entry})")
         return
 
@@ -2661,14 +2661,14 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
         spread_points = abs(tick.ask - tick.bid)
         spread_pips = spread_points / sym_info.point
         if spread_pips > MAX_SPREAD_POINTS:
-            log.info(msg.log_refuse(ch_num, "", f"{msg.MOTIF_SPREAD_LARGE} ({spread_pips:.0f} pts)"))
-            log.warning(f"Signal ignoré — spread trop large: {spread_pips:.0f} pts (max={MAX_SPREAD_POINTS}) | {sym_info.name}")
+            _log_mgmt(msg.log_refuse(ch_num, "", f"{msg.MOTIF_SPREAD_LARGE} ({spread_pips:.0f} pts)"))
+            _log_mgmt(f"Signal ignoré — spread trop large: {spread_pips:.0f} pts (max={MAX_SPREAD_POINTS}) | {sym_info.name}")
             return
 
     total_signals = len(manager.active)
     if total_signals >= MAX_POSITIONS:
-        log.info(msg.log_refuse(ch_num, "", f"{msg.MOTIF_MAX_SIGNAUX} ({total_signals}/{MAX_POSITIONS})"))
-        log.warning(f"Signal ignoré — max signaux atteint ({total_signals}/{MAX_POSITIONS}) | {symbol} {action}")
+        _log_mgmt(msg.log_refuse(ch_num, "", f"{msg.MOTIF_MAX_SIGNAUX} ({total_signals}/{MAX_POSITIONS})"))
+        _log_mgmt(f"Signal ignoré — max signaux atteint ({total_signals}/{MAX_POSITIONS}) | {symbol} {action}")
         return
 
     tickets = []
@@ -2694,7 +2694,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             below_zone = zone_low - TOLERANCE_ZN <= current < zone_low
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
+            _log_mgmt(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
             return
 
         prefix = "ZN"
@@ -2709,11 +2709,11 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
         if in_zone:
-            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+            _log_mgmt(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
                               sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         else:
-            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}")
+            _log_mgmt(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}")
             signal_limits_only = dict(signal)
             _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
                               sl, tp_final, 0, ch_num, canal, prefix)
@@ -2737,7 +2737,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             below_zone = zone_low_pu - TOLERANCE_ZN <= current < zone_low_pu
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            log.info(f"CH{ch_num}-PU | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
+            _log_mgmt(f"CH{ch_num}-PU | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
             return
 
         sl = _cap_sl(action, entry_price, sl, MAX_SL_USD)
@@ -2784,7 +2784,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
 
     total_signals = len(manager.active)
     if total_signals >= MAX_POSITIONS:
-        log.warning(f"Quick Alert ignorée — max signaux atteint ({total_signals}/{MAX_POSITIONS}) | {symbol} {action}")
+        _log_mgmt(f"Quick Alert ignorée — max signaux atteint ({total_signals}/{MAX_POSITIONS}) | {symbol} {action}")
         return
 
     sym_info = bridge._sym(symbol)
@@ -2850,17 +2850,17 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     if action == "BUY":
         if sl >= entry_price:
             sl = entry_price - 10.0
-            log.warning(f"Quick Alert : SL ajusté à {sl} (doit être < entry)")
+            _log_mgmt(f"Quick Alert : SL ajusté à {sl} (doit être < entry)")
         if default_tp <= entry_price:
             default_tp = entry_price + 10.0
-            log.warning(f"Quick Alert : TP ajusté à {default_tp} (doit être > entry)")
+            _log_mgmt(f"Quick Alert : TP ajusté à {default_tp} (doit être > entry)")
     else:  # SELL
         if sl <= entry_price:
             sl = entry_price + 10.0
-            log.warning(f"Quick Alert : SL ajusté à {sl} (doit être > entry)")
+            _log_mgmt(f"Quick Alert : SL ajusté à {sl} (doit être > entry)")
         if default_tp >= entry_price:
             default_tp = entry_price - 10.0
-            log.warning(f"Quick Alert : TP ajusté à {default_tp} (doit être < entry)")
+            _log_mgmt(f"Quick Alert : TP ajusté à {default_tp} (doit être < entry)")
 
     # ★ VÉRIFICATION TOLÉRANCE DE PRIX (QA avec prix)
     # Si le prix a bougé dans le sens du TP (favorable) → MARKET (meilleur prix, pas de limite).
@@ -2878,13 +2878,13 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             # Défavorable: prix < entry - tolerance (le prix descend trop contre le SELL)
             is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
         if is_unfavorable:
-            log.info(f"CH{ch_num}-AL | Quick Alert ANNULE | prix={current} | entry={entry_price}")
+            _log_mgmt(f"CH{ch_num}-AL | Quick Alert ANNULE | prix={current} | entry={entry_price}")
             _alert_mgmt(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
             return
 
     # ★ GARDE : entry_price requis pour les filtres suivants
     if entry_price is None:
-        log.warning(f"Quick Alert ignorée — entry_price manquant | {symbol} {action}")
+        _log_mgmt(f"Quick Alert ignorée — entry_price manquant | {symbol} {action}")
         return
 
     # ★ FILTRE DISTANCE TP pour Quick Alert
@@ -2896,7 +2896,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         dist_remaining = abs(current - default_tp)
         dist_total = abs(entry_price - default_tp)
     if dist_total > 0 and (dist_remaining / dist_total) < TP_DISTANCE_MIN_RATIO:
-        log.warning(f"Quick Alert ignorée — prix trop proche du TP ({dist_remaining/dist_total:.0%} restant) | "
+        _log_mgmt(f"Quick Alert ignorée — prix trop proche du TP ({dist_remaining/dist_total:.0%} restant) | "
                     f"prix={current} entry={entry_price} TP={default_tp}")
         return
 
@@ -2938,7 +2938,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
 
     # Vérifier si le prix est acceptable
     if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-        log.info(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
+        _log_mgmt(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
         return
 
     # Calculer les prix LIMIT pour le log
@@ -2950,9 +2950,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         l2_price = round(current + LIMIT_OFFSET_2, 2)
 
     if in_zone:
-        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+        _log_mgmt(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
     else:
-        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}")
+        _log_mgmt(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}")
 
     # SL plafonné
     entry_for_sl = entry_price if entry_price else current
@@ -3021,14 +3021,14 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                         elif deal.reason == mt5.DEAL_REASON_TP:
                             close_reason = "TP"
                         break
-        log.info(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
+        _log_mgmt(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
         _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
         # QA actif -> mettre a jour SL et TP avec ceux du signal complet
         # ★ SL plafonné aussi lors de la fusion
         qa_entry_price = qa.get("entry_price", 0)
         real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
-        log.info(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final}")
+        _log_mgmt(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final}")
         bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[FUSION-SL-TP]")
         for t in entry["tickets"]:
             if t["ticket"] == qa_ticket:
@@ -3481,7 +3481,7 @@ async def main():
                                 cancelled_limits += c
                             entry["_limit_cancelled"] = True
                 if cancelled_limits > 0:
-                    log.info(f"CLOSE: {cancelled_limits} ordres LIMIT annulés pour CH{ch_num}")
+                    _log_mgmt(f"CLOSE: {cancelled_limits} ordres LIMIT annulés pour CH{ch_num}")
 
                 # Mettre à jour le P&L quotidien
                 time.sleep(0.3)
@@ -3583,7 +3583,7 @@ async def main():
                                     entry_qa["signal"] = sig_dict
                                     entry_qa["_is_quick_alert"] = False
                                 updated_qa = True
-                                log.info(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
+                                _log_mgmt(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
                                 _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], _sig_ch_num, ticket, real_sl, tp_final_fusion))
                                 # ★ FIX : retirer le QA traité pour éviter les mises à jour multiples
                                 qa_list.pop(idx)
@@ -3592,7 +3592,7 @@ async def main():
                                 break
                             else:
                                 # QA déjà fermé → ignorer le signal complet
-                                log.info(f"[FUSION OOT] QA #{ticket} déjà fermé → signal complet ignoré")
+                                _log_mgmt(f"[FUSION OOT] QA #{ticket} déjà fermé → signal complet ignoré")
                                 qa_list.pop(idx)
                                 if not qa_list:
                                     _quick_alerts.pop(key, None)
