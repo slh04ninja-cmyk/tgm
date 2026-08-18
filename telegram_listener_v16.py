@@ -1958,22 +1958,23 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
             sig = entry.get("signal", {})
             entry_canal = sig.get("source_channel", "Inconnu")
             if entry_canal == canal:
-                # Trouver les positions ouvertes
+                sig_type = sig.get("type", "PU")
+                ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+                # ★ FIX : annuler les LIMITs AVANT de fermer les positions
+                if not entry.get("_limit_cancelled"):
+                    cancelled = bridge.cancel_pending_limits(entry)
+                    entry["_limit_cancelled"] = True
+                    if cancelled > 0:
+                        log.info(f"CH{ch_num}-{sig_type} | {cancelled} LIMIT annulés (nouveau signal)")
+                # Fermer les positions ouvertes
                 closed_any = False
                 for t in entry.get("tickets", []):
                     pos = manager._get_pos(t["ticket"])
                     if pos:
                         ticket = t["ticket"]
-                        sig_type = sig.get("type", "PU")
-                        ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-                        # ★ FIX : annuler les LIMITs AVANT de fermer
-                        if not entry.get("_limit_cancelled"):
-                            bridge.cancel_pending_limits(entry)
-                            entry["_limit_cancelled"] = True
                         if bridge.close_position(ticket, "NEW-SIGNAL"):
                             closed_any = True
                             log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
-                            # Mettre à jour le P&L quotidien (attendre que le deal apparaisse)
                             time.sleep(0.3)
                             pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
                             manager._update_daily_pnl(pnl)
