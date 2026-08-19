@@ -3075,18 +3075,16 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
         log.info(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
         _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
-        # QA actif -> mettre a jour SL et TP avec ceux du signal complet
+        # QA actif -> mettre a jour SL uniquement (TP gardé depuis TP_FIXED_GAIN_USD)
         # ★ SL plafonné aussi lors de la fusion
         qa_entry_price = qa.get("entry_price", 0)
         real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
-        log.info(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final}")
-        bridge.modify_sl_tp(qa_ticket, real_sl, tp_final, "[FUSION-SL-TP]")
-        for t in entry["tickets"]:
-            if t["ticket"] == qa_ticket:
-                t["tp_final"]  = tp_final
-                t["tp_target"] = tp_final
-                t["tp3"]       = tp_final
-                break
+        log.info(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final} (non appliqué)")
+        # ★ FIX : ne modifier que le SL, pas le TP (garder TP_FIXED_GAIN_USD)
+        pos_data = mt5.positions_get(ticket=qa_ticket)
+        if pos_data:
+            current_tp = pos_data[0].tp
+            bridge.modify_sl_tp(qa_ticket, real_sl, current_tp, "[FUSION-SL-ONLY]")
         entry["signal"]          = full_signal
         entry["_is_quick_alert"] = False
         _alert_mgmt(msg.alert_fusion(full_signal['action'], ch_num_fusion, qa_ticket, real_sl, tp_final))
@@ -3621,21 +3619,16 @@ async def main():
                         if ticket:
                             pos = mt5.positions_get(ticket=ticket)
                             if pos:
-                                # QA actif → mettre à jour SL/TP avec ceux du signal complet
-                                bridge.modify_sl_tp(ticket, real_sl, tp_final_fusion, "[FUSION-SL-TP-OOT]")
+                                # QA actif → mettre à jour SL uniquement (garder TP_FIXED_GAIN_USD)
+                                current_tp = pos[0].tp
+                                bridge.modify_sl_tp(ticket, real_sl, current_tp, "[FUSION-SL-ONLY-OOT]")
                                 entry_qa = qa.get("entry")
                                 if entry_qa:
-                                    for t in entry_qa.get("tickets", []):
-                                        if t["ticket"] == ticket:
-                                            t["tp_final"] = tp_final_fusion
-                                            t["tp_target"] = tp_final_fusion
-                                            t["tp3"] = tp_final_fusion
-                                            break
                                     entry_qa["signal"] = sig_dict
                                     entry_qa["_is_quick_alert"] = False
                                 updated_qa = True
-                                _log_mgmt(f"[FUSION OOT] QA #{ticket} SL/TP mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={tp_final_fusion}")
-                                _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], _sig_ch_num, ticket, real_sl, tp_final_fusion))
+                                _log_mgmt(f"[FUSION OOT] QA #{ticket} SL mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={current_tp} (gardé)")
+                                _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], _sig_ch_num, ticket, real_sl, current_tp))
                                 # ★ FIX : retirer le QA traité pour éviter les mises à jour multiples
                                 qa_list.pop(idx)
                                 if not qa_list:
