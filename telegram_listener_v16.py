@@ -173,6 +173,7 @@ TV_STRONG_BUY = int(os.getenv("TV_STRONG_BUY", "15"))   # ≥ 15 BUY → STRONG_
 TV_BUY = int(os.getenv("TV_BUY", "10"))                  # ≥ 10 BUY → BUY
 TV_STRONG_SELL = int(os.getenv("TV_STRONG_SELL", "15"))   # ≥ 15 SELL → STRONG_SELL
 TV_SELL = int(os.getenv("TV_SELL", "10"))                 # ≥ 10 SELL → SELL
+TV_NEUTRAL_ALLOW = os.getenv("TV_NEUTRAL_ALLOW", "true").lower() == "true"  # NEUTRAL accepte BUY+SELL
 
 # === CACHE TTL ===
 
@@ -585,6 +586,7 @@ class TradingViewFilter:
         self.buy_threshold = TV_BUY
         self.strong_sell_threshold = TV_STRONG_SELL
         self.sell_threshold = TV_SELL
+        self.neutral_allow = TV_NEUTRAL_ALLOW
         # Cache
         self._last_consensus = None    # "STRONG_BUY" | "BUY" | "NEUTRAL" | "SELL" | "STRONG_SELL"
         self._last_buy_count = 0
@@ -613,16 +615,24 @@ class TradingViewFilter:
 
         consensus = self._last_consensus
 
-        # Signal BUY → consensus doit être BUY, STRONG_BUY ou NEUTRAL
-        if action == "BUY" and consensus not in ("BUY", "STRONG_BUY", "NEUTRAL"):
+        # Signal BUY → consensus doit être BUY, STRONG_BUY ou NEUTRAL (si TV_NEUTRAL_ALLOW)
+        if action == "BUY":
+            if consensus in ("BUY", "STRONG_BUY"):
+                return True, ""
+            if consensus == "NEUTRAL" and self.neutral_allow:
+                return True, ""
             motif = (
                 f"TRADINGVIEW OPPOSÉ : signal BUY mais consensus {consensus} "
                 f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
             )
             return False, motif
 
-        # Signal SELL → consensus doit être SELL, STRONG_SELL ou NEUTRAL
-        if action == "SELL" and consensus not in ("SELL", "STRONG_SELL", "NEUTRAL"):
+        # Signal SELL → consensus doit être SELL, STRONG_SELL ou NEUTRAL (si TV_NEUTRAL_ALLOW)
+        if action == "SELL":
+            if consensus in ("SELL", "STRONG_SELL"):
+                return True, ""
+            if consensus == "NEUTRAL" and self.neutral_allow:
+                return True, ""
             motif = (
                 f"TRADINGVIEW OPPOSÉ : signal SELL mais consensus {consensus} "
                 f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
