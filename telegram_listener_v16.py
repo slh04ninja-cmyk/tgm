@@ -712,6 +712,17 @@ class TradingViewFilter:
         )
 
 
+def _tv_status(tv_filter) -> str:
+    """Retourne le status TV pour les logs (ex: '| TV=BUY (15B/5S/6N)')."""
+    if not tv_filter or not tv_filter.enabled or tv_filter._last_consensus is None:
+        return ""
+    c = tv_filter._last_consensus
+    b = tv_filter._last_buy_count
+    s = tv_filter._last_sell_count
+    n = tv_filter._last_neutral_count
+    return f" | TV={c} ({b}B/{s}S/{n}N)"
+
+
 # =============================================================
 # MT5 BRIDGE
 # =============================================================
@@ -2551,7 +2562,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                        action: str, symbol: str, current: float,
                        sl: float, tp_final: float,
                        lot_market: float,
-                       ch_num, canal: str, prefix: str = "ZN") -> bool:
+                       ch_num, canal: str, prefix: str = "ZN", tv_filter=None) -> bool:
     """Ouvre 1 MARKET + N LIMIT orders pour catcher le pullback.
     Retourne True si au moins le MARKET est ouvert."""
     tickets = []
@@ -2803,14 +2814,14 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
         if in_zone:
-            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
+                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
         else:
-            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}")
+            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
             signal_limits_only = dict(signal)
             _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
-                              sl, tp_final, 0, ch_num, canal, prefix)
+                              sl, tp_final, 0, ch_num, canal, prefix, tv_filter=tv_filter)
         return
 
     # ── Prix unique → converti en zone [entry ± TOLERANCE_PU] ──
@@ -2845,13 +2856,13 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager):
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
         if in_zone:
-            log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+            log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
+                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
         else:
-            log.info(f"CH{ch_num}-PU | ACCEPTE | L1={l1_price} | L2={l2_price}")
+            log.info(f"CH{ch_num}-PU | ACCEPTE | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
             _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, 0, ch_num, canal, prefix)
+                              sl, tp_final, 0, ch_num, canal, prefix, tv_filter=tv_filter)
         return
 
     # ── Les signaux zone sont convertis en Prix Unique plus haut ──
@@ -2869,7 +2880,7 @@ def _qa_key(symbol: str, action: str, channel_name: str = "") -> str:
     return f"CH{ch_num}_{symbol}_{action}"
 
 def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
-                        quick_alerts: dict):
+                        quick_alerts: dict, tv_filter=None):
     action = signal["action"]
     symbol = signal["symbol"]
     sl = signal.get("sl")
@@ -3044,9 +3055,9 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         l2_price = round(current + LIMIT_OFFSET_2, 2)
 
     if in_zone:
-        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
+        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
     else:
-        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}")
+        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
 
     # SL plafonné
     entry_for_sl = entry_price if entry_price else current
@@ -3055,10 +3066,10 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # MARKET + LIMITS (ou LIMITS seules si légèrement au-dessus)
     if in_zone:
         ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                                sl, default_tp, LOT_MARKET, ch_num, canal, qa_label)
+                                sl, default_tp, LOT_MARKET, ch_num, canal, qa_label, tv_filter=tv_filter)
     else:
         ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                                sl, default_tp, 0, ch_num, canal, qa_label)
+                                sl, default_tp, 0, ch_num, canal, qa_label, tv_filter=tv_filter)
     if not ok:
         log.error("✗ QUICK MARKET échoué")
         return
@@ -3632,7 +3643,7 @@ async def main():
                 sig_dict = signal_data.to_dict()
 
                 if signal_data.is_quick_alert:
-                    execute_quick_alert(sig_dict, bridge, manager, _quick_alerts)
+                    execute_quick_alert(sig_dict, bridge, manager, _quick_alerts, tv_filter=tv_filter)
                     return
 
                 key = _qa_key(sig_dict["symbol"], sig_dict["action"], canal_name)
