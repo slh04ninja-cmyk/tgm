@@ -1487,7 +1487,8 @@ class TradeManager:
             elif pnl < 0:
                 total_losses += 1
 
-        total_signals = len(signal_groups)
+        # ★ FIX : total_signals = somme des MK par canal (pas nb de groupes uniques)
+        total_signals = sum(ch.get('signals', 0) for ch in channels.values())
         winrate = total_wins / total_trades * 100 if total_trades > 0 else 0
 
         # Formater les méthodes pour bot_messages
