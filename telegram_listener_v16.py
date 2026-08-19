@@ -713,14 +713,10 @@ class TradingViewFilter:
 
 
 def _tv_status(tv_filter) -> str:
-    """Retourne le status TV pour les logs (ex: '| TV=BUY (15B/5S/6N)')."""
+    """Retourne le status TV pour les logs (ex: '| TV=BUY')."""
     if not tv_filter or not tv_filter.enabled or tv_filter._last_consensus is None:
         return ""
-    c = tv_filter._last_consensus
-    b = tv_filter._last_buy_count
-    s = tv_filter._last_sell_count
-    n = tv_filter._last_neutral_count
-    return f" | TV={c} ({b}B/{s}S/{n}N)"
+    return f" | TV={tv_filter._last_consensus}"
 
 
 # =============================================================
@@ -3631,8 +3627,7 @@ async def main():
                     allowed, motif = tv_filter.is_allowed(signal_data.direction)
                     if not allowed:
                         ch_num_tf = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
-                        log.info(msg.log_refuse(ch_num_tf, "", msg.MOTIF_TREND_OPPOSE))
-                        log.info(f"CH{ch_num_tf}-{_sig_mode} | {motif}")
+                        log.info(f"CH{ch_num_tf}-{_sig_mode} | REFUSÉ TV OPPOSÉ | TV={tv_filter._last_consensus}")
                         _alert_mgmt(msg.alert_trend_blocked(
                             signal_data.direction, signal_data.pair, ch_num_tf,
                             signal_data.direction, tv_filter._last_consensus,
