@@ -417,17 +417,14 @@ class NewsManager:
                 and (n.get("country", "") in ("USD", "XAU") or n.get("currency", "") in ("USD", "XAU"))
             ]
             # ★ FIX : ne garder que les news du JOUR DE TRADING en cours
-            # ET de la veille (pour les événements qui ont traversé le changement
-            # de jour de trading — ex: FOMC à 18:00 UTC, close window à 17:45 UTC,
-            # mais le bot redémarre après 03:00 UTC le lendemain)
+            # (ff_calendar_thisweek.json retourne toute la semaine)
             trading_day = get_trading_day_start()
             trading_day_date = trading_day.date()
-            prev_day_date = (trading_day - timedelta(days=1)).date()
             self._news = []
             for n in filtered:
                 try:
                     news_dt = datetime.fromisoformat(n["date"].replace("Z", "+00:00"))
-                    if news_dt.date() in (trading_day_date, prev_day_date):
+                    if news_dt.date() == trading_day_date:
                         self._news.append(n)
                 except Exception:
                     # Si la date est invalide, on garde la news par sécurité
@@ -495,6 +492,13 @@ class NewsManager:
                 log.info(msg.log_news_closing_positions(active_title, active_diff))
                 if self.manager:
                     self._close_all()
+            else:
+                # ★ Retry : si déjà bloqué mais positions encore ouvertes, re-fermer
+                remaining = mt5.positions_get()
+                remaining_count = len([p for p in remaining if p.magic == MAGIC_NUMBER]) if remaining else 0
+                if remaining_count > 0:
+                    log.warning(f"[NEWS] RETRY: {remaining_count} positions encore ouvertes pendant fenêtre close")
+                    self._close_all()
             self._blocked = True
         elif should_block:
             if not self._blocked:
@@ -506,24 +510,45 @@ class NewsManager:
             self._blocked = False
 
     def _close_all(self):
-        if self.manager:
+        if not self.manager:
+            log.warning("[NEWS] _close_all: manager=None, impossible de fermer")
+            return
+        try:
             # Capturer P&L avant fermeture
             positions_before = mt5.positions_get()
             tickets_before = {p.ticket: p for p in positions_before if p.magic == MAGIC_NUMBER} if positions_before else {}
-            self.bridge.close_all()
-            # ★ FIX : annuler aussi les ordres LIMIT en attente
+            log.info(f"[NEWS] Fermeture de {len(tickets_before)} positions...")
+            closed = self.bridge.close_all()
+            # ★ Annuler aussi les ordres LIMIT en attente
             with self.manager._lock:
                 for entry in self.manager.active:
                     if not entry.get("_limit_cancelled"):
-                        self.bridge.cancel_pending_limits(entry)
+                        cancelled = self.bridge.cancel_pending_limits(entry)
+                        if cancelled > 0:
+                            log.info(f"[NEWS] {cancelled} LIMIT annulés")
                         entry["_limit_cancelled"] = True
-            # Mettre à jour le P&L quotidien pour chaque position fermée
-            time.sleep(0.3)
+            # Vérifier que les positions sont bien fermées
+            time.sleep(0.5)
+            remaining = mt5.positions_get()
+            remaining_count = len([p for p in remaining if p.magic == MAGIC_NUMBER]) if remaining else 0
+            if remaining_count > 0:
+                log.warning(f"[NEWS] {remaining_count} positions encore ouvertes après fermeture! Retry...")
+                self.bridge.close_all()
+                time.sleep(0.3)
+                remaining2 = mt5.positions_get()
+                remaining_count2 = len([p for p in remaining2 if p.magic == MAGIC_NUMBER]) if remaining2 else 0
+                if remaining_count2 > 0:
+                    log.error(f"[NEWS] ÉCHEC: {remaining_count2} positions toujours ouvertes après retry")
+            else:
+                log.info(f"[NEWS] {len(tickets_before)} positions fermées avec succès")
+            # Mettre à jour le P&L quotidien
             for ticket, pos in tickets_before.items():
                 deals = mt5.history_deals_get(position=ticket)
                 if deals:
                     pnl = sum(d.profit for d in deals if d.position_id == ticket and d.entry == mt5.DEAL_ENTRY_OUT)
                     self.manager._update_daily_pnl(pnl)
+        except Exception as e:
+            log.error(f"[NEWS] Exception dans _close_all: {e}")
 
     def stop(self):
         self._stop = True
@@ -895,13 +920,18 @@ class MT5Bridge:
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
         if not positions:
             return
+        failed = []
         for pos in positions:
             if pos.magic != MAGIC_NUMBER:
                 continue
             if channel_num is not None:
                 if not pos.comment.startswith(f"CH{channel_num}-"):
                     continue
-            self.close_position(pos.ticket, comment="close-all")
+            if not self.close_position(pos.ticket, comment="close-all"):
+                failed.append(pos.ticket)
+                log.warning(f"[CLOSE-ALL] Échec fermeture #{pos.ticket} ({pos.comment})")
+        if failed:
+            log.error(f"[CLOSE-ALL] {len(failed)} positions non fermées: {failed}")
 
     def cancel_pending_limits(self, entry: dict) -> int:
         """Annule tous les ordres LIMIT non remplis d'une entrée."""
