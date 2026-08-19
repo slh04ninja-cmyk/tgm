@@ -613,16 +613,16 @@ class TradingViewFilter:
 
         consensus = self._last_consensus
 
-        # Signal BUY → consensus doit être BUY ou STRONG_BUY (NEUTRAL/SELL/STRONG_SELL = bloqué)
-        if action == "BUY" and consensus not in ("BUY", "STRONG_BUY"):
+        # Signal BUY → consensus doit être BUY, STRONG_BUY ou NEUTRAL
+        if action == "BUY" and consensus not in ("BUY", "STRONG_BUY", "NEUTRAL"):
             motif = (
                 f"TRADINGVIEW OPPOSÉ : signal BUY mais consensus {consensus} "
                 f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
             )
             return False, motif
 
-        # Signal SELL → consensus doit être SELL ou STRONG_SELL (NEUTRAL/BUY/STRONG_BUY = bloqué)
-        if action == "SELL" and consensus not in ("SELL", "STRONG_SELL"):
+        # Signal SELL → consensus doit être SELL, STRONG_SELL ou NEUTRAL
+        if action == "SELL" and consensus not in ("SELL", "STRONG_SELL", "NEUTRAL"):
             motif = (
                 f"TRADINGVIEW OPPOSÉ : signal SELL mais consensus {consensus} "
                 f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
