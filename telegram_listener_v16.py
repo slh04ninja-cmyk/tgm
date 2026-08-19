@@ -417,14 +417,17 @@ class NewsManager:
                 and (n.get("country", "") in ("USD", "XAU") or n.get("currency", "") in ("USD", "XAU"))
             ]
             # ★ FIX : ne garder que les news du JOUR DE TRADING en cours
-            # (ff_calendar_thisweek.json retourne toute la semaine)
+            # ET de la veille (pour les événements qui ont traversé le changement
+            # de jour de trading — ex: FOMC à 18:00 UTC, close window à 17:45 UTC,
+            # mais le bot redémarre après 03:00 UTC le lendemain)
             trading_day = get_trading_day_start()
             trading_day_date = trading_day.date()
+            prev_day_date = (trading_day - timedelta(days=1)).date()
             self._news = []
             for n in filtered:
                 try:
                     news_dt = datetime.fromisoformat(n["date"].replace("Z", "+00:00"))
-                    if news_dt.date() == trading_day_date:
+                    if news_dt.date() in (trading_day_date, prev_day_date):
                         self._news.append(n)
                 except Exception:
                     # Si la date est invalide, on garde la news par sécurité
