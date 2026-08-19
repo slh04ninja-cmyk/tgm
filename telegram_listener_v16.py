@@ -1444,9 +1444,12 @@ class TradeManager:
 
             # Stats par canal
             if ch_num not in channels:
-                channels[ch_num] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'name': ch_name}
+                channels[ch_num] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0}
             channels[ch_num]['trades'] += 1
             channels[ch_num]['pnl'] += pnl
+            # ★ Nombre de signaux = nombre de positions MK (chaque MK = 1 signal reçu)
+            if suffix == 'MK':
+                channels[ch_num]['signals'] += 1
             if pnl > 0:
                 channels[ch_num]['wins'] += 1
             elif pnl < 0:
@@ -1502,8 +1505,12 @@ class TradeManager:
 
         # Formater les canaux — ★ FIX (v16) : trié par P&L décroissant (cohérent avec les
         # rapports manuels générés jusqu'ici) au lieu de l'ordre d'insertion arbitraire.
+        # ★ FIX : 'signals' = nombre de positions MK (chaque MK = 1 signal reçu du canal)
         channels_list = sorted(
-            [{'ch_num': ch, **stats} for ch, stats in channels.items()],
+            [{'ch_num': ch, 'trades': stats['trades'], 'wins': stats['wins'],
+              'losses': stats['losses'], 'pnl': stats['pnl'], 'name': stats['name'],
+              'signals': stats.get('signals', 0)}
+             for ch, stats in channels.items()],
             key=lambda c: -c['pnl']
         )
 
@@ -2141,15 +2148,19 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
     pdf.ln(2)
 
     sig_headers = [
-        ("Signal", 22, "L"),
-        ("P&L", 28, "C"),
-        ("Nb signaux", 22, "C"),
-        ("Win", 16, "C"),
-        ("Loss", 16, "C"),
-        ("Winrate", 20, "C"),
+        ("Signal", 18, "L"),
+        ("Canaux", 16, "C"),
+        ("P&L", 22, "C"),
+        ("Signaux", 16, "C"),
+        ("Trades", 16, "C"),
+        ("Win", 12, "C"),
+        ("Loss", 12, "C"),
+        ("WR", 14, "C"),
     ]
-    pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 9))
-    _table_header(pdf, sig_headers, font_size=9)
+    pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 8))
+    _table_header(pdf, sig_headers, font_size=8)
+
+    tot_pnl = tot_signals = tot_trades = tot_wins = tot_losses = 0
 
     if not signal_types:
         pdf.set_font("Helvetica", "I", 9)
@@ -2160,14 +2171,33 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
             st_wins = st.get('wins', 0)
             st_losses = st.get('losses', st_trades - st_wins)
             st_pnl = st.get('pnl', 0.0)
+            st_channels = st.get('channels', 0)
             st_wr = st_wins / st_trades * 100 if st_trades > 0 else 0
-            pdf.cell(22, 7, _sanitize(st.get('type', '?'), 10), border=1)
-            pdf.cell(28, 7, f"{st_pnl:+.2f}$", border=1, align="C")
-            pdf.cell(22, 7, str(st_trades), border=1, align="C")
-            pdf.cell(16, 7, str(st_wins), border=1, align="C")
-            pdf.cell(16, 7, str(st_losses), border=1, align="C")
-            pdf.cell(20, 7, f"{st_wr:.1f}%", border=1, align="C")
+            pdf.cell(18, 7, _sanitize(st.get('type', '?'), 8), border=1)
+            pdf.cell(16, 7, str(st_channels), border=1, align="C")
+            pdf.cell(22, 7, f"{st_pnl:+.2f}$", border=1, align="C")
+            pdf.cell(16, 7, str(st_trades), border=1, align="C")
+            pdf.cell(16, 7, str(st_trades), border=1, align="C")
+            pdf.cell(12, 7, str(st_wins), border=1, align="C")
+            pdf.cell(12, 7, str(st_losses), border=1, align="C")
+            pdf.cell(14, 7, f"{st_wr:.0f}%", border=1, align="C")
             pdf.ln()
+            tot_pnl += st_pnl; tot_signals += st_trades; tot_trades += st_trades
+            tot_wins += st_wins; tot_losses += st_losses
+
+        tot_wr = tot_wins / tot_trades * 100 if tot_trades > 0 else 0
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(18, 7, "TOTAL", border=1)
+        pdf.cell(16, 7, "-", border=1, align="C")
+        pdf.cell(22, 7, f"{tot_pnl:+.2f}$", border=1, align="C")
+        pdf.cell(16, 7, str(tot_signals), border=1, align="C")
+        pdf.cell(16, 7, str(tot_trades), border=1, align="C")
+        pdf.cell(12, 7, str(tot_wins), border=1, align="C")
+        pdf.cell(12, 7, str(tot_losses), border=1, align="C")
+        pdf.cell(14, 7, f"{tot_wr:.0f}%", border=1, align="C")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 8)
+
     pdf._current_table_headers = None
     pdf.ln(6)
 
@@ -2183,12 +2213,13 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
 
     ch_headers = [
         ("Canal", 18, "L"),
-        ("Nom", 42, "L"),
+        ("Nom", 48, "L"),
         ("P&L", 25, "C"),
-        ("Nb signaux", 22, "C"),
-        ("Win", 16, "C"),
-        ("Loss", 16, "C"),
-        ("Winrate", 20, "C"),
+        ("Signaux", 18, "C"),
+        ("Trades", 18, "C"),
+        ("Win", 15, "C"),
+        ("Loss", 15, "C"),
+        ("Winrate", 18, "C"),
     ]
     pdf._current_table_headers = (ch_headers, ("Helvetica", "B", 9))
     _table_header(pdf, ch_headers, font_size=9)
@@ -2198,23 +2229,42 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         pdf.set_font("Helvetica", "I", 9)
         pdf.cell(0, 7, "Aucun trade sur les canaux", new_x="LMARGIN", new_y="NEXT")
     else:
+        ch_tot_pnl = ch_tot_sig = ch_tot_trades = ch_tot_wins = ch_tot_losses = 0
         for c in channels_sorted:
             c_trades = c.get('trades', 0)
             c_wins = c.get('wins', 0)
             c_losses = c.get('losses', c_trades - c_wins)
             c_pnl = c.get('pnl', 0.0)
+            c_signals = c.get('signals', 0)
             c_wr = c_wins / c_trades * 100 if c_trades > 0 else 0
-            c_name = _sanitize(c.get('name', ''), 20)
+            c_name = _sanitize(c.get('name', ''), 22)
             if not c_name or c_name == '?':
                 c_name = f"CH{c.get('ch_num', '?')}"
             pdf.cell(18, 7, f"CH{c.get('ch_num', '?')}", border=1)
-            pdf.cell(42, 7, c_name, border=1)
+            pdf.cell(48, 7, c_name, border=1)
             pdf.cell(25, 7, f"{c_pnl:+.2f}$", border=1, align="C")
-            pdf.cell(22, 7, str(c_trades), border=1, align="C")
-            pdf.cell(16, 7, str(c_wins), border=1, align="C")
-            pdf.cell(16, 7, str(c_losses), border=1, align="C")
-            pdf.cell(20, 7, f"{c_wr:.1f}%", border=1, align="C")
+            pdf.cell(18, 7, str(c_signals), border=1, align="C")
+            pdf.cell(18, 7, str(c_trades), border=1, align="C")
+            pdf.cell(15, 7, str(c_wins), border=1, align="C")
+            pdf.cell(15, 7, str(c_losses), border=1, align="C")
+            pdf.cell(18, 7, f"{c_wr:.1f}%", border=1, align="C")
             pdf.ln()
+            ch_tot_pnl += c_pnl; ch_tot_sig += c_signals; ch_tot_trades += c_trades
+            ch_tot_wins += c_wins; ch_tot_losses += c_losses
+
+        ch_tot_wr = ch_tot_wins / ch_tot_trades * 100 if ch_tot_trades > 0 else 0
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(18, 7, "TOTAL", border=1)
+        pdf.cell(48, 7, f"{len(channels_sorted)} canaux", border=1)
+        pdf.cell(25, 7, f"{ch_tot_pnl:+.2f}$", border=1, align="C")
+        pdf.cell(18, 7, str(ch_tot_sig), border=1, align="C")
+        pdf.cell(18, 7, str(ch_tot_trades), border=1, align="C")
+        pdf.cell(15, 7, str(ch_tot_wins), border=1, align="C")
+        pdf.cell(15, 7, str(ch_tot_losses), border=1, align="C")
+        pdf.cell(18, 7, f"{ch_tot_wr:.1f}%", border=1, align="C")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 9)
+
     pdf._current_table_headers = None
     pdf.ln(5)
 

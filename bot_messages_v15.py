@@ -306,6 +306,21 @@ def alert_p4a_close(ticket: int, profit: float) -> str:
 # --- P4b : Partial Trail ---
 
 
+# =============================================================
+# 10. RAPPORT JOURNALIER
+# =============================================================
+def report_daily_summary(date: str, pnl_realise: float, trades: int, wins: int, losses: int,
+                         winrate: float, total_signals: int = 0, max_drawdown: float = 0.0) -> str:
+    return (
+        f"📅 PERFORMANCE DU {date}\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"P&L réalisé : {pnl_realise:+.2f}$\n"
+        f"Total signaux : {total_signals} | Total trades : {trades}\n"
+        f"Wins : {wins} | Losses : {losses} | Winrate : {winrate:.1f}%\n"
+        f"Max Drawdown : {max_drawdown:.2f}$"
+    )
+
+
 def report_daily_by_method(methods: list) -> str:
     """methods = [{name, trades, wins, losses, pnl}]"""
     lines = ["📊 PAR MÉTHODE", "━━━━━━━━━━━━━━━━━━"]
@@ -319,14 +334,28 @@ def report_daily_by_method(methods: list) -> str:
 
 
 def report_daily_by_channel(channels: list) -> str:
-    """channels = [{ch_num, trades, wins, losses, pnl, name}]"""
+    """channels = [{ch_num, trades, wins, losses, pnl, name, signals}]"""
     lines = ["📊 PAR CANAL", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Canal':<10} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
-    lines.append("-" * 55)
+    lines.append(f"{'Canal':<10} | {'P&L':>8} | {'Signaux':>7} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
+    lines.append("-" * 60)
+    ch_tot_pnl = 0.0
+    ch_tot_signals = 0
+    ch_tot_trades = 0
+    ch_tot_wins = 0
+    ch_tot_losses = 0
     for c in sorted(channels, key=lambda x: x['pnl'], reverse=True):
         wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
         c_losses = c.get('losses', c['trades'] - c['wins'])
-        lines.append(f"{'CH' + str(c['ch_num']):<10} | {c['pnl']:>+7.2f}$ | {c['trades']:>6} | {c['wins']:>4} | {c_losses:>5} | {wr:>6.1f}%")
+        c_signals = c.get('signals', 0)
+        lines.append(f"{'CH' + str(c['ch_num']):<10} | {c['pnl']:>+7.2f}$ | {c_signals:>7} | {c['trades']:>6} | {c['wins']:>4} | {c_losses:>5} | {wr:>6.1f}%")
+        ch_tot_pnl += c['pnl']
+        ch_tot_signals += c_signals
+        ch_tot_trades += c['trades']
+        ch_tot_wins += c['wins']
+        ch_tot_losses += c_losses
+    ch_tot_wr = ch_tot_wins / ch_tot_trades * 100 if ch_tot_trades > 0 else 0
+    lines.append("-" * 60)
+    lines.append(f"{'TOTAL':<10} | {ch_tot_pnl:>+7.2f}$ | {ch_tot_signals:>7} | {ch_tot_trades:>6} | {ch_tot_wins:>4} | {ch_tot_losses:>5} | {ch_tot_wr:>6.1f}%")
     return '\n'.join(lines)
 
 
@@ -342,13 +371,22 @@ def report_daily_closes(tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: flo
 def report_daily_by_signal_type(signal_types: list) -> str:
     """signal_types = [{type, channels, trades, wins, losses, pnl, avg_win, avg_loss}]"""
     lines = ["📊 PAR TYPE DE SIGNAL", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Signal':<8} | {'Canaux':>6} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'WR':>4} | {'Gain':>7} | {'Perte':>7}")
-    lines.append("-" * 70)
+    lines.append(f"{'Signal':<8} | {'Canaux':>6} | {'P&L':>8} | {'Signaux':>7} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'WR':>4}")
+    lines.append("-" * 65)
+    tot_pnl = 0.0
+    tot_trades = 0
+    tot_wins = 0
+    tot_losses = 0
     for st in signal_types:
         wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
-        avg_win = st.get('avg_win', 0)
-        avg_loss = st.get('avg_loss', 0)
-        lines.append(f"{st['type']:<8} | {st['channels']:>6} | {st['pnl']:>+7.2f}$ | {st['trades']:>6} | {st['wins']:>4} | {st['losses']:>5} | {wr:>3.0f}% | {avg_win:>+6.1f}$ | {avg_loss:>+6.1f}$")
+        lines.append(f"{st['type']:<8} | {st['channels']:>6} | {st['pnl']:>+7.2f}$ | {st['trades']:>7} | {st['trades']:>6} | {st['wins']:>4} | {st['losses']:>5} | {wr:>3.0f}%")
+        tot_pnl += st['pnl']
+        tot_trades += st['trades']
+        tot_wins += st['wins']
+        tot_losses += st['losses']
+    tot_wr = tot_wins / tot_trades * 100 if tot_trades > 0 else 0
+    lines.append("-" * 65)
+    lines.append(f"{'TOTAL':<8} | {'-':>6} | {tot_pnl:>+7.2f}$ | {tot_trades:>7} | {tot_trades:>6} | {tot_wins:>4} | {tot_losses:>5} | {tot_wr:>3.0f}%")
     return '\n'.join(lines)
 
 
