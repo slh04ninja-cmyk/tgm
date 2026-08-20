@@ -1,23 +1,7 @@
 """
 =============================================================
  TELEGRAM → MT5 | Bot Trading
- Version 15.0.0 — Canaux depuis Channels.txt
-=============================================================
-MODIFICATIONS v14.0.0 (depuis v13.0.0) :
-
-■ NOUVEAU : Lecture des canaux depuis Channels.txt
-- Numérotation persistante (même après redémarrage)
-- Plus de dépendance au dossier Telegram pour la numérotation
-- Fallback sur TG_FOLDER si Channels.txt absent
-- Fallback sur TG_CHANNEL_* si TG_FOLDER non défini
-
-■ HÉRITÉ DE V12 :
-- Chargement dynamique des canaux (scan TG_CHANNEL_*)
-- News filtrées par jour de trading
-- QA sans prix (MP) / avec prix (AL1/AL2)
-- Tolérance SELL corrigée
-- Déduplication robuste
-- Code mort supprimé (-452 lignes)
+ Version 17.0.0 
 =============================================================
 """
 
