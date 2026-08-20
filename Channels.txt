@@ -1,4 +1,0 @@
-# Canaux Telegram — Numérotation persistante
-# Format: Canal_N : -100XXXXXXXXXX # NomDuCanal
-# Ce fichier est mis à jour automatiquement par le bot au démarrage
-# Ne pas modifier manuellement si TG_FOLDER est défini dans .env
