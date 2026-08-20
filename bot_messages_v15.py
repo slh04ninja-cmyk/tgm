@@ -1,12 +1,11 @@
 """
 =============================================================
  BOT_MESSAGES.PY — Textes des logs et alertes Telegram
- Version v12.1.0 — Formats d'alertes mis à jour
+ Version v15.0.0 — Formats d'alertes mis à jour
 =============================================================
 Centralise tous les textes affichés (console + Telegram) pour pouvoir
 les modifier facilement SANS toucher à la logique de trading.
 
-v12.1.0 :
 - Formats d'alertes harmonisés: SYMBOL | ACTION | COMMENT
 - Prix sans @
 - Clôtures: ACTION | COMMENT | LABEL
@@ -82,12 +81,12 @@ def alert_be_activated(action: str, symbol: str, nb_pos: int, sl_price: float, t
 # 3. SIGNAUX (ZN1/ZN2, PU1/PU2, AL-MP)
 # =============================================================
 def log_signal_detected(mt5_comment: str, action: str, entry_price) -> str:
-    return f"=== || {mt5_comment} | {action} | {entry_price} || ==="
+    return f"==|| {mt5_comment} | {action} | P={entry_price} ||=="
 
 
 def log_signal_detected_zone(mt5_comment: str, action: str, zone_low: float, zone_high: float) -> str:
     """Log de détection pour les signaux zone."""
-    return f"=== || {mt5_comment} | {action} | zone={zone_low}-{zone_high} || ==="
+    return f"==|| {mt5_comment} | {action} | Z={zone_low}-{zone_high} ||=="
 
 
 def log_order_placed(mt5_comment: str, order_type: str, ticket: int, price, sl) -> str:
