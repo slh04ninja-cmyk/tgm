@@ -212,9 +212,9 @@ Telegram (canaux configurés) → Signal Parser → MT5 Bridge → MetaTrader 5
 
 | Fichier | Lignes | Description |
 |---|---|---|
-| `telegram_listener_v16.py` | ~3300 | Cœur du bot (MARKET+LIMIT, TP dynamique, P&L close) |
-| `signal_parser.py` | — | Parser signaux |
-| `bot_messages.py` | — | Logs, alertes |
+| `telegram_listener_v16.py` | - | Cœur du bot (MARKET+LIMIT, TP dynamique, P&L close) |
+| `signal_parser_v15.py` | — | Parser signaux |
+| `bot_messages_v15.py` | — | Logs, alertes |
 | `bot_documentation_v16.html` | ~640 | Documentation HTML complète |
 | `.env` | — | Configuration |
 | `CONTEXT.md` | — | Ce fichier |
@@ -240,7 +240,7 @@ Telegram (canaux configurés) → Signal Parser → MT5 Bridge → MetaTrader 5
 
 | Variable | Défaut | Description |
 |---|---|---|
-| `TP_FIXED_GAIN_USD` | 8.0 | Gain cible par position |
+| `TP_FIXED_GAIN_USD` | 7.0 | Gain cible par position |
 | `TP_MULTIPE1` | 1.5 | Multiplicateur MARKET + L1 |
 | `TP_MULTIPE2` | 2.0 | Multiplicateur MARKET + L1 + L2 |
 
@@ -258,7 +258,7 @@ Telegram (canaux configurés) → Signal Parser → MT5 Bridge → MetaTrader 5
 | Variable | Défaut | Description |
 |---|---|---|
 | `MAGIC_NUMBER` | 20250226 | Identifiant bot MT5 |
-| `MAX_POSITIONS` | 3 | Max signaux actifs |
+| `MAX_POSITIONS` | 30 | Max signaux actifs |
 | `SLIPPAGE` | 20 | Slippage autorisé |
 | `MAX_SPREAD_POINTS` | 50 | Spread max |
 
