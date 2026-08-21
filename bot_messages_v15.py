@@ -63,12 +63,12 @@ def alert_close(label: str, action: str, symbol: str, pnl: float, idx: int, tota
 # 3. SIGNAUX (ZN1/ZN2, PU1/PU2, AL-MP)
 # =============================================================
 def log_signal_detected(mt5_comment: str, action: str, entry_price) -> str:
-    return f"==|| {mt5_comment} | {action} | P={entry_price} ||=="
+    return f"===  {mt5_comment} | {action}  ==="
 
 
 def log_signal_detected_zone(mt5_comment: str, action: str, zone_low: float, zone_high: float) -> str:
     """Log de détection pour les signaux zone."""
-    return f"==|| {mt5_comment} | {action} | Z={zone_low}-{zone_high} ||=="
+    return f"===  {mt5_comment} | {action} | ZN={zone_low}-{zone_high}  ==="
 
 
 # =============================================================
