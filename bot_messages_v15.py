@@ -59,24 +59,6 @@ def alert_close(label: str, action: str, symbol: str, pnl: float, idx: int, tota
 # =============================================================
 # 2. BREAK-EVEN (BE)
 # =============================================================
-def log_be_combined(mt5_comment: str, nb_pos: int, sl_price: float) -> str:
-    return f">>> | {mt5_comment} | BE | SL @{sl_price:.2f}"
-
-
-def alert_be_activated(action: str, symbol: str, nb_pos: int, sl_price: float, target_gain: float,
-                        mt5_comment: str, pending_annules: int = 0) -> str:
-    """Alerte Telegram à l'activation du BE.
-    Format: {emoji} {action} | {mt5_comment} | BE"""
-    tp_price = sl_price + target_gain if action == "BUY" else sl_price - target_gain
-    return (
-        f"🔒 {action} | {mt5_comment} | BE\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"SL → {sl_price:.2f}\n"
-        f"TP → {tp_price:.2f} (+{target_gain:.1f}$)\n"
-        f"Canal: {mt5_comment.split('-')[0] if '-' in mt5_comment else ''}"
-    )
-
-
 # =============================================================
 # 3. SIGNAUX (ZN1/ZN2, PU1/PU2, AL-MP)
 # =============================================================
@@ -87,25 +69,6 @@ def log_signal_detected(mt5_comment: str, action: str, entry_price) -> str:
 def log_signal_detected_zone(mt5_comment: str, action: str, zone_low: float, zone_high: float) -> str:
     """Log de détection pour les signaux zone."""
     return f"==|| {mt5_comment} | {action} | Z={zone_low}-{zone_high} ||=="
-
-
-def log_order_placed(mt5_comment: str, order_type: str, ticket: int, price, sl) -> str:
-    return f">>> | {mt5_comment} | {order_type} #{ticket} @{price} | SL: {sl}"
-
-
-def alert_market_opened(action: str, symbol: str, mt5_comment: str, price: float,
-                         lot: float, ticket: int, tp: float, sl: float, canal: str) -> str:
-    """Alerte Telegram à l'ouverture d'une position MARKET.
-    Format: {emoji} {symbol} | {action} | {mt5_comment}"""
-    emoji = "🟢" if "ZN" in mt5_comment or "PU" in mt5_comment else "⚡"
-    return (
-        f"{emoji} {symbol} | {action} | {mt5_comment}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"MARKET: {price:.2f} | Lot: {lot}\n"
-        f"TICKET: {ticket}\n"
-        f"TP: {tp} | SL: {sl}\n"
-        f"Canal: {canal}"
-    )
 
 
 # =============================================================
@@ -211,10 +174,6 @@ def log_balance_startup(balance: float, daily_pnl: float) -> str:
 # =============================================================
 # 6. NEWS
 # =============================================================
-def log_news_loaded(count: int) -> str:
-    return f" {count} news HIGH impact chargées"
-
-
 def log_news_fetch_error(error: str) -> str:
     return f"[NEWS] Erreur fetch: {error}"
 
@@ -267,128 +226,13 @@ def log_merge_done(action: str, symbol: str) -> str:
 # 9. MULTI-POSITIONS (A/B Testing — P1 à P4b)
 # =============================================================
 
-# --- Ouverture multi-positions ---
-def log_multi_pos_open(action: str, symbol: str, price: float, count: int, methods: str) -> str:
-    return f"Multi-pos {action} {symbol} @{price} × {count} positions | {methods}"
-
-
-def alert_multi_pos_open(symbol: str, action: str, mt5_comment: str, price: float,
-                          lot: float, count: int, methods: str, sl: float, tp: float, canal: str) -> str:
-    return (
-        f"🟢 {symbol} | {action} | {mt5_comment}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"MARKET: {price:.2f} | Lot: {lot} × {count}\n"
-        f"{methods}\n"
-        f"SL: {sl} | TP: {tp}\n"
-        f"Canal: {canal}"
-    )
-
-
-# --- SL plafonné ---
 def log_sl_cap(signal_sl: float, capped: float, distance: float, max_sl: float) -> str:
     return f"[SL CAP] SL plafonné: {signal_sl} → {capped} (distance {distance:.2f}$ > {max_sl}$)"
-
-
-# --- P1 : TP Fixe ---
-
-
-
-
-def alert_p4a_close(ticket: int, profit: float) -> str:
-    return (
-        f"✅ P4a Quick | #{ticket}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"P&L={profit:+.2f}$"
-    )
-
-
-# --- P4b : Partial Trail ---
 
 
 # =============================================================
 # 10. RAPPORT JOURNALIER
 # =============================================================
-def report_daily_summary(date: str, pnl_realise: float, trades: int, wins: int, losses: int,
-                         winrate: float, total_signals: int = 0, max_drawdown: float = 0.0) -> str:
-    return (
-        f"📅 PERFORMANCE DU {date}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"P&L réalisé : {pnl_realise:+.2f}$\n"
-        f"Total signaux : {total_signals} | Total trades : {trades}\n"
-        f"Wins : {wins} | Losses : {losses} | Winrate : {winrate:.1f}%\n"
-        f"Max Drawdown : {max_drawdown:.2f}$"
-    )
-
-
-def report_daily_by_method(methods: list) -> str:
-    """methods = [{name, trades, wins, losses, pnl}]"""
-    lines = ["📊 PAR MÉTHODE", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Méthode':<14} | {'P&L':>8} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
-    lines.append("-" * 55)
-    for m in methods:
-        wr = m['wins'] / m['trades'] * 100 if m['trades'] > 0 else 0
-        m_losses = m.get('losses', m['trades'] - m['wins'])
-        lines.append(f"{m['name']:<14} | {m['pnl']:>+7.2f}$ | {m['trades']:>6} | {m['wins']:>4} | {m_losses:>5} | {wr:>6.1f}%")
-    return '\n'.join(lines)
-
-
-def report_daily_by_channel(channels: list) -> str:
-    """channels = [{ch_num, trades, wins, losses, pnl, name, signals}]"""
-    lines = ["📊 PAR CANAL", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Canal':<10} | {'P&L':>8} | {'Signaux':>7} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'Winrate':>7}")
-    lines.append("-" * 60)
-    ch_tot_pnl = 0.0
-    ch_tot_signals = 0
-    ch_tot_trades = 0
-    ch_tot_wins = 0
-    ch_tot_losses = 0
-    for c in sorted(channels, key=lambda x: x['pnl'], reverse=True):
-        wr = c['wins'] / c['trades'] * 100 if c['trades'] > 0 else 0
-        c_losses = c.get('losses', c['trades'] - c['wins'])
-        c_signals = c.get('signals', 0)
-        lines.append(f"{'CH' + str(c['ch_num']):<10} | {c['pnl']:>+7.2f}$ | {c_signals:>7} | {c['trades']:>6} | {c['wins']:>4} | {c_losses:>5} | {wr:>6.1f}%")
-        ch_tot_pnl += c['pnl']
-        ch_tot_signals += c_signals
-        ch_tot_trades += c['trades']
-        ch_tot_wins += c['wins']
-        ch_tot_losses += c_losses
-    ch_tot_wr = ch_tot_wins / ch_tot_trades * 100 if ch_tot_trades > 0 else 0
-    lines.append("-" * 60)
-    lines.append(f"{'TOTAL':<10} | {ch_tot_pnl:>+7.2f}$ | {ch_tot_signals:>7} | {ch_tot_trades:>6} | {ch_tot_wins:>4} | {ch_tot_losses:>5} | {ch_tot_wr:>6.1f}%")
-    return '\n'.join(lines)
-
-
-def report_daily_closes(tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float) -> str:
-    return (
-        f"📋 CLÔTURES\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"TP : {tp_count} trades | {tp_pnl:+.2f}$\n"
-        f"SL : {sl_count} trades | {sl_pnl:+.2f}$"
-    )
-
-
-def report_daily_by_signal_type(signal_types: list) -> str:
-    """signal_types = [{type, channels, trades, wins, losses, pnl, avg_win, avg_loss}]"""
-    lines = ["📊 PAR TYPE DE SIGNAL", "━━━━━━━━━━━━━━━━━━"]
-    lines.append(f"{'Signal':<8} | {'Canaux':>6} | {'P&L':>8} | {'Signaux':>7} | {'Trades':>6} | {'Win':>4} | {'Loss':>5} | {'WR':>4}")
-    lines.append("-" * 65)
-    tot_pnl = 0.0
-    tot_trades = 0
-    tot_wins = 0
-    tot_losses = 0
-    for st in signal_types:
-        wr = st['wins'] / st['trades'] * 100 if st['trades'] > 0 else 0
-        lines.append(f"{st['type']:<8} | {st['channels']:>6} | {st['pnl']:>+7.2f}$ | {st['trades']:>7} | {st['trades']:>6} | {st['wins']:>4} | {st['losses']:>5} | {wr:>3.0f}%")
-        tot_pnl += st['pnl']
-        tot_trades += st['trades']
-        tot_wins += st['wins']
-        tot_losses += st['losses']
-    tot_wr = tot_wins / tot_trades * 100 if tot_trades > 0 else 0
-    lines.append("-" * 65)
-    lines.append(f"{'TOTAL':<8} | {'-':>6} | {tot_pnl:>+7.2f}$ | {tot_trades:>7} | {tot_trades:>6} | {tot_wins:>4} | {tot_losses:>5} | {tot_wr:>3.0f}%")
-    return '\n'.join(lines)
-
-
 def report_daily_full(date: str, pnl_realise: float, trades: int, wins: int, losses: int,
                       winrate: float, methods: list, channels: list,
                       tp_count: int, tp_pnl: float, sl_count: int, sl_pnl: float,

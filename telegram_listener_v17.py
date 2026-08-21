@@ -160,17 +160,9 @@ TV_STRONG_SELL = int(os.getenv("TV_STRONG_SELL", "15"))   # ≥ 15 SELL → STRO
 TV_SELL = int(os.getenv("TV_SELL", "10"))                 # ≥ 10 SELL → SELL
 TV_NEUTRAL_ALLOW = os.getenv("TV_NEUTRAL_ALLOW", "true").lower() == "true"  # NEUTRAL accepte BUY+SELL
 
-# === CACHE TTL ===
-
-
-# === HEARTBEAT ===
-
-
 # === PARAMÈTRES SL (définis dans .env) ===
 FUSION_TOLERANCE = float(os.getenv("FUSION_TOLERANCE", "3"))
 CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == "true"
-# ★ MODE POSITION UNIQUE : convertit les signaux zone (2 positions) en MARKET seul,
-# et désactive le merge QA+Fusion. Seul le Quick Alert est exécuté.
 
 # === TOLÉRANCES ===
 TOLERANCE_ZN = float(os.getenv("TOLERANCE_ZN", "1.0"))
@@ -1033,7 +1025,7 @@ class MT5Bridge:
         return cancelled
 
 # =============================================================
-# TRADE MANAGER (avec whitelist BE)
+# TRADE MANAGER
 # =============================================================
 class TradeManager:
     def __init__(self, bridge: MT5Bridge, quick_alerts_ref=None):
@@ -1670,7 +1662,7 @@ class TradeManager:
         }
 
     # =============================================================
-    # GESTION DU BE (avec whitelist)
+    # TP DYNAMIQUE
     # =============================================================
     def _recalculate_tp(self, entry: dict):
         """Recalcule le TP dynamique basé sur TP_FIXED_GAIN_USD.
@@ -2677,7 +2669,6 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
         tickets.append({
             "ticket": t, "lot": lot_market, "role": "market",
             "entry_price": current, "tp_final": tp_final,
-            "be_active": False, "be_sl": 0,
         })
         orders_desc.append(f"MK=#{t} @{current}")
         log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final} SL={sl}")
@@ -2739,7 +2730,6 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                         tickets.append({
                             "ticket": result.order, "lot": limit_lot, "role": "limit",
                             "entry_price": limit_price, "tp_final": tp_final,
-                            "be_active": False, "be_sl": 0,
                         })
                         orders_desc.append(f"L{i+1}={result.order} @{limit_price}")
                         log.debug(f"  ✓ LIMIT {i+1} #{result.order} @{limit_price} fill={fill_mode}")
