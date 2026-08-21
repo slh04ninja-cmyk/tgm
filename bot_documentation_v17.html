@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot Trading V17.1 — Documentation</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --orange: #d29922;
+  --purple: #bc8cff;
+  --cyan: #39d2c0;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 2em; margin-bottom: 8px; }
+h2 { font-size: 1.5em; margin: 40px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--accent); }
+h3 { font-size: 1.2em; margin: 24px 0 12px; color: var(--cyan); }
+h4 { font-size: 1em; margin: 16px 0 8px; color: var(--orange); }
+p { margin: 8px 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { background: var(--card); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; font-family: 'Fira Code', monospace; }
+pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0; font-size: 0.85em; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+th, td { padding: 10px 12px; text-align: left; border: 1px solid var(--border); }
+th { background: var(--card); color: var(--accent); font-weight: 600; }
+tr:nth-child(even) { background: rgba(22, 27, 34, 0.5); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }
+.badge-buy { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+.badge-sell { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+.badge-info { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
+.badge-warn { background: rgba(210, 153, 34, 0.2); color: var(--orange); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; }
+.card-title { font-weight: 600; margin-bottom: 8px; }
+.example { background: var(--card); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 12px 16px; margin: 12px 0; }
+.example-buy { border-left-color: var(--green); }
+.example-sell { border-left-color: var(--red); }
+.log { font-family: 'Fira Code', monospace; font-size: 0.85em; color: var(--muted); }
+.log .accept { color: var(--green); }
+.log .refuse { color: var(--red); }
+.log .fusion { color: var(--purple); }
+.log .signal { color: var(--cyan); }
+.nav { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--border); padding: 12px 0; z-index: 100; margin-bottom: 20px; }
+.nav-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.nav-links a { padding: 4px 12px; border-radius: 6px; background: var(--card); border: 1px solid var(--border); font-size: 0.85em; }
+.nav-links a:hover { background: var(--border); text-decoration: none; }
+.toc { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 16px 0; }
+.toc ul { list-style: none; padding-left: 16px; }
+.toc li { margin: 4px 0; }
+.flow { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; font-family: monospace; font-size: 0.85em; white-space: pre; line-height: 1.8; overflow-x: auto; }
+.version { color: var(--muted); font-size: 0.9em; }
+.header { padding: 40px 0 20px; }
+.header p { color: var(--muted); font-size: 1.1em; }
+hr { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+.env-var { font-family: monospace; color: var(--cyan); }
+.env-val { font-family: monospace; color: var(--orange); }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+<h1> TELEGRAM → MT5 | Bot Trading</h1>
+<p class="version">Version 17.1.0 — Documentation complète</p>
+<p>Bot de copy trading Telegram → MetaTrader 5 pour XAUUSD (Gold) et autres paires.</p>
+</div>
+
+<div class="nav">
+<div class="nav-links">
+<a href="#architecture">Architecture</a>
+<a href="#signaux">Signaux</a>
+<a href="#filtres">Filtres</a>
+<a href="#trades">Trades</a>
+<a href="#fusion">Fusion</a>
+<a href="#tp-dynamique">TP Dynamique</a>
+<a href="#news">News</a>
+<a href="#rapports">Rapports</a>
+<a href="#config">Config</a>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="architecture">1. Architecture</h2>
+
+<div class="flow">
+Telegram (canaux configurés)
+        │
+        ▼
+   Signal Parser (signal_parser_v15.py)
+        │
+        ▼
+   Filtres (Horaire → News → TradingView → P&L → Conflit)
+        │
+        ▼
+   ┌─────────────────────────────────────┐
+   │  Signal Type?                       │
+   │  ├─ TRADE → execute_signal()        │
+   │  ├─ CLOSE → bridge.close_all()      │
+   │  └─ SL_MOVE → bridge.update_sl()    │
+   └─────────────────────────────────────┘
+        │
+        ▼
+   MT5 Bridge → MetaTrader 5 (MARKET + LIMIT orders)
+        │
+        ▼
+   Trade Manager (polling 1s)
+   ├─ TP Dynamique (recalcul si LIMIT rempli)
+   ├─ P&L Cible (fermeture automatique)
+   └─ Fin de journée (rapport PDF + XLSX)
+</div>
+
+<h3>Composants principaux</h3>
+<table>
+<tr><th>Composant</th><th>Fichier</th><th>Rôle</th></tr>
+<tr><td>Listener</td><td><code>telegram_listener_v17.py</code></td><td>Cœur du bot — écoute Telegram, exécute les trades</td></tr>
+<tr><td>Parser</td><td><code>signal_parser_v15.py</code></td><td>Parse les messages texte en objets TradeSignal</td></tr>
+<tr><td>Messages</td><td><code>bot_messages_v15.py</code></td><td>Templates des logs et alertes Telegram</td></tr>
+<tr><td>Channels</td><td><code>Channels.txt</code></td><td>Mapping persistant des canaux Telegram</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="signaux">2. Types de Signaux</h2>
+
+<h3>2.1 Signal ZONE (ZN)</h3>
+<p>Signal avec une zone de prix (2 prix différents). Le bot ouvre MARKET si le prix est dans la zone, sinon LIMIT seuls.</p>
+
+<div class="example example-buy">
+<div class="card-title"><span class="badge badge-buy">BUY</span> Exemple ZN</div>
+<p><strong>Message Telegram :</strong></p>
+<pre><code>GOLD BUY
+Entry: 3345 - 3350
+TP1: 3360
+TP2: 3370
+SL: 3335</code></pre>
+<p><strong>Parsing :</strong> zone_low=3345, zone_high=3350, zone_mid=3347.50</p>
+<p><strong>Logs :</strong></p>
+<div class="log">
+<span class="signal">=== CH5-ZN | BUY | ZN=3345.0-3350.0 ===</span><br>
+<span class="accept">CH5-ZN | ACCEPTE | MK=3348.5 | L1=3345.5 | L2=3342.5</span>
+</div>
+<p><strong>Ordres placés :</strong></p>
+<table>
+<tr><th>Ordre</th><th>Prix</th><th>Lot</th><th>Comment MT5</th></tr>
+<tr><td>MARKET</td><td>3348.50</td><td>0.01</td><td>CH5-ZN-MK</td></tr>
+<tr><td>LIMIT 1 (Buy Limit)</td><td>3345.50</td><td>0.01</td><td>CH5-ZN-L1</td></tr>
+<tr><td>LIMIT 2 (Buy Limit)</td><td>3342.50</td><td>0.01</td><td>CH5-ZN-L2</td></tr>
+</table>
+</div>
+
+<div class="example example-sell">
+<div class="card-title"><span class="badge badge-sell">SELL</span> Exemple ZN</div>
+<p><strong>Message Telegram :</strong></p>
+<pre><code>GOLD SELL
+Zone: 3380-3385
+TP: 3360
+SL: 3395</code></pre>
+<p><strong>Parsing :</strong> zone_low=3380, zone_high=3385</p>
+<p><strong>Si prix actuel = 3382 (dans la zone) :</strong></p>
+<div class="log">
+<span class="signal">=== CH7-ZN | SELL | ZN=3380.0-3385.0 ===</span><br>
+<span class="accept">CH7-ZN | ACCEPTE | MK=3382.0 | L1=3385.0 | L2=3388.0</span>
+</div>
+<p><strong>Si prix actuel = 3386 (légèrement au-dessus, dans TOLERANCE_ZN) :</strong></p>
+<div class="log">
+<span class="signal">=== CH7-ZN | SELL | ZN=3380.0-3385.0 ===</span><br>
+<span class="accept">CH7-ZN | ACCEPTE | L1=3389.0 | L2=3392.0</span>
+</div>
+<p><em>Seuls les LIMITs sont placés (pas de MARKET).</em></p>
+</div>
+
+<h3>2.2 Signal PRIX UNIQUE (PU)</h3>
+<p>Signal avec un seul prix d'entrée. Le bot crée une zone autour de ce prix (±TOLERANCE_PU).</p>
+
+<div class="example example-buy">
+<div class="card-title"><span class="badge badge-buy">BUY</span> Exemple PU</div>
+<p><strong>Message Telegram :</strong></p>
+<pre><code>BUY GOLD @ 3350
+TP1: 3365
+SL: 3340</code></pre>
+<p><strong>Parsing :</strong> entry=3350, is_single_price=True</p>
+<p><strong>Zone créée :</strong> [3347.0, 3353.0] (3350 ± TOLERANCE_PU=3.0)</p>
+<p><strong>Si prix actuel = 3351 (dans la zone) :</strong></p>
+<div class="log">
+<span class="signal">=== CH2-PU | BUY | P=3350.0 ===</span><br>
+<span class="accept">CH2-PU | ACCEPTE | MK=3351.0 | L1=3348.0 | L2=3345.0</span>
+</div>
+</div>
+
+<h3>2.3 Quick Alert (AL) — Prix Unique sans SL/TP</h3>
+<p>Signal rapide sans SL ni TP explicites. Le bot génère automatiquement SL (±10$) et TP (TP_FIXED_GAIN_USD).</p>
+
+<div class="example example-buy">
+<div class="card-title"><span class="badge badge-buy">BUY</span> Exemple Quick Alert</div>
+<p><strong>Message Telegram :</strong></p>
+<pre><code>GOLD BUY 3350</code></pre>
+<p><strong>Parsing :</strong> Aucun TP ni SL → is_quick_alert=True</p>
+<p><strong>Génération auto :</strong></p>
+<table>
+<tr><th>Champ</th><th>Valeur</th><th>Logique</th></tr>
+<tr><td>SL</td><td>3340.00</td><td>entry - QUICK_ALERT_SL_OFFSET (10$)</td></tr>
+<tr><td>TP</td><td>3358.00</td><td>entry + TP_FIXED_GAIN_USD (8$)</td></tr>
+</table>
+<div class="log">
+<span class="signal">=== CH3-AL | BUY | P=3350.0 ===</span><br>
+<span class="accept">CH3-AL | ACCEPTE | MK=3350.0 | L1=3347.0 | L2=3344.0</span>
+</div>
+</div>
+
+<h3>2.4 Market Price (MP) — Signal sans prix</h3>
+<p>Signal sans aucun prix (ex: "BUY NOW"). Le bot exécute au prix actuel du marché.</p>
+
+<div class="example example-buy">
+<div class="card-title"><span class="badge badge-buy">BUY</span> Exemple Market Price</div>
+<p><strong>Message Telegram :</strong></p>
+<pre><code>GOLD BUY NOW</code></pre>
+<p><strong>Parsing :</strong> Aucun prix, Aucun TP/SL → is_market_price=True</p>
+<p><strong>Si prix actuel = 3348.50 :</strong></p>
+<div class="log">
+<span class="signal">=== CH3-MP | BUY ===</span><br>
+<span class="accept">CH3-MP | ACCEPTE | MK=3348.5 | L1=3345.5 | L2=3342.5</span>
+</div>
+<p><strong>Zone MP :</strong> [3345.5, 3348.5] (current - TOLERANCE_MP à current)</p>
+</div>
+
+<h3>2.5 Signal CLOSE</h3>
+<p>Ferme les positions ouvertes. Peut cibler un symbole spécifique ou tout fermer.</p>
+
+<table>
+<tr><th>Format</th><th>Action</th></tr>
+<tr><td><code>CLOSE</code></td><td>Ferme toutes les positions du canal</td></tr>
+<tr><td><code>CLOSE GOLD</code></td><td>Ferme les positions XAUUSD du canal</td></tr>
+<tr><td><code>CLOSE ALL</code></td><td>Ferme toutes les positions du canal</td></tr>
+<tr><td><code>CLOSE NOW</code></td><td>Idem CLOSE</td></tr>
+</table>
+
+<h3>2.6 Signal SL_MOVE</h3>
+<p>Déplace le SL d'une position existante.</p>
+<pre><code>SL MOVE 3340
+SL → 3340
+NEW SL: 3340</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="filtres">3. Filtres</h2>
+<p>Les signaux passent par une chaîne de filtres avant exécution. Chaque filtre peut bloquer le signal.</p>
+
+<div class="flow">
+Signal reçu
+    │
+    ├─ Filtre Horaire ───→ REFUSÉ HORAIRE (hors plage 3h-20h UTC)
+    │
+    ├─ Filtre News ──────→ REFUSÉ PROTECTION NEWS
+    │
+    ├─ Filtre TradingView → REFUSÉ TV OPPOSÉ
+    │
+    ├─ Filtre P&L Quotidien → REFUSÉ LIMITE P&L
+    │
+    ├─ Filtre Conflit ───→ Conflit détecté → ferme l'ancien
+    │
+    └─ Exécution du trade
+</div>
+
+<h3>3.1 Filtre Horaire</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">TIME_FILTER_ENABLED</td><td class="env-val">true</td><td>Active le filtre</td></tr>
+<tr><td class="env-var">TRADING_START_HOUR</td><td class="env-val">3</td><td>Heure de début (UTC)</td></tr>
+<tr><td class="env-var">TRADING_END_HOUR</td><td class="env-val">20</td><td>Heure de fin (UTC)</td></tr>
+</table>
+<p>À TRADING_END_HOUR, le bot ferme automatiquement toutes les positions et génère le rapport quotidien.</p>
+
+<h3>3.2 Filtre News</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">NEWS_FILTER_ENABLED</td><td class="env-val">false</td><td>Active le filtre</td></tr>
+<tr><td class="env-var">NEWS_MIN_IMPACT</td><td class="env-val">high</td><td>Impact minimum (low/medium/high)</td></tr>
+<tr><td class="env-var">NEWS_WINDOW_BEFORE_BLOCK</td><td class="env-val">15</td><td>Bloquer signaux X min avant</td></tr>
+<tr><td class="env-var">NEWS_WINDOW_BEFORE_CLOSE</td><td class="env-val">5</td><td>Fermer positions X min avant</td></tr>
+<tr><td class="env-var">NEWS_WINDOW_AFTER</td><td class="env-val">15</td><td>Reprendre X min après</td></tr>
+</table>
+
+<h3>3.3 Filtre TradingView (26 indicateurs)</h3>
+<p>Consensus de 26 indicateurs techniques (11 oscillateurs + 15 moyennes mobiles).</p>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">TV_FILTER_ENABLED</td><td class="env-val">false</td><td>Active le filtre</td></tr>
+<tr><td class="env-var">TV_FILTER_SYMBOL</td><td class="env-val">GOLD</td><td>Symbole à analyser</td></tr>
+<tr><td class="env-var">TV_FILTER_TIMEFRAME</td><td class="env-val">5m</td><td>Timeframe (1m, 5m, 15m, 1h, 4h, 1d)</td></tr>
+<tr><td class="env-var">TV_STRONG_BUY</td><td class="env-val">15</td><td>≥ 15 votes BUY → STRONG_BUY</td></tr>
+<tr><td class="env-var">TV_BUY</td><td class="env-val">10</td><td>≥ 10 votes BUY → BUY</td></tr>
+<tr><td class="env-var">TV_NEUTRAL_ALLOW</td><td class="env-val">true</td><td>NEUTRAL accepte BUY et SELL</td></tr>
+</table>
+<p><strong>Blocage :</strong> Signal BUY + consensus SELL/STRONG_SELL → bloqué. Idem pour SELL + BUY/STRONG_BUY.</p>
+
+<h3>3.4 Filtre P&L Quotidien</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">DAILY_PROFIT_LIMIT</td><td class="env-val">200.0</td><td>Objectif P&L quotidien ($)</td></tr>
+</table>
+<p>Quand le P&L réalisé + flottant atteint la limite, toutes les positions sont fermées et le trading est arrêté pour la journée.</p>
+
+<h3>3.5 Filtre Conflit</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">CONFLIT_FILTER_ENABLED</td><td class="env-val">true</td><td>Active le filtre</td></tr>
+</table>
+<p>Scopé au même canal : si un signal BUY arrive alors qu'une position SELL existe sur le même canal, l'ancienne est fermée.</p>
+
+<h3>3.6 Filtre Spread</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">MAX_SPREAD_POINTS</td><td class="env-val">50</td><td>Spread maximum autorisé (points)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="trades">4. Gestion des Trades — MARKET + LIMIT</h2>
+
+<h3>4.1 Principe</h3>
+<p>Chaque signal ouvre <strong>1 ordre MARKET</strong> (exécution immédiate) + <strong>N ordres LIMIT</strong> (pullback à meilleur prix).</p>
+
+<table>
+<tr><th>Ordre</th><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td>MARKET</td><td class="env-var">LOT_MARKET</td><td class="env-val">0.01</td><td>Exécution immédiate au prix actuel</td></tr>
+<tr><td>LIMIT 1</td><td class="env-var">LOT_LIMIT1</td><td class="env-val">0.01</td><td>À current ± LIMIT_OFFSET_1</td></tr>
+<tr><td>LIMIT 2</td><td class="env-var">LOT_LIMIT2</td><td class="env-val">0.01</td><td>À current ± LIMIT_OFFSET_2</td></tr>
+</table>
+
+<h3>4.2 Offsets</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>BUY</th><th>SELL</th></tr>
+<tr><td class="env-var">LIMIT_OFFSET_1</td><td class="env-val">3.0</td><td>LIMIT en dessous du prix (achat moins cher)</td><td>LIMIT au-dessus du prix (vente plus cher)</td></tr>
+<tr><td class="env-var">LIMIT_OFFSET_2</td><td class="env-val">6.0</td><td>LIMIT en dessous du prix</td><td>LIMIT au-dessus du prix</td></tr>
+</table>
+
+<h3>4.3 Identification MT5</h3>
+<pre><code>CH5-ZN-MK  ← Canal 5, Zone, Market
+CH5-ZN-L1  ← Canal 5, Zone, Limit 1
+CH5-ZN-L2  ← Canal 5, Zone, Limit 2
+CH3-MP-MK  ← Canal 3, Market Price, Market
+CH3-QA-L1  ← Canal 3, Quick Alert, Limit 1</code></pre>
+
+<h3>4.4 Scénarios de remplissage</h3>
+
+<div class="example example-buy">
+<div class="card-title"><span class="badge badge-buy">BUY</span> Scénario complet — XAUUSD</div>
+<p><strong>Signal :</strong> BUY zone 3345-3350, SL 3335, TP_FIXED_GAIN_USD=8$</p>
+<p><strong>Prix actuel :</strong> 3348.50</p>
+
+<table>
+<tr><th>Cas</th><th>Positions actives</th><th>Description</th><th>TP Dynamique</th></tr>
+<tr><td>Cas 1</td><td>MARKET seul</td><td>Prix ne revient pas</td><td>TP = avg_entry + 8.0$ (×1.0)</td></tr>
+<tr><td>Cas 2</td><td>MARKET + L1</td><td>Prix revient partiellement</td><td>TP = avg_entry + 16.0$ (×2.0)</td></tr>
+<tr><td>Cas 3</td><td>MARKET + L1 + L2</td><td>Prix revient fort</td><td>TP = avg_entry + 24.0$ (×3.0)</td></tr>
+</table>
+</div>
+
+<h3>4.5 Expiration des LIMIT</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">LIMIT_EXPIRY_MIN</td><td class="env-val">30</td><td>Durée de vie des ordres LIMIT (minutes)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="fusion">5. Fusion QA/MP + Signal PU/ZN</h2>
+
+<h3>5.1 Principe</h3>
+<p>Quand un Quick Alert (QA) ou Market Price (MP) est ouvert sur un canal, et qu'un signal PU/ZN arrive du <strong>même canal</strong> :</p>
+
+<div class="flow">
+Signal PU/ZN reçu sur CH5
+        │
+        ▼
+Existe-t-il un MARKET CH5-MP-MK ou CH5-QA-MK ?
+        │
+   ┌────┴────┐
+   │         │
+  NON       OUI
+   │         │
+   │         ▼
+   │    Le prix du MARKET est-il dans la zone du signal ?
+   │         │
+   │    ┌────┴────┐
+   │    │         │
+   │   OUI       NON
+   │    │         │
+   │    ▼         ▼
+   │  IGNORER   IGNORER HORS ZONE
+   │  (signal   (→ _close_previous_signal
+   │   inutile)    + execute_signal)
+   │
+   ▼
+execute_signal() normal
+</div>
+
+<h3>5.2 Exemples</h3>
+
+<div class="example example-buy">
+<div class="card-title">Fusion ACCEPTE — MARKET dans la zone</div>
+<div class="log">
+<span class="signal">=== CH3-MP | BUY ===</span><br>
+<span class="accept">CH3-MP | ACCEPTE | MK=3348.50 | L1=3345.50 | L2=3342.50</span><br>
+<i>... quelques minutes plus tard ...</i><br>
+<span class="signal">=== CH3-ZN | BUY | ZN=3347.0-3352.0 ===</span><br>
+<span class="fusion">CH3-MP | FUSION ACCEPTE |</span>
+</div>
+<p><strong>Explication :</strong> Le MARKET à 3348.50 est dans la zone [3347.0, 3352.0]. Le signal ZN est ignoré, la position existante couvre déjà la zone.</p>
+</div>
+
+<div class="example example-sell">
+<div class="card-title">Fusion IGNORE HORS ZONE</div>
+<div class="log">
+<span class="signal">=== CH3-MP | BUY ===</span><br>
+<span class="accept">CH3-MP | ACCEPTE | MK=3348.50 | L1=3345.50 | L2=3342.50</span><br>
+<i>... le prix monte, puis un nouveau signal ...</i><br>
+<span class="signal">=== CH3-ZN | BUY | ZN=3360.0-3365.0 ===</span><br>
+<span class="fusion">CH3-MP | FUSION IGNORE HORS ZONE |</span><br>
+<span class="accept">CH3-ZN | ACCEPTE | MK=3362.0 | L1=3359.0 | L2=3356.0</span>
+</div>
+<p><strong>Explication :</strong> Le MARKET à 3348.50 est HORS zone [3360.0, 3365.0]. L'ancien est fermé, le nouveau est exécuté (double signal).</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tp-dynamique">6. TP Dynamique</h2>
+
+<h3>6.1 Principe</h3>
+<p>Le TP n'est <strong>pas celui du signal</strong>. Il est calculé dynamiquement en fonction de <code>TP_FIXED_GAIN_USD</code> et du nombre de positions actives.</p>
+
+<h3>6.2 Formule</h3>
+<pre><code>pnl_cible = TP_FIXED_GAIN_USD × multiplicateur
+price_movement = pnl_cible / nb_positions
+TP = average_entry ± price_movement</code></pre>
+
+<h3>6.3 Multiplicateurs</h3>
+<table>
+<tr><th>Cas</th><th>Positions</th><th>Variable</th><th>Défaut</th><th>pnl_cible</th></tr>
+<tr><td>Cas 1</td><td>MARKET seul</td><td>—</td><td>×1.0</td><td>TP_FIXED_GAIN_USD × 1</td></tr>
+<tr><td>Cas 2</td><td>MARKET + L1</td><td class="env-var">TP_MULTIPE1</td><td class="env-val">2.0</td><td>TP_FIXED_GAIN_USD × 2</td></tr>
+<tr><td>Cas 3</td><td>MARKET + L1 + L2</td><td class="env-var">TP_MULTIPE2</td><td class="env-val">3.0</td><td>TP_FIXED_GAIN_USD × 3</td></tr>
+</table>
+
+<h3>6.4 Average Entry Pondéré</h3>
+<pre><code>average_entry = (entry_MK × lot_MK + entry_L1 × lot_L1 + entry_L2 × lot_L2) / total_lot</code></pre>
+
+<h3>6.5 Exemple complet</h3>
+<div class="example example-buy">
+<div class="card-title"><span class="badge badge-buy">BUY</span> TP Dynamique — Cas 2</div>
+<pre><code>TP_FIXED_GAIN_USD = 8.0
+TP_MULTIPE1 = 2.0
+
+MARKET @ 3348.50 (lot 0.01)
+LIMIT 1 @ 3345.50 (lot 0.01) → rempli !
+
+average_entry = (3348.50 + 3345.50) / 2 = 3347.00
+pnl_cible = 8.0 × 2.0 = 16.0$
+price_movement = 16.0 / 2 = 8.0
+TP = 3347.00 + 8.0 = 3355.00
+
+Vérification (0.01 lot = 1 oz) :
+  MK : (3355.00 - 3348.50) × 1 = +6.50$
+  L1 : (3355.00 - 3345.50) × 1 = +9.50$
+  Total = +16.00$ ✅</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="news">7. Filtre News</h2>
+
+<h3>7.1 Fenêtres de protection</h3>
+<div class="flow">
+        ← AFTER_MIN →|←  NEWS  →|← BLOCK_MIN →|← CLOSE_MIN →|
+        |____________|___________|______________|______________|
+        Reprise      Événement   Bloquer       Fermer
+        (après)                  signaux       positions
+</div>
+
+<h3>7.2 Cycle de vérification</h3>
+<table>
+<tr><th>Action</th><th>Fréquence</th></tr>
+<tr><td>Fetch calendrier (ff_calendar_thisweek.json)</td><td>Toutes les 30 minutes</td></tr>
+<tr><td>Vérification des fenêtres</td><td>Toutes les 30 secondes</td></tr>
+<tr><td>Re-fetch forcé (nouveau jour de trading)</td><td>1× par jour</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="rapports">8. Rapports Quotidiens</h2>
+
+<h3>8.1 Déclenchement</h3>
+<p>Le rapport est généré automatiquement à <code>TRADING_END_HOUR</code> (défaut 20h UTC).</p>
+
+<h3>8.2 Contenu</h3>
+<table>
+<tr><th>Section</th><th>Données</th></tr>
+<tr><td>Résumé</td><td>P&L réalisé, trades, wins, losses, winrate, max drawdown</td></tr>
+<tr><td>Par méthode</td><td>Stats par type de signal (ZN, PU, MP, AL)</td></tr>
+<tr><td>Par canal</td><td>Stats par canal Telegram (CH1, CH2, ...)</td></tr>
+<tr><td>Clôtures</td><td>TP count/P&L, SL count/P&L</td></tr>
+</table>
+
+<h3>8.3 Formats</h3>
+<table>
+<tr><th>Format</th><th>Fichier</th><th>Description</th></tr>
+<tr><td>Alerte Telegram</td><td>—</td><td>Message texte dans le canal de rapport</td></tr>
+<tr><td>PDF</td><td><code>daily_report_YYYY-MM-DD.pdf</code></td><td>Rapport détaillé avec tableaux</td></tr>
+<tr><td>XLSX</td><td><code>deals_YYYY-MM-DD.xlsx</code></td><td>Export des deals MT5 (Positions + Deals + Results)</td></tr>
+</table>
+
+<h3>8.4 Variables d'alertes</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">LOG_TRADE_MANAGEMENT</td><td class="env-val">true</td><td>Logs dans la console</td></tr>
+<tr><td class="env-var">ALERT_TRADE_MANAGEMENT</td><td class="env-val">true</td><td>Alertes Telegram pour chaque trade</td></tr>
+<tr><td class="env-var">ALERT_DAILY_PERFORMANCE</td><td class="env-val">true</td><td>Rapport quotidien Telegram + PDF + XLSX</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="config">9. Configuration complète (.env)</h2>
+
+<h3>9.1 Connexion Telegram</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">TG_API_ID</td><td class="env-val">—</td><td>API ID Telegram (my.telegram.org)</td></tr>
+<tr><td class="env-var">TG_API_HASH</td><td class="env-val">—</td><td>API Hash Telegram</td></tr>
+<tr><td class="env-var">TG_CHANNEL</td><td class="env-val">—</td><td>ID du canal principal</td></tr>
+<tr><td class="env-var">TG_CHANNEL_N</td><td class="env-val">—</td><td>Canaux supplémentaires (TG_CHANNEL_2, _3, ...)</td></tr>
+<tr><td class="env-var">TG_FOLDER</td><td class="env-val">—</td><td>Dossier Telegram (alternative aux CHANNEL)</td></tr>
+<tr><td class="env-var">TG_ALERT_CHANNEL</td><td class="env-val">—</td><td>Canal pour les alertes et rapports</td></tr>
+</table>
+
+<h3>9.2 Connexion MT5</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">MT5_LOGIN</td><td class="env-val">0</td><td>Numéro de compte MT5</td></tr>
+<tr><td class="env-var">MT5_PASSWORD</td><td class="env-val">—</td><td>Mot de passe MT5</td></tr>
+<tr><td class="env-var">MT5_SERVER</td><td class="env-val">—</td><td>Serveur MT5 (ex: Exness-MT5Trial9)</td></tr>
+<tr><td class="env-var">MT5_PATH</td><td class="env-val">C:\...\terminal64.exe</td><td>Chemin de l'exécutable MT5</td></tr>
+</table>
+
+<h3>9.3 Trading</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">MAGIC_NUMBER</td><td class="env-val">20250226</td><td>Identifiant unique du bot dans MT5</td></tr>
+<tr><td class="env-var">SLIPPAGE</td><td class="env-val">20</td><td>Slippage autorisé (points)</td></tr>
+<tr><td class="env-var">MAX_POSITIONS</td><td class="env-val">3</td><td>Nombre max de signaux actifs simultanés</td></tr>
+<tr><td class="env-var">MAX_SPREAD_POINTS</td><td class="env-val">50</td><td>Spread maximum autorisé</td></tr>
+<tr><td class="env-var">DEMO_MODE</td><td class="env-val">true</td><td>Mode démo (true) ou live (false)</td></tr>
+</table>
+
+<h3>9.4 Lots</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">LOT_MARKET</td><td class="env-val">0.01</td><td>Lot pour les ordres MARKET</td></tr>
+<tr><td class="env-var">LOT_LIMIT1</td><td class="env-val">0.01</td><td>Lot pour LIMIT 1</td></tr>
+<tr><td class="env-var">LOT_LIMIT2</td><td class="env-val">0.01</td><td>Lot pour LIMIT 2</td></tr>
+</table>
+
+<h3>9.5 LIMIT Orders</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">LIMIT_ENABLED</td><td class="env-val">true</td><td>Activer les LIMIT orders</td></tr>
+<tr><td class="env-var">LIMIT_COUNT</td><td class="env-val">2</td><td>Nombre de LIMITs (0, 1 ou 2)</td></tr>
+<tr><td class="env-var">LIMIT_OFFSET_1</td><td class="env-val">3.0</td><td>Offset du 1er LIMIT ($)</td></tr>
+<tr><td class="env-var">LIMIT_OFFSET_2</td><td class="env-val">6.0</td><td>Offset du 2ème LIMIT ($)</td></tr>
+<tr><td class="env-var">LIMIT_EXPIRY_MIN</td><td class="env-val">30</td><td>Expiration des LIMITs (minutes)</td></tr>
+</table>
+
+<h3>9.6 TP Dynamique</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">TP_FIXED_GAIN_USD</td><td class="env-val">8.0</td><td>Gain cible par position ($)</td></tr>
+<tr><td class="env-var">TP_MULTIPE1</td><td class="env-val">2.0</td><td>Multiplicateur MARKET + L1</td></tr>
+<tr><td class="env-var">TP_MULTIPE2</td><td class="env-val">3.0</td><td>Multiplicateur MARKET + L1 + L2</td></tr>
+</table>
+
+<h3>9.7 SL et Tolérances</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">MAX_SL_USD</td><td class="env-val">10.0</td><td>Distance SL maximale ($)</td></tr>
+<tr><td class="env-var">TOLERANCE_ZN</td><td class="env-val">1.0</td><td>Tolérance autour de la zone ($)</td></tr>
+<tr><td class="env-var">TOLERANCE_PU</td><td class="env-val">3.0</td><td>Tolérance signaux Prix Unique ($)</td></tr>
+<tr><td class="env-var">TOLERANCE_MP</td><td class="env-val">5.0</td><td>Tolérance MARKET PRICE ($)</td></tr>
+<tr><td class="env-var">FUSION_TOLERANCE</td><td class="env-val">3.0</td><td>Tolérance de fusion QA+signal ($)</td></tr>
+</table>
+
+<h3>9.8 Quick Alert</h3>
+<table>
+<tr><th>Variable</th><th>Défaut</th><th>Description</th></tr>
+<tr><td class="env-var">QUICK_ALERT_SL_OFFSET</td><td class="env-val">10.0</td><td>SL auto pour les Quick Alerts ($)</td></tr>
+<tr><td class="env-var">QA_PRICE_TOLERANCE</td><td class="env-val">3.0</td><td>Tolérance prix défavorable ($)</td></tr>
+<tr><td class="env-var">TP_DISTANCE_MIN_RATIO</td><td class="env-val">0.3</td><td>Ratio min distance TP restante</td></tr>
+</table>
+
+<hr>
+<p style="text-align: center; color: var(--muted); padding: 20px 0;">
+Bot Trading V17.1.0 — Documentation générée automatiquement<br>
+Dernière mise à jour : Août 2026
+</p>
+
+</div>
+</body>
+</html>
