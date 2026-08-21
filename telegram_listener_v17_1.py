@@ -3818,6 +3818,30 @@ async def main():
                         in_zone, existing_comment = _market_in_zone(canal_name, sig_dict, manager)
                         if existing_comment:
                             if in_zone:
+                                # ★ FUSION ACCEPTE : mettre à jour SL de TOUTES les positions (MK + L1 + L2)
+                                new_sl = sig_dict.get("sl")
+                                if new_sl is not None:
+                                    with manager._lock:
+                                        for entry in manager.active:
+                                            if entry.get("_mt5_comment") != existing_comment:
+                                                continue
+                                            for t in entry.get("tickets", []):
+                                                ticket = t.get("ticket")
+                                                if not ticket:
+                                                    continue
+                                                pos = manager._get_pos(ticket)
+                                                if pos:
+                                                    # Ne modifier que si le nouveau SL est plus restrictif
+                                                    action = sig_dict.get("action", "")
+                                                    if action == "BUY" and new_sl > pos.sl:
+                                                        bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
+                                                        log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
+                                                    elif action == "SELL" and new_sl < pos.sl:
+                                                        bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
+                                                        log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
+                                            # Mettre à jour le signal de l'entrée
+                                            entry["signal"]["sl"] = new_sl
+                                            break
                                 log.info(f"{existing_comment} | FUSION ACCEPTE |")
                                 return  # MARKET déjà dans la zone → ignorer le signal
                             else:
