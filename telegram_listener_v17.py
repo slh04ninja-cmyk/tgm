@@ -2747,7 +2747,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
     return True
 
 
-def execute_signal(signal: dict, bridge: MT5Bridge, manager):
+def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
     action = signal["action"]
     symbol = signal["symbol"]
     zone_low = signal["zone_low"]
@@ -3232,6 +3232,7 @@ async def main():
     bridge = MT5Bridge()
     tv_filter = TradingViewFilter()
     manager = None
+    news_mgr = None
 
     try:
         if not bridge.connect():
@@ -3759,7 +3760,7 @@ async def main():
 
                     if not updated_qa:
                         # Aucun QA trouvé → exécuter le signal complet normalement
-                        execute_signal(sig_dict, bridge, manager)
+                        execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
 
         # Banner
         mode = "🔲 DEMO" if DEMO_MODE else "💰 LIVE"
