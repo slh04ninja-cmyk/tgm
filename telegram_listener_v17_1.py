@@ -2895,7 +2895,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
 
     # ── Signaux Zone ──
     # Prix dans la zone [zone_low, zone_high] → MARKET + LIMITS
-    # Prix légèrement au-dessus (TOLERANCE_ZN) → LIMITS seules
+    # Prix légèrement hors zone (TOLERANCE_ZN) → MARKET + LIMITS aussi
     # Sinon annulé
     if is_zone_signal and len(all_tps) >= 1:
         if action == "BUY":
@@ -2920,15 +2920,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             l1_price = round(current + LIMIT_OFFSET_1, 2)
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-        if in_zone:
-            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
-            _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
-        else:
-            log.info(f"CH{ch_num}-{prefix} | ACCEPTE | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
-            signal_limits_only = dict(signal)
-            _open_market_limit(signal_limits_only, bridge, manager, action, symbol, current,
-                              sl, tp_final, 0, ch_num, canal, prefix, tv_filter=tv_filter)
+        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
+        _open_market_limit(signal, bridge, manager, action, symbol, current,
+                          sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
         return
 
     # ── Prix unique → converti en zone [entry ± TOLERANCE_PU] ──
@@ -2962,14 +2956,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             l1_price = round(current + LIMIT_OFFSET_1, 2)
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-        if in_zone:
-            log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
-            _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
-        else:
-            log.info(f"CH{ch_num}-PU | ACCEPTE | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
-            _open_market_limit(signal, bridge, manager, action, symbol, current,
-                              sl, tp_final, 0, ch_num, canal, prefix, tv_filter=tv_filter)
+        log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
+        _open_market_limit(signal, bridge, manager, action, symbol, current,
+                          sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
         return
 
     # ── Les signaux zone sont convertis en Prix Unique plus haut ──
