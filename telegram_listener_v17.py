@@ -2106,6 +2106,42 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                 return True
     return False
 
+
+def _market_in_zone(canal: str, signal: dict, manager: TradeManager) -> bool:
+    """Verifie si une position MARKET existante (QA/MP) du meme canal est deja dans
+    la zone du nouveau signal PU/ZN. Si oui, le nouveau signal est ignore (pas besoin
+    de fermer/rouvrir — la position existante couvre deja la zone).
+
+    Returns:
+        True si le MARKET entry est dans la zone → ignorer le nouveau signal
+        False sinon → laisser le mecanisme existant gerer le double signal
+    """
+    zone_low = signal.get("zone_low")
+    zone_high = signal.get("zone_high")
+    if zone_low is None or zone_high is None:
+        return False
+
+    with manager._lock:
+        for entry in list(manager.active):
+            sig = entry.get("signal", {})
+            entry_canal = sig.get("source_channel", "Inconnu")
+            if entry_canal != canal:
+                continue
+            # Chercher le ticket MARKET de cette entree
+            mt5_comment = entry.get("_mt5_comment", "")
+            # Ne considerer que les entrees QA/MP (quick alerts)
+            if "-QA" not in mt5_comment and "-MP" not in mt5_comment:
+                continue
+            for t in entry.get("tickets", []):
+                if t.get("role") == "market":
+                    market_entry = t.get("entry_price", 0)
+                    if zone_low <= market_entry <= zone_high:
+                        ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
+                        log.info(f"CH{ch_num} | MARKET #{t['ticket']} @{market_entry} deja dans zone [{zone_low}-{zone_high}] → signal PU/ZN ignoré")
+                        return True
+    return False
+
+
 def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float) -> float:
     """Plafonne le SL à max_sl_usd$ de l'entrée.
     Pour XAUUSD 0.01 lot : 1$ de prix = 1$ de P&L."""
@@ -3759,6 +3795,9 @@ async def main():
                                 break
 
                     if not updated_qa:
+                        # ★ Vérifier si un MARKET existant (QA/MP) couvre déjà la zone
+                        if _market_in_zone(canal_name, sig_dict, manager):
+                            return  # MARKET déjà dans la zone → ignorer le signal
                         # Aucun QA trouvé → exécuter le signal complet normalement
                         execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
 
