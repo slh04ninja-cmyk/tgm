@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rapport 4 Jours — 18-21 Août 2026</title>
+<style>
+:root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f85149; --orange: #d29922; --purple: #bc8cff; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 1.8em; margin-bottom: 4px; }
+h2 { font-size: 1.4em; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); color: var(--accent); }
+h3 { font-size: 1.1em; margin: 20px 0 8px; color: var(--purple); }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.9em; }
+th, td { padding: 8px 10px; text-align: left; border: 1px solid var(--border); }
+th { background: var(--card); color: var(--accent); font-weight: 600; }
+tr:nth-child(even) { background: rgba(22, 27, 34, 0.5); }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin: 12px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+.stat-val { font-size: 1.8em; font-weight: 700; }
+.stat-label { color: var(--muted); font-size: 0.85em; margin-top: 4px; }
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.neu { color: var(--muted); }
+.bar { height: 20px; border-radius: 4px; display: inline-block; min-width: 2px; }
+.bar-pos { background: var(--green); }
+.bar-neg { background: var(--red); }
+.version { color: var(--muted); font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Rapport Quotidien — 4 Jours</h1>
+<p class="version">18 - 21 Août 2026 | Bot Trading V17.1</p>
+
+<div class="grid">
+<div class="stat">
+<div class="stat-val pos">+41.75$</div>
+<div class="stat-label">P&L Total</div>
+</div>
+<div class="stat">
+<div class="stat-val">324</div>
+<div class="stat-label">Trades Totaux</div>
+</div>
+<div class="stat">
+<div class="stat-val">189 / 135</div>
+<div class="stat-label">Wins / Losses</div>
+</div>
+<div class="stat">
+<div class="stat-val pos">58.3%</div>
+<div class="stat-label">Winrate Global</div>
+</div>
+<div class="stat">
+<div class="stat-val neg">-142.49$</div>
+<div class="stat-label">Max Drawdown</div>
+</div>
+<div class="stat">
+<div class="stat-val">166</div>
+<div class="stat-label">Signaux Reçus</div>
+</div>
+</div>
+
+<h2>1. Résumé par Jour</h2>
+<table>
+<tr><th>Date</th><th>P&L</th><th>Signaux</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Winrate</th><th>Max DD</th></tr>
+<tr><td>2026-08-18</td><td class="pos">+116.51$</td><td>47</td><td>97</td><td>66</td><td>31</td><td>68.0%</td><td class="neg">-104.41$</td></tr>
+<tr><td>2026-08-19</td><td class="neg">-106.97$</td><td>70</td><td>135</td><td>70</td><td>65</td><td>51.9%</td><td class="neg">-142.49$</td></tr>
+<tr><td>2026-08-20</td><td class="pos">+38.86$</td><td>25</td><td>45</td><td>28</td><td>17</td><td>62.2%</td><td class="neg">-4.86$</td></tr>
+<tr><td>2026-08-21</td><td class="neg">-6.65$</td><td>24</td><td>47</td><td>25</td><td>22</td><td>53.2%</td><td class="neg">-66.84$</td></tr>
+<tr style="font-weight:700"><td>TOTAL</td><td class="pos">+41.75$</td><td>166</td><td>324</td><td>189</td><td>135</td><td>58.3%</td><td class="neg">-142.49$</td></tr>
+</table>
+
+<h3>Meilleur jour : 2026-08-18 (+116.51$)</h3>
+<h3>Pire jour : 2026-08-19 (-106.97$)</h3>
+
+<h2>2. Performance par Type de Signal</h2>
+<table>
+<tr><th>Signal</th><th>P&L</th><th>Trades</th><th>Wins</th><th>Losses</th><th>Winrate</th><th>18/08</th><th>19/08</th><th>20/08</th><th>21/08</th></tr>
+<tr><td><b>MP</b></td><td class="pos">+80.60$</td><td>145</td><td>84</td><td>61</td><td>57.9%</td><td class="pos">+55.63$</td><td class="neg">-34.51$</td><td class="pos">+33.32$</td><td class="pos">+26.16$</td></tr>
+<tr><td><b>PU</b></td><td class="pos">+2.98$</td><td>78</td><td>47</td><td>31</td><td>60.3%</td><td class="pos">+62.66$</td><td class="neg">-55.68$</td><td class="neu">+0.00$</td><td class="neg">-4.00$</td></tr>
+<tr><td><b>QA</b></td><td class="neg">-37.38$</td><td>61</td><td>34</td><td>27</td><td>55.7%</td><td class="neg">-7.86$</td><td class="pos">+0.75$</td><td class="pos">+5.54$</td><td class="neg">-35.81$</td></tr>
+<tr><td><b>ZN</b></td><td class="neg">-4.45$</td><td>40</td><td>24</td><td>16</td><td>60.0%</td><td class="pos">+6.08$</td><td class="neg">-17.53$</td><td class="neu">+0.00$</td><td class="pos">+7.00$</td></tr>
+<tr style="font-weight:700"><td>TOTAL</td><td class="pos">+41.75$</td><td>324</td><td>189</td><td>135</td><td>58.3%</td><td class="pos">+116.51$</td><td class="neg">-106.97$</td><td class="pos">+38.86$</td><td class="neg">-6.65$</td></tr>
+</table>
+
+<h2>3. Top 5 Canaux (4 jours)</h2>
+<table>
+<tr><th>#</th><th>Canal</th><th>P&L Total</th><th>18/08</th><th>19/08</th><th>20/08</th><th>21/08</th></tr>
+<tr><td>1</td><td>EAGLE FOREX PESEARCH</td><td class="pos">+52.51$</td><td class="pos">+35.04$</td><td class="pos">+17.47$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td></tr>
+<tr><td>2</td><td>Pudin Fx Official</td><td class="pos">+35.22$</td><td class="pos">+6.58$</td><td class="neg">-3.12$</td><td class="pos">+3.54$</td><td class="pos">+28.22$</td></tr>
+<tr><td>3</td><td>Forex Xauusd & Binary</td><td class="pos">+34.43$</td><td class="neu">+0.00$</td><td class="pos">+27.67$</td><td class="pos">+6.76$</td><td class="neu">+0.00$</td></tr>
+<tr><td>4</td><td>SMITH XAUUSD KLLER</td><td class="pos">+28.86$</td><td class="pos">+22.05$</td><td class="pos">+6.81$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td></tr>
+<tr><td>5</td><td>PIPS MASTER</td><td class="pos">+28.32$</td><td class="pos">+7.15$</td><td class="pos">+7.01$</td><td class="pos">+7.16$</td><td class="pos">+7.00$</td></tr>
+</table>
+
+<h2>4. Bottom 5 Canaux (4 jours)</h2>
+<table>
+<tr><th>#</th><th>Canal</th><th>P&L Total</th><th>18/08</th><th>19/08</th><th>20/08</th><th>21/08</th></tr>
+<tr><td>1</td><td>AJIB BOY FX</td><td class="neg">-36.70$</td><td class="pos">+14.01$</td><td class="neg">-26.42$</td><td class="neg">-17.00$</td><td class="neg">-7.29$</td></tr>
+<tr><td>2</td><td>CH69</td><td class="neg">-43.94$</td><td class="neu">+0.00$</td><td class="neg">-43.94$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td></tr>
+<tr><td>3</td><td>VIP SIGNAL MASTAR</td><td class="neg">-50.16$</td><td class="pos">+7.72$</td><td class="neg">-36.68$</td><td class="pos">+7.00$</td><td class="neg">-28.20$</td></tr>
+<tr><td>4</td><td>Lady Trader Pro Signals</td><td class="neg">-51.34$</td><td class="neg">-51.34$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td></tr>
+<tr><td>5</td><td>FOREX PLATO TRADING</td><td class="neg">-63.72$</td><td class="pos">+7.56$</td><td class="neg">-42.66$</td><td class="neu">+0.00$</td><td class="neg">-28.62$</td></tr>
+</table>
+
+<h2>5. Tous les Canaux (4 jours)</h2>
+<table>
+<tr><th>Canal</th><th>Nom</th><th>P&L Total</th><th>18/08</th><th>19/08</th><th>20/08</th><th>21/08</th><th>Jours Actifs</th></tr>
+<tr><td>CH63</td><td>EAGLE FOREX PESEARCH</td><td class="pos">+52.51$</td><td class="pos">+35.04$</td><td class="pos">+17.47$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH65</td><td>Pudin Fx Official</td><td class="pos">+35.22$</td><td class="pos">+6.58$</td><td class="neg">-3.12$</td><td class="pos">+3.54$</td><td class="pos">+28.22$</td><td>4</td></tr>
+<tr><td>CH14</td><td>Forex Xauusd & Binary</td><td class="pos">+34.43$</td><td class="neu">+0.00$</td><td class="pos">+27.67$</td><td class="pos">+6.76$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH2</td><td>SMITH XAUUSD KLLER</td><td class="pos">+28.86$</td><td class="pos">+22.05$</td><td class="pos">+6.81$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH34</td><td>PIPS MASTER</td><td class="pos">+28.32$</td><td class="pos">+7.15$</td><td class="pos">+7.01$</td><td class="pos">+7.16$</td><td class="pos">+7.00$</td><td>4</td></tr>
+<tr><td>CH60</td><td>GOLD SNIPER ZONE</td><td class="pos">+27.51$</td><td class="pos">+5.37$</td><td class="pos">+11.58$</td><td class="neu">+0.00$</td><td class="pos">+10.56$</td><td>3</td></tr>
+<tr><td>CH27</td><td>XAU/USD SIGNALS</td><td class="pos">+24.81$</td><td class="neu">+0.00$</td><td class="pos">+14.31$</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH57</td><td>FX VIP SERVICE</td><td class="pos">+22.11$</td><td class="pos">+7.35$</td><td class="pos">+14.76$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH15</td><td>XAUUSD GOLD TRADING</td><td class="pos">+21.25$</td><td class="pos">+21.25$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH76</td><td>Johan Trader</td><td class="pos">+20.68$</td><td class="pos">+20.68$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH1</td><td>TRADE WITH MARK</td><td class="pos">+18.58$</td><td class="pos">+8.08$</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH16</td><td>Yakuza Trade Direction</td><td class="pos">+17.19$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="pos">+17.19$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH54</td><td>Smart Money Hunter</td><td class="pos">+13.93$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="pos">+13.93$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH4</td><td>FX SIMMONS MASTER</td><td class="pos">+10.50$</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH46</td><td>CH46</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH73</td><td>CH73</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td class="pos">+10.50$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH45</td><td>CH45</td><td class="pos">+10.38$</td><td class="neu">+0.00$</td><td class="pos">+10.38$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH48</td><td>World of forex</td><td class="pos">+9.97$</td><td class="pos">+9.97$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH20</td><td>Roby Sultan Gold Flip</td><td class="pos">+9.62$</td><td class="neg">-13.54$</td><td class="pos">+9.15$</td><td class="neu">+0.00$</td><td class="pos">+14.01$</td><td>3</td></tr>
+<tr><td>CH23</td><td>INSIDER TRADING</td><td class="pos">+9.51$</td><td class="pos">+9.51$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH11</td><td>GOLDHUNTER PAUL</td><td class="pos">+7.62$</td><td class="pos">+7.62$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH26</td><td>XAUUSD DAILY SIGNAL</td><td class="pos">+7.50$</td><td class="pos">+7.50$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH42</td><td>CH42</td><td class="pos">+7.50$</td><td class="neu">+0.00$</td><td class="pos">+7.50$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH47</td><td>CH47</td><td class="pos">+7.38$</td><td class="neu">+0.00$</td><td class="pos">+7.38$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH17</td><td>CH17</td><td class="pos">+7.08$</td><td class="neu">+0.00$</td><td class="pos">+7.08$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH21</td><td>David Forex Empire</td><td class="pos">+7.00$</td><td class="pos">+7.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH41</td><td>ANALYSIS GOLD SIGNALS</td><td class="pos">+7.00$</td><td class="pos">+7.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH66</td><td>CH66</td><td class="pos">+7.00$</td><td class="neu">+0.00$</td><td class="pos">+7.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH22</td><td>Alixza Gold Trading</td><td class="pos">+6.74$</td><td class="pos">+6.74$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH13</td><td>XAUUSD GOLD MASTER</td><td class="pos">+1.99$</td><td class="pos">+7.79$</td><td class="neg">-33.86$</td><td class="pos">+14.05$</td><td class="pos">+14.01$</td><td>4</td></tr>
+<tr><td>CH12</td><td>CH12</td><td class="pos">+1.46$</td><td class="neu">+0.00$</td><td class="pos">+1.46$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH64</td><td>FOREX GOLD CLUB</td><td class="pos">+0.99$</td><td class="neu">+0.00$</td><td class="neg">-5.68$</td><td class="pos">+6.67$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH37</td><td>ANN Zerofloat</td><td class="pos">+0.26$</td><td class="pos">+7.02$</td><td class="neg">-7.19$</td><td class="pos">+6.61$</td><td class="neg">-6.18$</td><td>4</td></tr>
+<tr><td>CH59</td><td>GOLD MARKET ACADEMY</td><td class="neg">-1.09$</td><td class="neg">-1.09$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH62</td><td>USD Scalper Project</td><td class="neg">-9.58$</td><td class="neg">-31.05$</td><td class="pos">+6.93$</td><td class="pos">+14.54$</td><td class="neu">+0.00$</td><td>3</td></tr>
+<tr><td>CH29</td><td>ELITE CAPITAL FX</td><td class="neg">-10.84$</td><td class="neu">+0.00$</td><td class="pos">+27.62$</td><td class="neg">-38.46$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH8</td><td>CH8</td><td class="neg">-12.06$</td><td class="neu">+0.00$</td><td class="neg">-12.06$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH3</td><td>FxGzl</td><td class="neg">-13.26$</td><td class="neg">-20.74$</td><td class="pos">+14.17$</td><td class="pos">+0.57$</td><td class="neg">-7.26$</td><td>4</td></tr>
+<tr><td>CH24</td><td>AMELIA GOLD TRADER</td><td class="neg">-14.38$</td><td class="pos">+7.27$</td><td class="neg">-28.65$</td><td class="neu">+0.00$</td><td class="pos">+7.00$</td><td>3</td></tr>
+<tr><td>CH72</td><td>GOLD PRO SIGNALS</td><td class="neg">-15.57$</td><td class="pos">+1.40$</td><td class="neg">-16.97$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH18</td><td>CH18</td><td class="neg">-20.63$</td><td class="neu">+0.00$</td><td class="neg">-20.63$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH50</td><td>CH50</td><td class="neg">-20.76$</td><td class="neu">+0.00$</td><td class="neg">-20.76$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH55</td><td>CH55</td><td class="neg">-25.64$</td><td class="neu">+0.00$</td><td class="neg">-25.64$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH6</td><td>Jennifer GOLD</td><td class="neg">-26.30$</td><td class="neg">-28.44$</td><td class="pos">+2.14$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>2</td></tr>
+<tr><td>CH61</td><td>GOLD SNIPER</td><td class="neg">-28.18$</td><td class="pos">+10.55$</td><td class="neg">-14.63$</td><td class="neg">-14.20$</td><td class="neg">-9.90$</td><td>4</td></tr>
+<tr><td>CH58</td><td>AJIB BOY FX</td><td class="neg">-36.70$</td><td class="pos">+14.01$</td><td class="neg">-26.42$</td><td class="neg">-17.00$</td><td class="neg">-7.29$</td><td>4</td></tr>
+<tr><td>CH69</td><td>CH69</td><td class="neg">-43.94$</td><td class="neu">+0.00$</td><td class="neg">-43.94$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH70</td><td>VIP SIGNAL MASTAR</td><td class="neg">-50.16$</td><td class="pos">+7.72$</td><td class="neg">-36.68$</td><td class="pos">+7.00$</td><td class="neg">-28.20$</td><td>4</td></tr>
+<tr><td>CH36</td><td>Lady Trader Pro Signals</td><td class="neg">-51.34$</td><td class="neg">-51.34$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td class="neu">+0.00$</td><td>1</td></tr>
+<tr><td>CH5</td><td>FOREX PLATO TRADING</td><td class="neg">-63.72$</td><td class="pos">+7.56$</td><td class="neg">-42.66$</td><td class="neu">+0.00$</td><td class="neg">-28.62$</td><td>3</td></tr>
+</table>
+
+<h2>6. Analyse</h2>
+<div class="card">
+<h3>Points forts</h3>
+<ul>
+<li><b>MP (Market Price)</b> est le signal le plus rentable : +80.60$ sur 4 jours (145 trades, 57.9% WR)</li>
+<li><b>CH63 (EAGLE FOREX)</b> meilleur canal : +52.51$ sur 2 jours actifs, 100% WR</li>
+<li><b>CH34 (PIPS MASTER)</b> le plus constant : +28.32$ sur 4 jours, jamais négatif</li>
+<li><b>CH65 (Pudin Fx)</b> bon recovery : -3.12$ le 19 → +28.22$ le 21</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>Points faibles</h3>
+<ul>
+<li><b>19 août</b> jour très difficile : -106.97$, 51.9% WR, DD -142.49$</li>
+<li><b>QA (Quick Alert)</b> signal le moins fiable : -37.38$ sur 4 jours (55.7% WR)</li>
+<li><b>CH36 (Lady Trader)</b> pire canal : -51.34$ en 1 seul jour, 0% WR</li>
+<li><b>CH69</b> -43.94$ en 1 jour, 0% WR</li>
+<li><b>CH58 (AJIB BOY FX)</b> négatif 3 jours sur 4 : -36.70$ total</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>Recommandations</h3>
+<ul>
+<li>Désactiver ou réduire les lots pour <b>CH36</b>, <b>CH69</b>, <b>CH58</b> (pertes récurrentes)</li>
+<li>Prioriser les canaux <b>MP</b> et <b>ZN</b> (meilleur ratio risque/gain)</li>
+<li>Le filtre <b>QA</b> pourrait bénéficier d'un SL plus serré (37.38$ de pertes)</li>
+<li>Le 19 août montre l'importance du <b>DAILY_PROFIT_LIMIT</b> pour limiter les pertes</li>
+</ul>
+</div>
+
+<hr>
+<p style="text-align:center; color:var(--muted); padding:20px 0;">
+Rapport généré automatiquement — Bot Trading V17.1<br>
+18 - 21 Août 2026
+</p>
+
+</div>
+</body>
+</html>
