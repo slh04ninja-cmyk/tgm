@@ -182,6 +182,91 @@ Format : `Canal_N : -100XXXXXXXXXX # NomDuCanal`
 
 ---
 
+## Workflow Modification App Android + Build APK
+
+### Etapes
+
+1. **Modifier le code**
+   - Fichiers Kotlin : `app/src/main/java/com/copytrading/`
+   - Layouts XML : `app/src/main/res/layout/`
+   - Couleurs : `app/src/main/res/values/colors.xml`
+
+2. **Commit + Push**
+   ```bash
+   cd /data/data/com.termux/files/home/CopyTrading
+   git add -A
+   git commit -m "feat: description du changement"
+   git push origin main
+   ```
+
+3. **Attendre le build GitHub Actions**
+   ```bash
+   # Recuperer le dernier run
+   gh run list --limit 1 --json databaseId -q '.[0].databaseId'
+   
+   # Attendre la fin du build
+   gh run watch <RUN_ID> --exit-status
+   ```
+
+4. **Telecharger l'APK**
+   ```bash
+   rm -f /data/data/com.termux/files/home/Download/app-debug.apk
+   gh run download <RUN_ID> -n copytrading-debug -D /data/data/com.termux/files/home/Download/
+   cp /data/data/com.termux/files/home/Download/app-debug.apk /data/data/com.termux/files/home/CopyTrading.apk
+   ```
+
+5. **Envoyer l'APK a l'utilisateur**
+   ```
+   MEDIA:/data/data/com.termux/files/home/CopyTrading.apk
+   ```
+
+6. **L'utilisateur installe** depuis `/storage/emulated/0/Download/CopyTrading.apk`
+
+### Points importants
+
+- Le build prend ~2-3 minutes
+- L'artifact s'appelle `copytrading-debug` (pas CopyTrading-apk)
+- Toujours `rm -f` l'ancien APK avant de telecharger (conflit de zip)
+- L'APK est un debug build (pas signe release)
+- Pas besoin de rebuild si seul le bot (bot_api.py) est modifie — utiliser `/api/file` + `/api/restart`
+
+### Modification du bot (cote serveur)
+
+```bash
+# 1. Modifier le fichier localement
+# 2. Upload via API
+curl -X POST -H 'Authorization: Bearer <TOKEN>' -H 'Content-Type: application/json' \
+  -d '{"path": "bot_api.py", "content": "<contenu>"}' \
+  http://38.247.138.124:8000/api/file
+
+# 3. Redemarrer uvicorn
+curl -X POST -H 'Authorization: Bearer <TOKEN>' \
+  http://38.247.138.124:8000/api/restart
+
+# 4. Verifier
+curl -s -H 'Authorization: Bearer <TOKEN>' \
+  http://38.247.138.124:8000/api/status
+```
+
+### Modification du telegram listener
+
+```bash
+# 1. Modifier telegram_listener_v17_1.py localement
+# 2. Upload via API (chemin relatif)
+curl -X POST -H 'Authorization: Bearer <TOKEN>' -H 'Content-Type: application/json' \
+  -d '{"path": "telegram_listener_v17_1.py", "content": "<contenu>"}' \
+  http://38.247.138.124:8000/api/file
+
+# 3. Redemarrer le bot (pas uvicorn)
+curl -X POST -H 'Authorization: Bearer <TOKEN>' \
+  http://38.247.138.124:8000/api/bot/stop
+sleep 2
+curl -X POST -H 'Authorization: Bearer <TOKEN>' \
+  http://38.247.138.124:8000/api/bot/start
+```
+
+---
+
 ## Contraintes
 
 - **Pas de SSH** sur le serveur Windows
