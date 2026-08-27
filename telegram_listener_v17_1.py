@@ -170,6 +170,31 @@ TP_PAR_DEFAUT = float(os.getenv("TP_PAR_DEFAUT", "15.0"))
 # === AUTRES ===
 TG_ALERT_CHANNEL = os.getenv("TG_ALERT_CHANNEL", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
+
+# === DELETED MESSAGE TRACKER ===
+_SIGNAL_TRACKER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "signal_tracker.json")
+_signal_tracker: dict = {}  # {msg_id: {channel_id, channel_name, timestamp, text_preview, checked, deleted, deleted_at}}
+_TRACKER_CHECK_INTERVAL = 60  # 1 minute
+_TRACKER_MAX_AGE = 86400 * 3  # garder 3 jours max
+
+def _load_signal_tracker():
+    global _signal_tracker
+    try:
+        if os.path.exists(_SIGNAL_TRACKER_FILE):
+            with open(_SIGNAL_TRACKER_FILE, "r", encoding="utf-8") as f:
+                _signal_tracker = json.load(f)
+    except Exception:
+        _signal_tracker = {}
+
+def _save_signal_tracker():
+    try:
+        with open(_SIGNAL_TRACKER_FILE, "w", encoding="utf-8") as f:
+            json.dump(_signal_tracker, f)
+    except Exception:
+        pass
+
+_load_signal_tracker()
+
 NEWS_ENABLED = os.getenv("NEWS_FILTER_ENABLED", "false").lower() == "true"
 NEWS_BLOCK_MIN = int(os.getenv("NEWS_WINDOW_BEFORE_BLOCK", "15"))
 NEWS_CLOSE_MIN = int(os.getenv("NEWS_WINDOW_BEFORE_CLOSE", "5"))
@@ -188,7 +213,7 @@ START_TIME = datetime.now(timezone.utc)
 # LOGGING
 # =============================================================
 class OrderFilter(logging.Filter):
-    HIDE = ["[SPAM]", "[CYCLE]"]
+    HIDE = ["[SPAM]", "[CYCLE]", "Got difference for channel", "[PARSING]"]
     def filter(self, record):
         msg = record.getMessage()
         for tag in self.HIDE:
@@ -1059,6 +1084,9 @@ class TradeManager:
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
         self._completed_entries = []  # entrées terminées (pour rapport fin de journée)
 
+        # ★ RECOVERY : reconstruire self.active depuis les positions MT5 ouvertes
+        self._recover_open_positions()
+
 
 
     # =============================================================
@@ -1119,6 +1147,137 @@ class TradeManager:
                 json.dump({'day': start.day, 'limit_reached': self._daily_limit_reached}, f)
         except Exception:
             pass
+
+    # =============================================================
+    # RECOVERY : reconstruire self.active depuis les positions MT5
+    # =============================================================
+    def _recover_open_positions(self):
+        """Au démarrage, lit les positions ouvertes dans MT5 et reconstruit
+        self.active pour que le bot puisse gérer TP dynamique, P&L cible, etc."""
+        try:
+            positions = mt5.positions_get()
+            if not positions:
+                log.info("[RECOVERY] Aucune position ouverte dans MT5")
+                return
+
+            # Filtrer par magic number
+            bot_positions = [p for p in positions if p.magic == MAGIC_NUMBER]
+            if not bot_positions:
+                log.info(f"[RECOVERY] {len(positions)} positions mais aucune avec magic {MAGIC_NUMBER}")
+                return
+
+            # Grouper par préfixe commentaire: CH{num}-{signal}
+            groups = {}  # "CH3-PU" -> [pos1, pos2, ...]
+            for pos in bot_positions:
+                comment = pos.comment or ""
+                # Extraire préfixe CH{num}-{signal} (ignorer -MK, -L1, -L2)
+                parts = comment.split("-")
+                if len(parts) >= 2 and parts[0].startswith("CH"):
+                    prefix = f"{parts[0]}-{parts[1]}"
+                else:
+                    prefix = comment  # pas de structure connue
+                groups.setdefault(prefix, []).append(pos)
+
+            recovered = 0
+            for prefix, positions_group in groups.items():
+                # Déterminer action depuis le premier ticket (type 0=BUY, 1=SELL)
+                first = positions_group[0]
+                action = "BUY" if first.type == mt5.ORDER_TYPE_BUY else "SELL"
+                symbol = first.symbol
+
+                # Construire les tickets
+                tickets = []
+                market_ticket = None
+                for pos in positions_group:
+                    comment = pos.comment or ""
+                    parts = comment.split("-")
+                    role = "market"
+                    if len(parts) >= 3:
+                        if parts[2].startswith("L"):
+                            role = "limit"
+                    tickets.append({
+                        "ticket": pos.ticket,
+                        "lot": pos.volume,
+                        "role": role,
+                        "entry_price": pos.price_open,
+                        "tp_final": pos.tp,
+                    })
+                    if role == "market":
+                        market_ticket = pos.ticket
+
+                # Construire le signal minimal
+                ch_parts = prefix.split("-")
+                ch_num = ch_parts[0].replace("CH", "") if len(ch_parts) >= 1 else "?"
+                signal_type = ch_parts[1] if len(ch_parts) >= 1 else "?"
+                signal = {
+                    "action": action,
+                    "symbol": symbol,
+                    "source_channel": f"Canal_{ch_num}",
+                }
+
+                entry = {
+                    "signal": signal,
+                    "tickets": tickets,
+                    "_open_date": datetime.fromtimestamp(first.time).strftime("%Y-%m-%d %H:%M:%S") if hasattr(first, 'time') else "?",
+                    "_signal_id": f"{symbol}_{action}_recovered_{first.ticket}",
+                    "_mt5_comment": prefix,
+                    "_market_ticket": market_ticket or tickets[0]["ticket"],
+                    "_limit_cancelled": False,
+                    "_recovered": True,
+                }
+                self.active.append(entry)
+                recovered += 1
+
+                # Recalculer TP dynamique
+                self._recalculate_tp(entry)
+
+            log.info(f"[RECOVERY] {recovered} signaux reconstruits depuis {len(bot_positions)} positions MT5")
+            for entry in self.active:
+                nb_tickets = len(entry["tickets"])
+                comment = entry["_mt5_comment"]
+                action = entry["signal"]["action"]
+                symbol = entry["signal"]["symbol"]
+                log.info(f"[RECOVERY]   {comment} | {action} {symbol} | {nb_tickets} positions")
+
+            # --- Nettoyage des LIMIT orphelins ---
+            # Si un MK a touché son TP avant le redémarrage, les LIMIT restent
+            # en attente dans mt5.orders_get(). On les annule.
+            recovered_prefixes = set(e["_mt5_comment"] for e in self.active)
+            pending_orders = mt5.orders_get() or []
+            orphan_limits = []
+            for order in pending_orders:
+                if order.magic != MAGIC_NUMBER:
+                    continue
+                ocomment = order.comment or ""
+                oparts = ocomment.split("-")
+                if len(oparts) >= 3 and oparts[0].startswith("CH") and oparts[2].startswith("L"):
+                    prefix = f"{oparts[0]}-{oparts[1]}"
+                    if prefix not in recovered_prefixes:
+                        orphan_limits.append(order)
+
+            if orphan_limits:
+                log.info(f"[RECOVERY] {len(orphan_limits)} LIMIT orphelins détectés — annulation...")
+                for order in orphan_limits:
+                    req = {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": order.ticket,
+                        "symbol": order.symbol,
+                        "type": order.type,
+                        "volume": order.volume_current,
+                        "magic": MAGIC_NUMBER,
+                    }
+                    result = mt5.order_send(req)
+                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                        log.info(f"[RECOVERY]   LIMIT #{order.ticket} ({order.comment}) annulé ✓")
+                    else:
+                        retcode = result.retcode if result else "NO_RESULT"
+                        log.warning(f"[RECOVERY]   LIMIT #{order.ticket} annulation échouée: {retcode}")
+                log.info(f"[RECOVERY] {len(orphan_limits)} LIMIT orphelins annulés")
+            else:
+                log.info("[RECOVERY] Aucun LIMIT orphelin")
+
+        except Exception as e:
+            log.error(f"[RECOVERY] Erreur: {e}", exc_info=True)
 
     # =============================================================
     def _recover_daily_pnl(self) -> float:
@@ -2007,6 +2166,48 @@ class TradeManager:
                     if cancelled > 0:
                         log.info(f"MARKET #{market_ticket} fermé -> {cancelled} LIMIT annulés")
 
+        # ══════════════════════════════════════════════════════════════
+        # ★★★ PHASE 6 : NETTOYAGE GLOBAL LIMIT ORPHELINS ★★★
+        # Vérifie TOUS les ordres LIMIT en attente — si aucun MK actif
+        # ne correspond, annule le LIMIT. Sécurité contre les fuites.
+        # ══════════════════════════════════════════════════════════════
+        try:
+            pending_orders = mt5.orders_get()
+            if pending_orders:
+                # Collecter les préfixes CH actifs (ex: "CH94-ZN")
+                active_prefixes = set()
+                with self._lock:
+                    for entry in self.active:
+                        comment = entry.get("_mt5_comment", "")
+                        parts = comment.split("-")
+                        if len(parts) >= 2:
+                            active_prefixes.add(f"{parts[0]}-{parts[1]}")
+
+                for order in pending_orders:
+                    if order.magic != MAGIC_NUMBER:
+                        continue
+                    ocomment = order.comment or ""
+                    oparts = ocomment.split("-")
+                    if len(oparts) >= 3 and oparts[0].startswith("CH") and oparts[2].startswith("L"):
+                        prefix = f"{oparts[0]}-{oparts[1]}"
+                        if prefix not in active_prefixes:
+                            req = {
+                                "action": mt5.TRADE_ACTION_REMOVE,
+                                "order": order.ticket,
+                                "symbol": order.symbol,
+                                "type": order.type,
+                                "volume": order.volume_current,
+                                "magic": MAGIC_NUMBER,
+                            }
+                            result = mt5.order_send(req)
+                            if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                                log.info(f"[ORPHAN] LIMIT #{order.ticket} ({ocomment}) annulé — aucun MK actif")
+                            else:
+                                retcode = result.retcode if result else "NO_RESULT"
+                                log.warning(f"[ORPHAN] LIMIT #{order.ticket} annulation échouée: {retcode}")
+        except Exception as e:
+            log.debug(f"[ORPHAN] Erreur nettoyage: {e}")
+
 # =============================================================
 # CONFLIT & EXÉCUTION (avec SL paramétrable)
 # =============================================================
@@ -2431,6 +2632,42 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
 
     pdf._current_table_headers = None
     pdf.ln(5)
+
+    # ══════════════════════════════════════════════════════════════
+    # MESSAGES SUPPRIMÉS
+    # ══════════════════════════════════════════════════════════════
+    deleted_msgs = [
+        (mid, info) for mid, info in _signal_tracker.items()
+        if info.get("deleted") and info.get("timestamp", 0) >= get_trading_day_start().timestamp()
+    ]
+    if deleted_msgs:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 10, "Signaux Supprimes par les Canaux", new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+        headers = [("CH", 12, "L"), ("Canal", 40, "L"), ("S. Recu", 22, "L"), ("S. Supprime", 22, "L"), ("Message", 0, "L")]
+        _table_header(pdf, headers)
+        pdf._current_table_headers = (headers, ("Helvetica", "", 8))
+        pdf.set_font("Helvetica", "", 8)
+
+        for mid, info in sorted(deleted_msgs, key=lambda x: str(x[1].get("channel_num", "999")).zfill(5)):
+            ch_num = info.get("channel_num", "?")
+            ch_name = _sanitize(info.get("channel_name", "?"), 30)
+            ts_recv = info.get("timestamp", 0)
+            ts_del = info.get("deleted_at", 0)
+            recv_str = datetime.fromtimestamp(ts_recv, tz=timezone.utc).strftime("%H:%M") if ts_recv else "?"
+            del_str = datetime.fromtimestamp(ts_del, tz=timezone.utc).strftime("%H:%M") if ts_del else "?"
+            preview = _sanitize(info.get("text_preview", ""), 80)
+
+            pdf.cell(12, 6, f"CH{ch_num}", border=1)
+            pdf.cell(40, 6, ch_name, border=1)
+            pdf.cell(22, 6, recv_str, border=1)
+            pdf.cell(22, 6, del_str, border=1)
+            pdf.cell(0, 6, preview, border=1)
+            pdf.ln()
+
+        pdf._current_table_headers = None
+        pdf.ln(5)
 
     # ── Sauvegarde ──
     filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"daily_report_{date_str}.pdf")
@@ -2906,7 +3143,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             below_zone = zone_low - TOLERANCE_ZN <= current < zone_low
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            log.info(f"CH{ch_num}-ZN | REFUSÉ HORS ZONE")
+            log.info(f"CH{ch_num}-ZN | REFUSE HORS ZONE")
             return
 
         prefix = "ZN"
@@ -2943,7 +3180,7 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             below_zone = zone_low_pu - TOLERANCE_ZN <= current < zone_low_pu
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            log.info(f"CH{ch_num}-PU | REFUSÉ HORS ZONE | prix={current} | entry={entry_price}")
+            log.info(f"CH{ch_num}-PU | REFUSE HORS ZONE")
             return
 
         sl = _cap_sl(action, entry_price, sl, MAX_SL_USD)
@@ -3079,7 +3316,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             # Défavorable: prix < entry - tolerance (le prix descend trop contre le SELL)
             is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
         if is_unfavorable:
-            log.info(f"CH{ch_num}-AL | Quick Alert ANNULE | prix={current} | entry={entry_price}")
+            log.info(f"CH{ch_num}-AL | REFUSE HORS ZONE")
             _alert_mgmt(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
             return
 
@@ -3139,7 +3376,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
 
     # Vérifier si le prix est acceptable
     if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-        log.info(f"CH{ch_num}-{qa_label} | REFUSÉ HORS ZONE | prix={current}")
+        log.info(f"CH{ch_num}-{qa_label} | REFUSE HORS ZONE")
         return
 
     # Calculer les prix LIMIT pour le log
@@ -3222,14 +3459,14 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
                         elif deal.reason == mt5.DEAL_REASON_TP:
                             close_reason = "TP"
                         break
-        log.info(f"CH{ch_num_fusion}-MP | FUSION REFUSÉ | QA #{qa_ticket} déjà fermé ({close_reason})")
+        log.info(f"CH{ch_num_fusion}-{qa_label} | FUSION REFUSE | QA #{qa_ticket} deja ferme ({close_reason})")
         _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
     else:
         # QA actif -> mettre a jour SL uniquement (TP gardé depuis TP_FIXED_GAIN_USD)
         # ★ SL plafonné aussi lors de la fusion
         qa_entry_price = qa.get("entry_price", 0)
         real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
-        log.info(f"CH{ch_num_fusion}-MP | FUSION ACCEPTE | SL={real_sl} | TP={tp_final} (non appliqué)")
+        log.info(f"CH{ch_num_fusion}-{qa_label} | FUSION ACCEPTE")
         # ★ FIX : ne modifier que le SL, pas le TP (garder TP_FIXED_GAIN_USD)
         pos_data = mt5.positions_get(ticket=qa_ticket)
         if pos_data:
@@ -3279,11 +3516,9 @@ async def main():
         acc_info = mt5.account_info()
         if acc_info:
             log.info(msg.log_balance_startup(acc_info.balance, manager._daily_pnl))
-        await manager.start()
 
         news_mgr = NewsManager(bridge)
         news_mgr.set_manager(manager)
-        await news_mgr.start()
 
         client = TelegramClient("session_trading", API_ID, API_HASH)
         await client.start()
@@ -3585,6 +3820,55 @@ async def main():
         _SEEN_TTL = 120.0
         _SEEN_MAX_IDS = 5000
 
+        # --- Deleted message tracker (utilise le module-level _signal_tracker) ---
+        async def _check_deleted_messages():
+            """Vérifie périodiquement si les messages de signaux existent encore."""
+            while True:
+                await asyncio.sleep(_TRACKER_CHECK_INTERVAL)
+                try:
+                    now = time.time()
+                    to_check = []
+                    to_remove = []
+
+                    for msg_id_str, info in _signal_tracker.items():
+                        age = now - info.get("timestamp", 0)
+                        if age > _TRACKER_MAX_AGE:
+                            to_remove.append(msg_id_str)
+                        elif not info.get("checked", False):
+                            to_check.append((int(msg_id_str), info))
+
+                    for mid in to_remove:
+                        del _signal_tracker[mid]
+
+                    if not to_check:
+                        _save_signal_tracker()
+                        continue
+
+                    by_channel: dict = {}
+                    for msg_id, info in to_check:
+                        ch_id = info.get("channel_id", 0)
+                        by_channel.setdefault(ch_id, []).append((msg_id, info))
+
+                    for ch_id, msgs in by_channel.items():
+                        try:
+                            entity = await client.get_entity(ch_id)
+                            msg_ids = [m[0] for m in msgs]
+                            messages = await client.get_messages(entity, ids=msg_ids)
+                            for (msg_id, info), msg in zip(msgs, messages):
+                                mid_str = str(msg_id)
+                                if msg is None or msg.text is None:
+                                    _signal_tracker[mid_str]["deleted"] = True
+                                    _signal_tracker[mid_str]["checked"] = True
+                                    _signal_tracker[mid_str]["deleted_at"] = now
+                                else:
+                                    _signal_tracker[mid_str]["checked"] = True
+                        except Exception as e:
+                            log.debug(f"[DELETED-CHECK] Erreur channel {ch_id}: {e}")
+
+                    _save_signal_tracker()
+                except Exception as e:
+                    log.error(f"[DELETED-CHECK] Erreur: {e}", exc_info=True)
+
         @client.on(events.NewMessage(chats=chats))
         async def handler(event):
             text = event.message.text or ""
@@ -3625,6 +3909,26 @@ async def main():
 
             if not _is_signal_message(text):
                 return
+
+            # --- Tracker : enregistrer le message de signal ---
+            try:
+                _ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
+                _signal_tracker[str(msg_id)] = {
+                    "channel_id": chat.id,
+                    "channel_name": canal_name,
+                    "channel_num": _ch_num,
+                    "timestamp": now_ts,
+                    "text_preview": text[:200],
+                    "checked": False,
+                }
+                # Nettoyer les trop vieux du tracker
+                if len(_signal_tracker) > 2000:
+                    cutoff = now_ts - _TRACKER_MAX_AGE
+                    stale = [k for k, v in _signal_tracker.items() if v.get("timestamp", 0) < cutoff]
+                    for k in stale[:500]:
+                        del _signal_tracker[k]
+            except Exception:
+                pass
 
             # Log brut en DEBUG seulement
             clean_text = text.replace('*', '').replace('\n', ' | ')[:150]
@@ -3713,10 +4017,19 @@ async def main():
             elif signal_data.signal_type == "TRADE":
                 # ★ FIX (v16) : log de réception AVANT les filtres (pour toujours l'afficher)
                 if _sig_mt5_comment:
+                    # Obtenir le prix actuel pour PA
+                    _pa = None
+                    try:
+                        if signal_data.pair:
+                            _sym_info = bridge._sym(signal_data.pair)
+                            if _sym_info:
+                                _pa = bridge.current_price(_sym_info.name, signal_data.direction or "BUY")
+                    except Exception:
+                        pass
                     if _sig_mode == "ZN" and _sig_zone_low is not None and _sig_zone_high is not None:
-                        log.info(msg.log_signal_detected_zone(_sig_mt5_comment, signal_data.direction or "?", _sig_zone_low, _sig_zone_high))
+                        log.info(msg.log_signal_detected_zone(_sig_mt5_comment, signal_data.direction or "?", _sig_zone_low, _sig_zone_high, current_price=_pa))
                     else:
-                        log.info(msg.log_signal_detected(_sig_mt5_comment, signal_data.direction or "?", signal_data.zone_mid))
+                        log.info(msg.log_signal_detected(_sig_mt5_comment, signal_data.direction or "?", signal_data.zone_mid, current_price=_pa))
 
                 if NEWS_ENABLED and news_mgr.is_blocked():
                     ch_num_news = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
@@ -3725,11 +4038,11 @@ async def main():
 
                 blocked, reason = in_blocked_window()
                 if blocked:
-                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSÉ HORAIRE")
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSE HORAIRE")
                     return
 
                 if not manager._check_daily_pnl_limit() or manager._daily_limit_reached:
-                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSÉ LIMITE P&L")
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSE LIMITE P&L")
                     return
 
                 # ★ FILTRE TRADINGVIEW — bloquer les signaux opposés au consensus 26 indicateurs
@@ -3737,7 +4050,7 @@ async def main():
                     allowed, motif = tv_filter.is_allowed(signal_data.direction)
                     if not allowed:
                         ch_num_tf = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
-                        log.info(f"CH{ch_num_tf}-{_sig_mode} | REFUSÉ TV OPPOSÉ | TV={tv_filter._last_consensus}")
+                        log.info(f"CH{ch_num_tf}-{_sig_mode} | REFUSE TV OPPOSE")
                         _alert_mgmt(msg.alert_trend_blocked(
                             signal_data.direction, signal_data.pair, ch_num_tf,
                             signal_data.direction, tv_filter._last_consensus,
@@ -3837,6 +4150,11 @@ async def main():
                                 log.info(f"{existing_comment} | FUSION IGNORE HORS ZONE |")
                         # Aucun QA trouvé → exécuter le signal complet normalement
                         execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
+
+        # ★ Démarrer les boucles APRÈS le chargement des canaux
+        await manager.start()
+        await news_mgr.start()
+        asyncio.create_task(_check_deleted_messages())
 
         # Banner
         mode = "🔲 DEMO" if DEMO_MODE else "💰 LIVE"
