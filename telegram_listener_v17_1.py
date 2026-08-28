@@ -2813,12 +2813,15 @@ def _collect_weekly_report_data() -> dict:
             signal_by_day[day_idx][sig_type]['channels'].add(ch_num)
 
         # Par jour + canal
+        suffix = parts[2] if len(parts) >= 3 else None
         if day_idx not in channel_by_day:
             channel_by_day[day_idx] = {}
         if ch_num not in channel_by_day[day_idx]:
-            channel_by_day[day_idx][ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name}
+            channel_by_day[day_idx][ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0}
         channel_by_day[day_idx][ch_num]['trades'] += 1
         channel_by_day[day_idx][ch_num]['pnl'] += pnl
+        if suffix == 'MK':
+            channel_by_day[day_idx][ch_num]['signals'] += 1
 
         # Totaux semaine
         if sig_type not in signal_totals:
@@ -2829,9 +2832,11 @@ def _collect_weekly_report_data() -> dict:
             signal_totals[sig_type]['channels'].add(ch_num)
 
         if ch_num not in channel_totals:
-            channel_totals[ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name}
+            channel_totals[ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0}
         channel_totals[ch_num]['trades'] += 1
         channel_totals[ch_num]['pnl'] += pnl
+        if suffix == 'MK':
+            channel_totals[ch_num]['signals'] += 1
 
     return {
         'week_start': monday.isoformat(),
@@ -3024,13 +3029,14 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
 
     ch_headers = [
         ("Canal", 16, "L"),
-        ("Nom", 38, "L"),
-        ("Lu", 18, "C"),
-        ("Ma", 18, "C"),
-        ("Me", 18, "C"),
-        ("Je", 18, "C"),
-        ("Ve", 18, "C"),
-        ("Trades", 14, "C"),
+        ("Nom", 34, "L"),
+        ("Signal", 14, "C"),
+        ("Trade", 14, "C"),
+        ("Lu", 16, "C"),
+        ("Ma", 16, "C"),
+        ("Me", 16, "C"),
+        ("Je", 16, "C"),
+        ("Ve", 16, "C"),
         ("P&L", 22, "C"),
     ]
     pdf._current_table_headers = (ch_headers, ("Helvetica", "B", 8))
@@ -3043,39 +3049,44 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         sorted_channels = sorted(channel_totals.items(), key=lambda kv: -kv[1]['pnl'])
         ch_tot_pnl = 0.0
         ch_tot_trades = 0
+        ch_tot_signals = 0
         ch_tot_day_pnl = [0.0] * 5
 
         for ch_num, stats in sorted_channels:
             c_trades = stats['trades']
             c_pnl = stats['pnl']
-            c_name = _sanitize(stats['name'], 18)
+            c_signals = stats.get('signals', 0)
+            c_name = _sanitize(stats['name'], 16)
             if not c_name or c_name == '?':
                 c_name = f"CH{ch_num}"
 
             pdf.cell(16, 7, f"CH{ch_num}", border=1)
-            pdf.cell(38, 7, c_name, border=1)
+            pdf.cell(34, 7, c_name, border=1)
+            pdf.cell(14, 7, str(c_signals), border=1, align="C")
+            pdf.cell(14, 7, str(c_trades), border=1, align="C")
 
             for i in range(5):
                 if i in channel_by_day and ch_num in channel_by_day[i]:
                     day_pnl = channel_by_day[i][ch_num]['pnl']
                 else:
                     day_pnl = 0.0
-                pdf.cell(18, 7, f"{day_pnl:+.0f}", border=1, align="C", new_x="RIGHT")
+                pdf.cell(16, 7, f"{day_pnl:+.0f}", border=1, align="C", new_x="RIGHT")
                 ch_tot_day_pnl[i] += day_pnl
 
-            pdf.cell(14, 7, str(c_trades), border=1, align="C")
             pdf.cell(22, 7, f"{c_pnl:+.2f}$", border=1, align="C")
             pdf.ln()
             ch_tot_pnl += c_pnl
             ch_tot_trades += c_trades
+            ch_tot_signals += c_signals
 
         # Ligne TOTAL
         pdf.set_font("Helvetica", "B", 8)
         pdf.cell(16, 7, "TOTAL", border=1)
-        pdf.cell(38, 7, f"{len(sorted_channels)} canaux", border=1)
-        for i in range(5):
-            pdf.cell(18, 7, f"{ch_tot_day_pnl[i]:+.0f}", border=1, align="C", new_x="RIGHT")
+        pdf.cell(34, 7, f"{len(sorted_channels)} canaux", border=1)
+        pdf.cell(14, 7, str(ch_tot_signals), border=1, align="C")
         pdf.cell(14, 7, str(ch_tot_trades), border=1, align="C")
+        for i in range(5):
+            pdf.cell(16, 7, f"{ch_tot_day_pnl[i]:+.0f}", border=1, align="C", new_x="RIGHT")
         pdf.cell(22, 7, f"{ch_tot_pnl:+.2f}$", border=1, align="C")
         pdf.ln()
         pdf.set_font("Helvetica", "", 8)
