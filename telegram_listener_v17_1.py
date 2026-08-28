@@ -1523,6 +1523,14 @@ class TradeManager:
             if xlsx_path:
                 _send_telegram_document(xlsx_path, f"📋 Deals {today}")
 
+            # ★ Rapport hebdomadaire le vendredi
+            from datetime import date as date_cls
+            if date_cls.today().weekday() == 4:  # 4 = vendredi
+                weekly_data = _collect_weekly_report_data()
+                weekly_pdf = _generate_weekly_report_pdf(weekly_data)
+                if weekly_pdf:
+                    _send_telegram_document(weekly_pdf, f"📊 Rapport Hebdo {weekly_data['week_start']} → {weekly_data['week_end']}")
+
         else:
             log.info(msg.log_daily_limit_header())
             log.info(msg.log_daily_limit_detail(total, nb_positions, cancelled))
@@ -2678,6 +2686,411 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         return filepath
     except Exception as e:
         log.error(f"Erreur génération PDF: {e}")
+        return ""
+
+
+# ══════════════════════════════════════════════════════════════
+# RAPPORT HEBDOMADAIRE (Lundi → Vendredi)
+# ══════════════════════════════════════════════════════════════
+
+def _collect_weekly_report_data() -> dict:
+    """Collecte les deals de la semaine (lundi → vendredi) depuis MT5."""
+    import MetaTrader5 as mt5_local
+    from datetime import date as date_cls
+
+    today = date_cls.today()
+    # Lundi de cette semaine
+    monday = today - timedelta(days=today.weekday())
+    # Début du lundi (TRADING_START_HOUR UTC)
+    week_start = datetime(monday.year, monday.month, monday.day,
+                          TRADING_START_HOUR, 0, 0, tzinfo=timezone.utc)
+    # Fin du vendredi (TRADING_END_HOUR UTC)
+    friday = monday + timedelta(days=4)
+    week_end = datetime(friday.year, friday.month, friday.day,
+                        TRADING_END_HOUR, 0, 0, tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    if now < week_end:
+        week_end = now
+
+    all_deals = mt5_local.history_deals_get(week_start, week_end)
+    if all_deals is None:
+        all_deals = []
+
+    # Map jour → nom (Lu, Ma, Me, Je, Ve)
+    day_names = {0: 'Lu', 1: 'Ma', 2: 'Me', 3: 'Je', 4: 'Ve'}
+
+    # Indexer les deals d'ouverture
+    open_magic = {}
+    open_comment = {}
+    for deal in all_deals:
+        if deal.entry == mt5_local.DEAL_ENTRY_IN:
+            open_magic[deal.position_id] = deal.magic
+            if getattr(deal, 'comment', ''):
+                open_comment[deal.position_id] = deal.comment
+
+    # Fallback ordres
+    missing_ids = [pid for pid in open_magic if pid not in open_comment]
+    if missing_ids:
+        orders = mt5_local.history_orders_get(week_start, week_end)
+        if orders:
+            order_comment = {o.ticket: o.comment for o in orders if getattr(o, 'comment', '')}
+            for pid in missing_ids:
+                c = order_comment.get(pid)
+                if c:
+                    open_comment[pid] = c
+
+    # Nom des canaux
+    ch_name_map = {}
+    _channels_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Channels.txt')
+    try:
+        with open(_channels_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
+                if m:
+                    ch_num = int(m.group(1))
+                    raw = m.group(2)
+                    if '#' in raw:
+                        main_part, comment_part = raw.split('#', 1)
+                        main_part = main_part.strip()
+                        comment_part = comment_part.strip()
+                    else:
+                        main_part, comment_part = raw.strip(), ''
+                    try:
+                        int(main_part)
+                        is_id = True
+                    except ValueError:
+                        is_id = False
+                    if is_id:
+                        ch_name_map[ch_num] = comment_part if comment_part else f"CH{ch_num}"
+                    else:
+                        ch_name_map[ch_num] = main_part
+    except Exception:
+        pass
+
+    # Structures de données
+    # signal_types[day][type] = {'trades', 'pnl', 'channels': set}
+    # channels[day][ch_num] = {'trades', 'pnl', 'name'}
+    signal_by_day = {}  # {day_idx: {sig_type: {trades, pnl, channels: set}}}
+    channel_by_day = {}  # {day_idx: {ch_num: {trades, pnl, name}}}
+    signal_totals = {}  # {sig_type: {trades, pnl, channels: set}}
+    channel_totals = {}  # {ch_num: {trades, pnl, name}}
+
+    # Regrouper les deals de clôture
+    for deal in all_deals:
+        if deal.entry != mt5_local.DEAL_ENTRY_OUT:
+            continue
+        origin_magic = open_magic.get(deal.position_id, deal.magic)
+        if origin_magic != MAGIC_NUMBER:
+            continue
+
+        # Jour de la clôture
+        close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc)
+        day_idx = close_time.weekday()  # 0=Lu, 4=Ve
+        if day_idx > 4:
+            continue  # ignorer weekend
+
+        comment = open_comment.get(deal.position_id, '')
+        parts = comment.split('-')
+        ch_num = 0
+        for part in parts:
+            if part.startswith('CH') and part[2:].isdigit():
+                ch_num = int(part[2:])
+                break
+        sig_type = parts[1] if len(parts) >= 2 else 'Unknown'
+
+        pnl = deal.profit
+        ch_name = ch_name_map.get(ch_num, f'CH{ch_num}')
+
+        # Par jour + type de signal
+        if day_idx not in signal_by_day:
+            signal_by_day[day_idx] = {}
+        if sig_type not in signal_by_day[day_idx]:
+            signal_by_day[day_idx][sig_type] = {'trades': 0, 'pnl': 0.0, 'channels': set()}
+        signal_by_day[day_idx][sig_type]['trades'] += 1
+        signal_by_day[day_idx][sig_type]['pnl'] += pnl
+        if ch_num:
+            signal_by_day[day_idx][sig_type]['channels'].add(ch_num)
+
+        # Par jour + canal
+        if day_idx not in channel_by_day:
+            channel_by_day[day_idx] = {}
+        if ch_num not in channel_by_day[day_idx]:
+            channel_by_day[day_idx][ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name}
+        channel_by_day[day_idx][ch_num]['trades'] += 1
+        channel_by_day[day_idx][ch_num]['pnl'] += pnl
+
+        # Totaux semaine
+        if sig_type not in signal_totals:
+            signal_totals[sig_type] = {'trades': 0, 'pnl': 0.0, 'channels': set()}
+        signal_totals[sig_type]['trades'] += 1
+        signal_totals[sig_type]['pnl'] += pnl
+        if ch_num:
+            signal_totals[sig_type]['channels'].add(ch_num)
+
+        if ch_num not in channel_totals:
+            channel_totals[ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name}
+        channel_totals[ch_num]['trades'] += 1
+        channel_totals[ch_num]['pnl'] += pnl
+
+    return {
+        'week_start': monday.isoformat(),
+        'week_end': friday.isoformat(),
+        'signal_by_day': signal_by_day,
+        'channel_by_day': channel_by_day,
+        'signal_totals': signal_totals,
+        'channel_totals': channel_totals,
+    }
+
+
+def _generate_weekly_report_pdf(weekly_data: dict) -> str:
+    """Génère un PDF du rapport hebdomadaire (lundi→vendredi)."""
+    try:
+        from fpdf import FPDF
+    except ImportError:
+        try:
+            import subprocess, sys
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2", "-q"])
+            from fpdf import FPDF
+        except Exception:
+            return ""
+
+    def _sanitize(text: str, max_len: int = 0) -> str:
+        clean = re.sub(r'[^\x00-\x7F]+', '', str(text)).strip()
+        if max_len > 0:
+            clean = clean[:max_len]
+        return clean or "?"
+
+    def _table_header(pdf, headers, font_name="Helvetica", font_size=9):
+        pdf.set_font(font_name, "B", font_size)
+        pdf.set_fill_color(230, 230, 230)
+        for txt, w, align in headers:
+            pdf.cell(w, 7, txt, border=1, align=align, fill=True)
+        pdf.ln()
+        pdf.set_font(font_name, "", font_size)
+
+    class WeeklyReportPDF(FPDF):
+        _current_table_headers = None
+        def header(self):
+            if self.page_no() > 1 and self._current_table_headers:
+                headers, font_info = self._current_table_headers
+                self.set_font(*font_info)
+                self.set_fill_color(230, 230, 230)
+                for txt, w, align in headers:
+                    self.cell(w, 7, txt, border=1, align=align, fill=True)
+                self.ln()
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Helvetica", "I", 8)
+            self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
+
+    week_start = weekly_data['week_start']
+    week_end = weekly_data['week_end']
+    signal_by_day = weekly_data['signal_by_day']
+    channel_by_day = weekly_data['channel_by_day']
+    signal_totals = weekly_data['signal_totals']
+    channel_totals = weekly_data['channel_totals']
+    day_names = ['Lu', 'Ma', 'Me', 'Je', 'Ve']
+
+    pdf = WeeklyReportPDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=20)
+
+    # ── TITRE ──
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 12, f"Rapport Hebdomadaire {week_start} → {week_end}",
+             new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(6)
+
+    # ══════════════════════════════════════════════════════════════
+    # 1. RESUME GLOBAL
+    # ══════════════════════════════════════════════════════════════
+    total_pnl = sum(d['pnl'] for d in signal_totals.values())
+    total_trades = sum(d['trades'] for d in signal_totals.values())
+    total_channels = len(channel_totals)
+
+    # P&L par jour
+    daily_pnls = []
+    for i in range(5):
+        day_pnl = 0.0
+        if i in signal_by_day:
+            day_pnl = sum(d['pnl'] for d in signal_by_day[i].values())
+        daily_pnls.append(day_pnl)
+
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(45, 45, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 9, "  Resume Global", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 7, f"P&L realise : {total_pnl:+.2f}$", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"Total trades : {total_trades}  |  Canaux actifs : {total_channels}",
+             new_x="LMARGIN", new_y="NEXT")
+    # P&L par jour
+    daily_str = '  |  '.join(f"{day_names[i]}: {daily_pnls[i]:+.2f}$" for i in range(5))
+    pdf.cell(0, 7, daily_str, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(6)
+
+    # ══════════════════════════════════════════════════════════════
+    # 2. PERFORMANCE PAR TYPE DE SIGNAL
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(45, 45, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 9, "  Performance par type de signal",
+             new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    sig_headers = [
+        ("Type", 16, "L"),
+        ("Canaux", 14, "C"),
+        ("Trades", 14, "C"),
+        ("Lu", 18, "C"),
+        ("Ma", 18, "C"),
+        ("Me", 18, "C"),
+        ("Je", 18, "C"),
+        ("Ve", 18, "C"),
+        ("P&L", 22, "C"),
+    ]
+    pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 8))
+    _table_header(pdf, sig_headers, font_size=8)
+
+    if not signal_totals:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 7, "Aucun trade cette semaine", new_x="LMARGIN", new_y="NEXT")
+    else:
+        # Trier par P&L décroissant
+        sorted_types = sorted(signal_totals.items(), key=lambda kv: -kv[1]['pnl'])
+        tot_trades = 0
+        tot_pnl = 0.0
+        tot_day_trades = [0] * 5
+        tot_day_pnl = [0.0] * 5
+
+        for sig_type, stats in sorted_types:
+            st_trades = stats['trades']
+            st_pnl = stats['pnl']
+            st_channels = len(stats['channels'])
+
+            pdf.cell(16, 7, _sanitize(sig_type, 8), border=1)
+            pdf.cell(14, 7, str(st_channels), border=1, align="C")
+            pdf.cell(14, 7, str(st_trades), border=1, align="C")
+
+            for i in range(5):
+                if i in signal_by_day and sig_type in signal_by_day[i]:
+                    d = signal_by_day[i][sig_type]
+                    day_pnl = d['pnl']
+                    day_trades = d['trades']
+                else:
+                    day_pnl = 0.0
+                    day_trades = 0
+                pdf.cell(18, 7, f"{day_pnl:+.0f} ({day_trades})", border=1, align="C",
+                         new_x="RIGHT")
+                tot_day_pnl[i] += day_pnl
+                tot_day_trades[i] += day_trades
+
+            pdf.cell(22, 7, f"{st_pnl:+.2f}$", border=1, align="C")
+            pdf.ln()
+            tot_trades += st_trades
+            tot_pnl += st_pnl
+
+        # Ligne TOTAL
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(16, 7, "TOTAL", border=1)
+        pdf.cell(14, 7, "-", border=1, align="C")
+        pdf.cell(14, 7, str(tot_trades), border=1, align="C")
+        for i in range(5):
+            pdf.cell(18, 7, f"{tot_day_pnl[i]:+.0f} ({tot_day_trades[i]})", border=1,
+                     align="C", new_x="RIGHT")
+        pdf.cell(22, 7, f"{tot_pnl:+.2f}$", border=1, align="C")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 8)
+
+    pdf._current_table_headers = None
+    pdf.ln(6)
+
+    # ══════════════════════════════════════════════════════════════
+    # 3. PERFORMANCE PAR CANAL
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(45, 45, 45)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 9, "  Performance par canal", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    ch_headers = [
+        ("Canal", 16, "L"),
+        ("Nom", 38, "L"),
+        ("Lu", 18, "C"),
+        ("Ma", 18, "C"),
+        ("Me", 18, "C"),
+        ("Je", 18, "C"),
+        ("Ve", 18, "C"),
+        ("Trades", 14, "C"),
+        ("P&L", 22, "C"),
+    ]
+    pdf._current_table_headers = (ch_headers, ("Helvetica", "B", 8))
+    _table_header(pdf, ch_headers, font_size=8)
+
+    if not channel_totals:
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.cell(0, 7, "Aucun canal actif cette semaine", new_x="LMARGIN", new_y="NEXT")
+    else:
+        sorted_channels = sorted(channel_totals.items(), key=lambda kv: -kv[1]['pnl'])
+        ch_tot_pnl = 0.0
+        ch_tot_trades = 0
+        ch_tot_day_pnl = [0.0] * 5
+
+        for ch_num, stats in sorted_channels:
+            c_trades = stats['trades']
+            c_pnl = stats['pnl']
+            c_name = _sanitize(stats['name'], 18)
+            if not c_name or c_name == '?':
+                c_name = f"CH{ch_num}"
+
+            pdf.cell(16, 7, f"CH{ch_num}", border=1)
+            pdf.cell(38, 7, c_name, border=1)
+
+            for i in range(5):
+                if i in channel_by_day and ch_num in channel_by_day[i]:
+                    day_pnl = channel_by_day[i][ch_num]['pnl']
+                else:
+                    day_pnl = 0.0
+                pdf.cell(18, 7, f"{day_pnl:+.0f}", border=1, align="C", new_x="RIGHT")
+                ch_tot_day_pnl[i] += day_pnl
+
+            pdf.cell(14, 7, str(c_trades), border=1, align="C")
+            pdf.cell(22, 7, f"{c_pnl:+.2f}$", border=1, align="C")
+            pdf.ln()
+            ch_tot_pnl += c_pnl
+            ch_tot_trades += c_trades
+
+        # Ligne TOTAL
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(16, 7, "TOTAL", border=1)
+        pdf.cell(38, 7, f"{len(sorted_channels)} canaux", border=1)
+        for i in range(5):
+            pdf.cell(18, 7, f"{ch_tot_day_pnl[i]:+.0f}", border=1, align="C", new_x="RIGHT")
+        pdf.cell(14, 7, str(ch_tot_trades), border=1, align="C")
+        pdf.cell(22, 7, f"{ch_tot_pnl:+.2f}$", border=1, align="C")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 8)
+
+    pdf._current_table_headers = None
+
+    # ── Sauvegarde ──
+    filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            f"weekly_report_{week_start}_{week_end}.pdf")
+    try:
+        pdf.output(filepath)
+        log.info(f"PDF rapport hebdo généré: {filepath}")
+        return filepath
+    except Exception as e:
+        log.error(f"Erreur génération PDF hebdo: {e}")
         return ""
 
 
