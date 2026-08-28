@@ -2817,9 +2817,11 @@ def _collect_weekly_report_data() -> dict:
         if day_idx not in channel_by_day:
             channel_by_day[day_idx] = {}
         if ch_num not in channel_by_day[day_idx]:
-            channel_by_day[day_idx][ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0}
+            channel_by_day[day_idx][ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0, 'wins': 0}
         channel_by_day[day_idx][ch_num]['trades'] += 1
         channel_by_day[day_idx][ch_num]['pnl'] += pnl
+        if pnl > 0:
+            channel_by_day[day_idx][ch_num]['wins'] += 1
         if suffix == 'MK':
             channel_by_day[day_idx][ch_num]['signals'] += 1
 
@@ -2832,9 +2834,11 @@ def _collect_weekly_report_data() -> dict:
             signal_totals[sig_type]['channels'].add(ch_num)
 
         if ch_num not in channel_totals:
-            channel_totals[ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0}
+            channel_totals[ch_num] = {'trades': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0, 'wins': 0}
         channel_totals[ch_num]['trades'] += 1
         channel_totals[ch_num]['pnl'] += pnl
+        if pnl > 0:
+            channel_totals[ch_num]['wins'] += 1
         if suffix == 'MK':
             channel_totals[ch_num]['signals'] += 1
 
@@ -3038,6 +3042,7 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         ("Je", 16, "C"),
         ("Ve", 16, "C"),
         ("P&L", 22, "C"),
+        ("Wr", 14, "C"),
     ]
     pdf._current_table_headers = (ch_headers, ("Helvetica", "B", 8))
     _table_header(pdf, ch_headers, font_size=8)
@@ -3050,36 +3055,55 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         ch_tot_pnl = 0.0
         ch_tot_trades = 0
         ch_tot_signals = 0
+        ch_tot_wins = 0
         ch_tot_day_pnl = [0.0] * 5
 
         for ch_num, stats in sorted_channels:
             c_trades = stats['trades']
             c_pnl = stats['pnl']
             c_signals = stats.get('signals', 0)
-            c_name = _sanitize(stats['name'], 16)
+            c_wins = stats.get('wins', 0)
+            c_wr = c_wins / c_trades * 100 if c_trades > 0 else 0
+            c_name = _sanitize(stats['name'], 30)
             if not c_name or c_name == '?':
                 c_name = f"CH{ch_num}"
 
-            pdf.cell(16, 7, f"CH{ch_num}", border=1)
-            pdf.cell(34, 7, c_name, border=1)
-            pdf.cell(14, 7, str(c_signals), border=1, align="C")
-            pdf.cell(14, 7, str(c_trades), border=1, align="C")
+            # Hauteur de ligne : 2 lignes si nom long, sinon 1
+            row_h = 10 if len(c_name) > 16 else 7
+            x_start = pdf.get_x()
+            y_start = pdf.get_y()
+
+            pdf.cell(16, row_h, f"CH{ch_num}", border=1)
+
+            # Nom avec multi_cell pour les noms longs
+            if len(c_name) > 16:
+                pdf.multi_cell(34, 5, c_name, border=1)
+                # Repositionner X après multi_cell
+                pdf.set_xy(x_start + 16 + 34, y_start)
+            else:
+                pdf.cell(34, row_h, c_name, border=1)
+
+            pdf.cell(14, row_h, str(c_signals), border=1, align="C")
+            pdf.cell(14, row_h, str(c_trades), border=1, align="C")
 
             for i in range(5):
                 if i in channel_by_day and ch_num in channel_by_day[i]:
                     day_pnl = channel_by_day[i][ch_num]['pnl']
                 else:
                     day_pnl = 0.0
-                pdf.cell(16, 7, f"{day_pnl:+.0f}", border=1, align="C", new_x="RIGHT")
+                pdf.cell(16, row_h, f"{day_pnl:+.0f}", border=1, align="C", new_x="RIGHT")
                 ch_tot_day_pnl[i] += day_pnl
 
-            pdf.cell(22, 7, f"{c_pnl:+.2f}$", border=1, align="C")
+            pdf.cell(22, row_h, f"{c_pnl:+.2f}$", border=1, align="C")
+            pdf.cell(14, row_h, f"{c_wr:.0f}%", border=1, align="C")
             pdf.ln()
             ch_tot_pnl += c_pnl
             ch_tot_trades += c_trades
             ch_tot_signals += c_signals
+            ch_tot_wins += c_wins
 
         # Ligne TOTAL
+        ch_tot_wr = ch_tot_wins / ch_tot_trades * 100 if ch_tot_trades > 0 else 0
         pdf.set_font("Helvetica", "B", 8)
         pdf.cell(16, 7, "TOTAL", border=1)
         pdf.cell(34, 7, f"{len(sorted_channels)} canaux", border=1)
@@ -3088,6 +3112,7 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         for i in range(5):
             pdf.cell(16, 7, f"{ch_tot_day_pnl[i]:+.0f}", border=1, align="C", new_x="RIGHT")
         pdf.cell(22, 7, f"{ch_tot_pnl:+.2f}$", border=1, align="C")
+        pdf.cell(14, 7, f"{ch_tot_wr:.0f}%", border=1, align="C")
         pdf.ln()
         pdf.set_font("Helvetica", "", 8)
 
