@@ -617,64 +617,53 @@ def update_config(updates: EnvBulkUpdate):
             key, _, value = stripped.partition("=")
             existing[key.strip()] = value.strip()
 
-    # Appliquer les mises à jour
-    deleted_keys = set()
+    # Séparer les canaux TG_CHANNEL_X envoyés par l'app
+    incoming_channels = []
     for key, value in updates.values.items():
-        # Ne pas écraser les passwords avec ***
+        if key.startswith("TG_CHANNEL_") and key[11:].isdigit():
+            if value:  # ignorer les vides
+                incoming_channels.append((key, value))
+    incoming_channels.sort()  # TG_CHANNEL_1, TG_CHANNEL_2, ...
+
+    # Appliquer les autres mises à jour (non-canaux)
+    for key, value in updates.values.items():
+        if key.startswith("TG_CHANNEL_"):
+            continue  # canaux gérés séparément
         if value == "***":
             continue
-        # Supprimer les clés vides
-        if value == "" and key in existing:
-            del existing[key]
-            deleted_keys.add(key)
-            continue
-        existing[key] = value
-
+        if value == "":
+            existing.pop(key, None)
+        else:
+            existing[key] = value
     # Réécrire le fichier
+    # 1. Supprimer TOUS les anciens TG_CHANNEL_X
+    # 2. Réécrire les autres clés
+    # 3. Insérer les nouveaux canaux au bon endroit
     new_lines = []
-    written_keys = set()
+    channel_insert_idx = -1
     for line in lines:
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
-            if key in deleted_keys:
-                continue  # clé supprimée → on saute la ligne
+            if key.startswith("TG_CHANNEL_") and key[11:].isdigit():
+                # Supprimer — on réécrira les nouveaux après
+                if channel_insert_idx < 0:
+                    channel_insert_idx = len(new_lines)
+                continue
             if key in existing:
                 new_lines.append(f"{key}={existing[key]}\n")
-                written_keys.add(key)
-            else:
-                new_lines.append(line)
+            # else: clé supprimée → on saute
         else:
+            # Ligne de commentaire — repérer l'insertion après Fallback
+            if "Fallback" in stripped or "TG_ALERT_CHANNEL" in stripped:
+                channel_insert_idx = len(new_lines) + 1
             new_lines.append(line)
 
-    # Ajouter les nouvelles clés
-    # Séparer les TG_CHANNEL_X des autres nouvelles clés
-    new_channel_keys = []
-    new_other_keys = []
-    for key, value in existing.items():
-        if key not in written_keys:
-            if key.startswith("TG_CHANNEL_") and key[11:].isdigit():
-                new_channel_keys.append((key, value))
-            else:
-                new_other_keys.append((key, value))
-
-    # Insérer les nouveaux canaux après le dernier TG_CHANNEL_X existant
-    if new_channel_keys:
-        last_ch_idx = -1
-        for i, line in enumerate(new_lines):
-            stripped = line.strip()
-            if stripped.startswith("TG_CHANNEL_") and not stripped.startswith("#"):
-                last_ch_idx = i
-        if last_ch_idx >= 0:
-            for j, (key, value) in enumerate(sorted(new_channel_keys)):
-                new_lines.insert(last_ch_idx + 1 + j, f"{key}={value}\n")
-        else:
-            for key, value in sorted(new_channel_keys):
-                new_lines.append(f"{key}={value}\n")
-
-    # Ajouter les autres nouvelles clés à la fin
-    for key, value in new_other_keys:
-        new_lines.append(f"{key}={value}\n")
+    # Insérer les nouveaux canaux
+    if channel_insert_idx < 0:
+        channel_insert_idx = len(new_lines)
+    for j, (key, value) in enumerate(incoming_channels):
+        new_lines.insert(channel_insert_idx + j, f"{key}={value}\n")
 
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
