@@ -638,15 +638,38 @@ def update_config(updates: EnvBulkUpdate):
             if key in existing:
                 new_lines.append(f"{key}={existing[key]}\n")
                 written_keys.add(key)
-            else:
-                new_lines.append(line)
+            # else: clé supprimée → on saute la ligne
         else:
             new_lines.append(line)
 
     # Ajouter les nouvelles clés
+    # Séparer les TG_CHANNEL_X des autres nouvelles clés
+    new_channel_keys = []
+    new_other_keys = []
     for key, value in existing.items():
         if key not in written_keys:
-            new_lines.append(f"{key}={value}\n")
+            if key.startswith("TG_CHANNEL_") and key[11:].isdigit():
+                new_channel_keys.append((key, value))
+            else:
+                new_other_keys.append((key, value))
+
+    # Insérer les nouveaux canaux après le dernier TG_CHANNEL_X existant
+    if new_channel_keys:
+        last_ch_idx = -1
+        for i, line in enumerate(new_lines):
+            stripped = line.strip()
+            if stripped.startswith("TG_CHANNEL_") and not stripped.startswith("#"):
+                last_ch_idx = i
+        if last_ch_idx >= 0:
+            for j, (key, value) in enumerate(sorted(new_channel_keys)):
+                new_lines.insert(last_ch_idx + 1 + j, f"{key}={value}\n")
+        else:
+            for key, value in sorted(new_channel_keys):
+                new_lines.append(f"{key}={value}\n")
+
+    # Ajouter les autres nouvelles clés à la fin
+    for key, value in new_other_keys:
+        new_lines.append(f"{key}={value}\n")
 
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
@@ -889,11 +912,11 @@ def list_files(path: str = ""):
 @app.post("/api/restart")
 def restart_server():
     """Redémarre uvicorn pour recharger bot_api.py."""
-    import threading
-    def _delayed_exit():
-        import time; time.sleep(1)
-        os._exit(0)
-    threading.Thread(target=_delayed_exit, daemon=True).start()
+    import threading, sys
+    def _restart():
+        import time; time.sleep(2)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    threading.Thread(target=_restart, daemon=True).start()
     return {"status": "restarting"}
 
 if __name__ == "__main__":
