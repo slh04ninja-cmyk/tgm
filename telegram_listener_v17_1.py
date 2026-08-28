@@ -2899,7 +2899,7 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
 
     # ── TITRE ──
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, f"Rapport Hebdomadaire {week_start} → {week_end}",
+    pdf.cell(0, 12, f"Rapport Hebdomadaire {week_start} - {week_end}",
              new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(6)
 
