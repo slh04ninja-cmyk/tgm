@@ -618,6 +618,7 @@ def update_config(updates: EnvBulkUpdate):
             existing[key.strip()] = value.strip()
 
     # Appliquer les mises à jour
+    deleted_keys = set()
     for key, value in updates.values.items():
         # Ne pas écraser les passwords avec ***
         if value == "***":
@@ -625,6 +626,7 @@ def update_config(updates: EnvBulkUpdate):
         # Supprimer les clés vides
         if value == "" and key in existing:
             del existing[key]
+            deleted_keys.add(key)
             continue
         existing[key] = value
 
@@ -635,10 +637,13 @@ def update_config(updates: EnvBulkUpdate):
         stripped = line.strip()
         if stripped and not stripped.startswith("#") and "=" in stripped:
             key = stripped.split("=", 1)[0].strip()
+            if key in deleted_keys:
+                continue  # clé supprimée → on saute la ligne
             if key in existing:
                 new_lines.append(f"{key}={existing[key]}\n")
                 written_keys.add(key)
-            # else: clé supprimée → on saute la ligne
+            else:
+                new_lines.append(line)
         else:
             new_lines.append(line)
 
