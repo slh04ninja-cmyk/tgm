@@ -62,20 +62,27 @@ def alert_close(label: str, action: str, symbol: str, pnl: float, idx: int, tota
 # =============================================================
 # 3. SIGNAUX (ZN1/ZN2, PU1/PU2, AL-MP)
 # =============================================================
-def log_signal_detected(mt5_comment: str, action: str, entry_price) -> str:
-    return f"===  {mt5_comment} | {action}  ==="
+def log_signal_detected(mt5_comment: str, action: str, entry_price, current_price=None) -> str:
+    """Log de réception pour MP/PU/AL."""
+    parts = [mt5_comment, action]
+    if entry_price is not None:
+        parts.append(f"PE={entry_price}")
+    if current_price is not None:
+        parts.append(f"PA={current_price}")
+    return f"== {' | '.join(parts)} =="
 
 
-def log_signal_detected_zone(mt5_comment: str, action: str, zone_low: float, zone_high: float) -> str:
-    """Log de détection pour les signaux zone."""
-    return f"===  {mt5_comment} | {action} | ZN={zone_low}-{zone_high}  ==="
+def log_signal_detected_zone(mt5_comment: str, action: str, zone_low: float, zone_high: float, current_price=None) -> str:
+    """Log de réception pour les signaux zone."""
+    pa = f" | PA={current_price}" if current_price is not None else ""
+    return f"== {mt5_comment} | {action}{pa} | ZN={zone_low}-{zone_high} =="
 
 
 # =============================================================
 # 4. REJET DE SIGNAL
 # =============================================================
 def log_refuse(ch_num, suffix: str, motif: str) -> str:
-    return f"CH{ch_num}{suffix} | REFUSÉ | {motif}"
+    return f"CH{ch_num}{suffix} | REFUSE | {motif}"
 
 
 # Motifs standards

@@ -693,7 +693,7 @@ class SignalParser:
             # ★ FIX : fallback XAUUSD par défaut si aucun symbole détecté
             # (certains canaux Gold n'écrivent pas GOLD/XAUUSD dans leurs signaux)
             symbol = "XAUUSD"
-            log.info(f"[PARSING] Symbole non trouvé → fallback XAUUSD : {normalized_text[:80]}")
+            log.debug(f"[PARSING] Symbole non trouvé → fallback XAUUSD : {normalized_text[:80]}")
 
         action = _extract_action(normalized_text)
         if not action:
@@ -708,7 +708,7 @@ class SignalParser:
         if zone_low is None:
             # --- MARKET PRICE : signal sans prix (ex: GOLD BUY NOW, BUY XAUUSD NOW) ---
             if self._is_market_now(normalized_text):
-                log.info(f"[PARSING] Market price signal détecté: {action} {symbol}")
+                log.debug(f"[PARSING] Market price signal détecté: {action} {symbol}")
                 sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
                 RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
                 if action == "BUY":
@@ -747,14 +747,14 @@ class SignalParser:
             zone_low = min(zone_low, merge_price)
             zone_high = max(zone_high, merge_price)
             is_single = False
-            log.info(f"MORE détecté → zone [{zone_low}, {zone_high}]")
+            log.debug(f"MORE détecté → zone [{zone_low}, {zone_high}]")
 
         # ★ FIX : TP sans mot-clé — chercher les nombres entre zone et SL
         if not tps and sl is not None:
             orphan_tps = _extract_orphan_tps(normalized_text, zone_low, zone_high, sl, action)
             if orphan_tps:
                 tps = orphan_tps
-                log.info(f"TP détectés sans mot-clé: {tps}")
+                log.debug(f"TP détectés sans mot-clé: {tps}")
 
         # ★ FIX : détecter les signaux à double zones (résultat + signal)
         # Compte les paires de nombres (hors TPs et SL) qui ressemblent à des zones.
@@ -775,7 +775,7 @@ class SignalParser:
                 distance = entry_mid - avg_tp
                 sl = entry_mid + max(distance * 1.5, 2.0)
             sl = round(sl, 2)
-            log.info(f"SL généré automatiquement : {sl} (basé sur les TPs)")
+            log.debug(f"SL généré automatiquement : {sl} (basé sur les TPs)")
 
         # Génération auto TP si SL présent mais pas de TPs
         if sl is not None and not tps:
@@ -786,11 +786,11 @@ class SignalParser:
             else:
                 tp = entry_mid - (sl - entry_mid) * RR_RATIO
             tps = [round(tp, 2)]
-            log.info(f"TP généré automatiquement : {tps[0]} (RR={RR_RATIO})")
+            log.debug(f"TP généré automatiquement : {tps[0]} (RR={RR_RATIO})")
 
         # Quick alert si ni TP ni SL
         if not tps and sl is None:
-            log.info(f"Quick alert détecté: {action} {symbol} @{zone_low}")
+            log.debug(f"Quick alert détecté: {action} {symbol} @{zone_low}")
             sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
             RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
             entry_mid = (zone_low + zone_high) / 2
