@@ -2699,12 +2699,9 @@ def _collect_weekly_report_data() -> dict:
     from datetime import date as date_cls
 
     today = date_cls.today()
-    # Lundi de cette semaine
     monday = today - timedelta(days=today.weekday())
-    # Début du lundi (TRADING_START_HOUR UTC)
     week_start = datetime(monday.year, monday.month, monday.day,
                           TRADING_START_HOUR, 0, 0, tzinfo=timezone.utc)
-    # Fin du vendredi (TRADING_END_HOUR UTC)
     friday = monday + timedelta(days=4)
     week_end = datetime(friday.year, friday.month, friday.day,
                         TRADING_END_HOUR, 0, 0, tzinfo=timezone.utc)
@@ -2717,8 +2714,11 @@ def _collect_weekly_report_data() -> dict:
     if all_deals is None:
         all_deals = []
 
-    # Map jour → nom (Lu, Ma, Me, Je, Ve)
     day_names = {0: 'Lu', 1: 'Ma', 2: 'Me', 3: 'Je', 4: 'Ve'}
+    day_dates = {}  # {0: '24/08/2026', ...}
+    for i in range(5):
+        d = monday + timedelta(days=i)
+        day_dates[i] = d.strftime('%d/%m/%Y')
 
     # Indexer les deals d'ouverture
     open_magic = {}
@@ -2769,12 +2769,14 @@ def _collect_weekly_report_data() -> dict:
         pass
 
     # Structures de données
-    # signal_types[day][type] = {'trades', 'pnl', 'channels': set}
-    # channels[day][ch_num] = {'trades', 'pnl', 'name'}
-    signal_by_day = {}  # {day_idx: {sig_type: {trades, pnl, channels: set}}}
-    channel_by_day = {}  # {day_idx: {ch_num: {trades, pnl, name}}}
-    signal_totals = {}  # {sig_type: {trades, pnl, channels: set}}
-    channel_totals = {}  # {ch_num: {trades, pnl, name}}
+    signal_by_day = {}
+    channel_by_day = {}
+    signal_totals = {}
+    channel_totals = {}
+
+    # Nouvelles structures pour le rapport enrichi
+    daily_summary = {i: {'pnl': 0.0, 'wins': 0, 'losses': 0, 'trades': 0} for i in range(5)}
+    channel_wins = {}  # {ch_num: wins} global semaine
 
     # Regrouper les deals de clôture
     for deal in all_deals:
@@ -2784,11 +2786,10 @@ def _collect_weekly_report_data() -> dict:
         if origin_magic != MAGIC_NUMBER:
             continue
 
-        # Jour de la clôture
         close_time = datetime.fromtimestamp(deal.time, tz=timezone.utc)
-        day_idx = close_time.weekday()  # 0=Lu, 4=Ve
+        day_idx = close_time.weekday()
         if day_idx > 4:
-            continue  # ignorer weekend
+            continue
 
         comment = open_comment.get(deal.position_id, '')
         parts = comment.split('-')
@@ -2801,6 +2802,14 @@ def _collect_weekly_report_data() -> dict:
 
         pnl = deal.profit
         ch_name = ch_name_map.get(ch_num, f'CH{ch_num}')
+
+        # Daily summary
+        daily_summary[day_idx]['pnl'] += pnl
+        daily_summary[day_idx]['trades'] += 1
+        if pnl > 0:
+            daily_summary[day_idx]['wins'] += 1
+        else:
+            daily_summary[day_idx]['losses'] += 1
 
         # Par jour + type de signal
         if day_idx not in signal_by_day:
@@ -2842,18 +2851,78 @@ def _collect_weekly_report_data() -> dict:
         if suffix == 'MK':
             channel_totals[ch_num]['signals'] += 1
 
+    # Max Drawdown: P&L cumulé minimum de la semaine
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    for i in range(5):
+        cumulative += daily_summary[i]['pnl']
+        if cumulative > peak:
+            peak = cumulative
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+
+    # Totaux globaux
+    total_wins = sum(d['wins'] for d in daily_summary.values())
+    total_losses = sum(d['losses'] for d in daily_summary.values())
+    total_trades = sum(d['trades'] for d in daily_summary.values())
+    total_pnl = sum(d['pnl'] for d in daily_summary.values())
+
+    # Signaux supprimés par canal (depuis _signal_tracker)
+    deleted_by_channel = {}
+    try:
+        for mid, info in _signal_tracker.items():
+            if not info.get("deleted"):
+                continue
+            ts = info.get("timestamp", 0)
+            if ts < week_start.timestamp():
+                continue
+            ch_num = info.get("channel_num", 0)
+            ch_name = info.get("channel_name", f"CH{ch_num}")
+            if ch_num not in deleted_by_channel:
+                deleted_by_channel[ch_num] = {'name': ch_name, 'count': 0, 'examples': []}
+            deleted_by_channel[ch_num]['count'] += 1
+            preview = info.get("text_preview", "")
+            recv_time = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%H:%M")
+            if len(deleted_by_channel[ch_num]['examples']) < 3:
+                deleted_by_channel[ch_num]['examples'].append(f"[{recv_time}] {preview[:60]}")
+    except Exception:
+        pass
+
+    # Noms de mois ASCII (strftime peut produire des caractères non-ASCII en locale FR)
+    _MONTHS_FR = {1: 'Janvier', 2: 'Fevrier', 3: 'Mars', 4: 'Avril', 5: 'Mai', 6: 'Juin',
+                  7: 'Juillet', 8: 'Aout', 9: 'Septembre', 10: 'Octobre', 11: 'Novembre', 12: 'Decembre'}
+    _start_month = _MONTHS_FR.get(monday.month, str(monday.month))
+    _end_month = _MONTHS_FR.get(friday.month, str(friday.month))
     return {
         'week_start': monday.isoformat(),
         'week_end': friday.isoformat(),
+        'week_start_display': f'{monday.day:02d} {_start_month} {monday.year}',
+        'week_end_display': f'{friday.day:02d} {_end_month} {friday.year}',
+        'day_names': ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'],
+        'day_dates': day_dates,
         'signal_by_day': signal_by_day,
         'channel_by_day': channel_by_day,
         'signal_totals': signal_totals,
         'channel_totals': channel_totals,
+        'daily_summary': daily_summary,
+        'total_pnl': total_pnl,
+        'total_trades': total_trades,
+        'total_wins': total_wins,
+        'total_losses': total_losses,
+        'total_channels': len(channel_totals),
+        'max_drawdown': max_dd,
+        'deleted_by_channel': deleted_by_channel,
     }
 
 
+# ══════════════════════════════════════════════════════════════
+# FONCTION 2: _generate_weekly_report_pdf()
+# ══════════════════════════════════════════════════════════════
+
 def _generate_weekly_report_pdf(weekly_data: dict) -> str:
-    """Génère un PDF du rapport hebdomadaire (lundi→vendredi)."""
+    """Génère un PDF du rapport hebdomadaire au format du modèle."""
     try:
         from fpdf import FPDF
     except ImportError:
@@ -2870,100 +2939,220 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
             clean = clean[:max_len]
         return clean or "?"
 
+    def _fmt_pnl(val: float) -> str:
+        """Formate P&L comme '+549,94 $' ou '-114,86 $'."""
+        sign = '+' if val >= 0 else ''
+        return f"{sign}{val:,.2f} $".replace(',', 'X').replace('.', ',').replace('X', '.')
+
     def _table_header(pdf, headers, font_name="Helvetica", font_size=9):
         pdf.set_font(font_name, "B", font_size)
-        pdf.set_fill_color(230, 230, 230)
+        pdf.set_fill_color(210, 210, 225)
+        pdf.set_text_color(40, 40, 60)
         for txt, w, align in headers:
             pdf.cell(w, 7, txt, border=1, align=align, fill=True)
         pdf.ln()
         pdf.set_font(font_name, "", font_size)
+        pdf.set_text_color(0, 0, 0)
 
     class WeeklyReportPDF(FPDF):
         _current_table_headers = None
+
         def header(self):
             if self.page_no() > 1 and self._current_table_headers:
                 headers, font_info = self._current_table_headers
                 self.set_font(*font_info)
-                self.set_fill_color(230, 230, 230)
+                self.set_fill_color(50, 50, 70)
+                self.set_text_color(255, 255, 255)
                 for txt, w, align in headers:
                     self.cell(w, 7, txt, border=1, align=align, fill=True)
                 self.ln()
+                self.set_text_color(0, 0, 0)
+
         def footer(self):
             self.set_y(-15)
             self.set_font("Helvetica", "I", 8)
             self.cell(0, 10, f"Page {self.page_no()}/{{nb}}", align="C")
 
+    # ── Données ──
     week_start = weekly_data['week_start']
     week_end = weekly_data['week_end']
+    week_start_display = weekly_data.get('week_start_display', week_start)
+    week_end_display = weekly_data.get('week_end_display', week_end)
+    day_names = weekly_data.get('day_names', ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'])
+    day_dates = weekly_data.get('day_dates', {})
     signal_by_day = weekly_data['signal_by_day']
     channel_by_day = weekly_data['channel_by_day']
     signal_totals = weekly_data['signal_totals']
     channel_totals = weekly_data['channel_totals']
-    day_names = ['Lu', 'Ma', 'Me', 'Je', 'Ve']
+    daily_summary = weekly_data.get('daily_summary', {})
+    total_pnl = weekly_data.get('total_pnl', 0.0)
+    total_trades = weekly_data.get('total_trades', 0)
+    total_wins = weekly_data.get('total_wins', 0)
+    total_losses = weekly_data.get('total_losses', 0)
+    total_channels = weekly_data.get('total_channels', 0)
+    max_dd = weekly_data.get('max_drawdown', 0.0)
+    deleted_by_channel = weekly_data.get('deleted_by_channel', {})
+
+    winrate = total_wins / total_trades * 100 if total_trades > 0 else 0.0
 
     pdf = WeeklyReportPDF()
     pdf.alias_nb_pages()
+    pdf.set_left_margin(10)
+    pdf.set_right_margin(10)
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
 
-    # ── TITRE ──
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 12, f"Rapport Hebdomadaire {week_start} - {week_end}",
+    # ══════════════════════════════════════════════════════════════
+    # TITRE
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 14, "RAPPORT HEBDOMADAIRE DE TRADING",
              new_x="LMARGIN", new_y="NEXT", align="C")
-    pdf.ln(6)
-
-    # ══════════════════════════════════════════════════════════════
-    # 1. RESUME GLOBAL
-    # ══════════════════════════════════════════════════════════════
-    total_pnl = sum(d['pnl'] for d in signal_totals.values())
-    total_trades = sum(d['trades'] for d in signal_totals.values())
-    total_channels = len(channel_totals)
-
-    # P&L par jour
-    daily_pnls = []
-    for i in range(5):
-        day_pnl = 0.0
-        if i in signal_by_day:
-            day_pnl = sum(d['pnl'] for d in signal_by_day[i].values())
-        daily_pnls.append(day_pnl)
-
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.set_fill_color(45, 45, 45)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 9, "  Resume Global", new_x="LMARGIN", new_y="NEXT", fill=True)
-    pdf.set_text_color(0, 0, 0)
-    pdf.ln(3)
-
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 7, f"P&L realise : {total_pnl:+.2f}$", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 7, f"Total trades : {total_trades}  |  Canaux actifs : {total_channels}",
-             new_x="LMARGIN", new_y="NEXT")
-    # P&L par jour
-    daily_str = '  |  '.join(f"{day_names[i]}: {daily_pnls[i]:+.2f}$" for i in range(5))
-    pdf.cell(0, 7, daily_str, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(0, 8,
+             _sanitize(f"Periode du {week_start_display} au {week_end_display} - Synthese Globale & Performance"),
+             new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(30)
+
+    # ══════════════════════════════════════════════════════════════
+    # 5 KPI CARDS
+    # ══════════════════════════════════════════════════════════════
+    card_w = 36
+    card_h = 22
+    card_gap = 4
+    total_cards_w = 5 * card_w + 4 * card_gap
+    x_start = (210 - total_cards_w) / 2  # centré sur A4
+
+    kpis = [
+        ("P&L REALISE", _fmt_pnl(total_pnl), (0, 180, 80) if total_pnl >= 0 else (220, 50, 50)),
+        ("WINRATE GLOBAL", f"{winrate:.1f} %", (100, 100, 200)),
+        ("WINS / LOSSES", f"{total_wins} / {total_losses}", (100, 100, 100)),
+        ("TOTAL TRADES", f"{total_trades} ({total_channels})", (100, 100, 100)),
+        ("MAX DRAWDOWN", f"-{max_dd:,.2f} $".replace(',', ' ').replace('.', ','), (220, 50, 50)),
+    ]
+
+    y_cards = pdf.get_y()
+    for i, (label, value, color) in enumerate(kpis):
+        x = x_start + i * (card_w + card_gap)
+
+        # Fond de carte
+        pdf.set_fill_color(245, 245, 250)
+        pdf.set_draw_color(180, 180, 200)
+        pdf.rect(x, y_cards, card_w, card_h, style='DF')
+
+        # Label
+        pdf.set_xy(x, y_cards + 2)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(80, 80, 100)
+        pdf.cell(card_w, 5, label, align="C")
+
+        # Valeur
+        pdf.set_xy(x, y_cards + 9)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*color)
+        pdf.cell(card_w, 10, value, align="C")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(y_cards + card_h + 8)
+
+    # ══════════════════════════════════════════════════════════════
+    # PERFORMANCE QUOTIDIENNE
+    # ══════════════════════════════════════════════════════════════
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_fill_color(220, 220, 235)
+    pdf.set_text_color(40, 40, 60)
+    pdf.cell(0, 9, "  PERFORMANCE QUOTIDIENNE",
+             new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    daily_headers = [
+        ("JOUR", 30, "L"),
+        ("DATE", 35, "C"),
+        ("P&L ($)", 35, "C"),
+        ("STATUT", 40, "C"),
+    ]
+    pdf._current_table_headers = (daily_headers, ("Helvetica", "B", 9))
+    _table_header(pdf, daily_headers, font_size=9)
+
+    week_pnl_check = 0.0
+    for i in range(5):
+        ds = daily_summary.get(i, {'pnl': 0.0, 'wins': 0, 'losses': 0})
+        day_pnl = ds['pnl']
+        week_pnl_check += day_pnl
+
+        # Couleur de fond alternée
+        if i % 2 == 0:
+            pdf.set_fill_color(245, 245, 250)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(30, 8, day_names[i], border=1, fill=True)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(35, 8, day_dates.get(i, ''), border=1, align="C", fill=True)
+
+        # P&L coloré
+        if day_pnl >= 0:
+            pdf.set_text_color(0, 150, 0)
+        else:
+            pdf.set_text_color(200, 0, 0)
+        pdf.cell(35, 8, _fmt_pnl(day_pnl), border=1, align="C", fill=True)
+        pdf.set_text_color(0, 0, 0)
+
+        # Statut
+        if day_pnl >= 0:
+            status = "[+] Profit"
+        else:
+            status = "[-] Perte"
+            # Vérifier si c'est le jour du max drawdown
+            cumul = sum(daily_summary.get(j, {'pnl': 0})['pnl'] for j in range(i + 1))
+            if cumul <= 0:
+                status += " (Max DD)"
+        pdf.cell(40, 8, status, border=1, align="C", fill=True)
+        pdf.ln()
+
+    # Ligne TOTAL
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(230, 230, 240)
+    pdf.cell(30, 8, "TOTAL SEMAINE", border=1, fill=True)
+    pdf.cell(35, 8, "", border=1, fill=True)
+    if total_pnl >= 0:
+        pdf.set_text_color(0, 150, 0)
+    else:
+        pdf.set_text_color(200, 0, 0)
+    pdf.cell(35, 8, _fmt_pnl(total_pnl), border=1, align="C", fill=True)
+    pdf.set_text_color(0, 0, 0)
+    status_week = "[+] Semaine Gagnante" if total_pnl >= 0 else "[-] Semaine Perdante"
+    pdf.cell(40, 8, status_week, border=1, align="C", fill=True)
+    pdf.ln()
+
+    pdf._current_table_headers = None
     pdf.ln(6)
 
     # ══════════════════════════════════════════════════════════════
-    # 2. PERFORMANCE PAR TYPE DE SIGNAL
+    # PERFORMANCE PAR TYPE DE SIGNAL
     # ══════════════════════════════════════════════════════════════
     pdf.set_font("Helvetica", "B", 13)
-    pdf.set_fill_color(45, 45, 45)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 9, "  Performance par type de signal",
+    pdf.set_fill_color(220, 220, 235)
+    pdf.set_text_color(40, 40, 60)
+    pdf.cell(0, 9, "  PERFORMANCE PAR TYPE DE SIGNAL",
              new_x="LMARGIN", new_y="NEXT", fill=True)
     pdf.set_text_color(0, 0, 0)
     pdf.ln(2)
 
     sig_headers = [
-        ("Type", 16, "L"),
-        ("Canaux", 14, "C"),
-        ("Trades", 14, "C"),
-        ("Lu", 18, "C"),
-        ("Ma", 18, "C"),
-        ("Me", 18, "C"),
-        ("Je", 18, "C"),
-        ("Ve", 18, "C"),
-        ("P&L", 22, "C"),
+        ("TYPE", 16, "L"),
+        ("CANAUX", 16, "C"),
+        ("TRADES", 16, "C"),
+        ("LU", 18, "C"),
+        ("MA", 18, "C"),
+        ("ME", 18, "C"),
+        ("JE", 18, "C"),
+        ("VE", 18, "C"),
+        ("P&L TOTAL", 24, "C"),
     ]
     pdf._current_table_headers = (sig_headers, ("Helvetica", "B", 8))
     _table_header(pdf, sig_headers, font_size=8)
@@ -2972,12 +3161,11 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         pdf.set_font("Helvetica", "I", 9)
         pdf.cell(0, 7, "Aucun trade cette semaine", new_x="LMARGIN", new_y="NEXT")
     else:
-        # Trier par P&L décroissant
         sorted_types = sorted(signal_totals.items(), key=lambda kv: -kv[1]['pnl'])
-        tot_trades = 0
-        tot_pnl = 0.0
-        tot_day_trades = [0] * 5
+        tot_trades_sig = 0
+        tot_pnl_sig = 0.0
         tot_day_pnl = [0.0] * 5
+        tot_day_trades = [0] * 5
 
         for sig_type, stats in sorted_types:
             st_trades = stats['trades']
@@ -2985,8 +3173,8 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
             st_channels = len(stats['channels'])
 
             pdf.cell(16, 7, _sanitize(sig_type, 8), border=1)
-            pdf.cell(14, 7, str(st_channels), border=1, align="C")
-            pdf.cell(14, 7, str(st_trades), border=1, align="C")
+            pdf.cell(16, 7, str(st_channels), border=1, align="C")
+            pdf.cell(16, 7, str(st_trades), border=1, align="C")
 
             for i in range(5):
                 if i in signal_by_day and sig_type in signal_by_day[i]:
@@ -2996,25 +3184,37 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
                 else:
                     day_pnl = 0.0
                     day_trades = 0
-                pdf.cell(18, 7, f"{day_pnl:+.0f} ({day_trades})", border=1, align="C",
-                         new_x="RIGHT")
+                cell_text = f"{day_pnl:+.0f}" if day_pnl != 0 else "0"
+                pdf.cell(18, 7, cell_text, border=1, align="C", new_x="RIGHT")
                 tot_day_pnl[i] += day_pnl
                 tot_day_trades[i] += day_trades
 
-            pdf.cell(22, 7, f"{st_pnl:+.2f}$", border=1, align="C")
+            # P&L Total coloré
+            if st_pnl >= 0:
+                pdf.set_text_color(0, 130, 0)
+            else:
+                pdf.set_text_color(200, 0, 0)
+            pdf.cell(24, 7, _fmt_pnl(st_pnl), border=1, align="C")
+            pdf.set_text_color(0, 0, 0)
             pdf.ln()
-            tot_trades += st_trades
-            tot_pnl += st_pnl
+            tot_trades_sig += st_trades
+            tot_pnl_sig += st_pnl
 
         # Ligne TOTAL
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(16, 7, "TOTAL", border=1)
-        pdf.cell(14, 7, "-", border=1, align="C")
-        pdf.cell(14, 7, str(tot_trades), border=1, align="C")
+        pdf.set_fill_color(230, 230, 240)
+        pdf.cell(16, 7, "TOTAL", border=1, fill=True)
+        pdf.cell(16, 7, "-", border=1, align="C", fill=True)
+        pdf.cell(16, 7, str(tot_trades_sig), border=1, align="C", fill=True)
         for i in range(5):
-            pdf.cell(18, 7, f"{tot_day_pnl[i]:+.0f} ({tot_day_trades[i]})", border=1,
-                     align="C", new_x="RIGHT")
-        pdf.cell(22, 7, f"{tot_pnl:+.2f}$", border=1, align="C")
+            cell_text = f"{tot_day_pnl[i]:+.0f}" if tot_day_pnl[i] != 0 else "0"
+            pdf.cell(18, 7, cell_text, border=1, align="C", fill=True, new_x="RIGHT")
+        if tot_pnl_sig >= 0:
+            pdf.set_text_color(0, 130, 0)
+        else:
+            pdf.set_text_color(200, 0, 0)
+        pdf.cell(24, 7, _fmt_pnl(tot_pnl_sig), border=1, align="C", fill=True)
+        pdf.set_text_color(0, 0, 0)
         pdf.ln()
         pdf.set_font("Helvetica", "", 8)
 
@@ -3022,27 +3222,26 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
     pdf.ln(6)
 
     # ══════════════════════════════════════════════════════════════
-    # 3. PERFORMANCE PAR CANAL
+    # PERFORMANCE PAR CANAL
     # ══════════════════════════════════════════════════════════════
     pdf.set_font("Helvetica", "B", 13)
-    pdf.set_fill_color(45, 45, 45)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 9, "  Performance par canal", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_fill_color(220, 220, 235)
+    pdf.set_text_color(40, 40, 60)
+    pdf.cell(0, 9, f"  PERFORMANCE PAR CANAL ({total_channels} CANAUX, CLASSES PAR P&L)",
+             new_x="LMARGIN", new_y="NEXT", fill=True)
     pdf.set_text_color(0, 0, 0)
     pdf.ln(2)
 
     ch_headers = [
-        ("Canal", 16, "L"),
-        ("Nom", 34, "L"),
-        ("Signal", 14, "C"),
-        ("Trade", 14, "C"),
-        ("Lu", 16, "C"),
-        ("Ma", 16, "C"),
-        ("Me", 16, "C"),
-        ("Je", 16, "C"),
-        ("Ve", 16, "C"),
-        ("P&L", 22, "C"),
-        ("Wr", 14, "C"),
+        ("ID", 14, "L"),
+        ("NOM DU CANAL", 50, "L"),
+        ("LU", 16, "C"),
+        ("MA", 16, "C"),
+        ("ME", 16, "C"),
+        ("JE", 16, "C"),
+        ("VE", 16, "C"),
+        ("P&L TOTAL", 22, "C"),
+        ("WIN RATE", 16, "C"),
     ]
     pdf._current_table_headers = (ch_headers, ("Helvetica", "B", 8))
     _table_header(pdf, ch_headers, font_size=8)
@@ -3054,79 +3253,126 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         sorted_channels = sorted(channel_totals.items(), key=lambda kv: -kv[1]['pnl'])
         ch_tot_pnl = 0.0
         ch_tot_trades = 0
-        ch_tot_signals = 0
         ch_tot_wins = 0
-        ch_tot_day_pnl = [0.0] * 5
 
         for ch_num, stats in sorted_channels:
             c_trades = stats['trades']
             c_pnl = stats['pnl']
-            c_signals = stats.get('signals', 0)
             c_wins = stats.get('wins', 0)
             c_wr = c_wins / c_trades * 100 if c_trades > 0 else 0
-            c_name = _sanitize(stats['name'], 30)
+            c_name = _sanitize(stats['name'], 28)
             if not c_name or c_name == '?':
                 c_name = f"CH{ch_num}"
 
-            # Hauteur de ligne : 2 lignes si nom long, sinon 1
-            row_h = 10 if len(c_name) > 16 else 7
-            x_start = pdf.get_x()
-            y_start = pdf.get_y()
-
-            pdf.cell(16, row_h, f"CH{ch_num}", border=1)
-
-            # Nom avec multi_cell pour les noms longs
-            if len(c_name) > 16:
-                pdf.multi_cell(34, 5, c_name, border=1)
-                # Repositionner X après multi_cell
-                pdf.set_xy(x_start + 16 + 34, y_start)
+            # Couleur de fond alternée
+            if sorted_channels.index((ch_num, stats)) % 2 == 0:
+                pdf.set_fill_color(250, 250, 255)
             else:
-                pdf.cell(34, row_h, c_name, border=1)
+                pdf.set_fill_color(255, 255, 255)
 
-            pdf.cell(14, row_h, str(c_signals), border=1, align="C")
-            pdf.cell(14, row_h, str(c_trades), border=1, align="C")
+            pdf.cell(14, 6, f"CH{ch_num}", border=1, fill=True)
+            pdf.cell(50, 6, c_name, border=1, fill=True)
 
             for i in range(5):
                 if i in channel_by_day and ch_num in channel_by_day[i]:
                     day_pnl = channel_by_day[i][ch_num]['pnl']
                 else:
                     day_pnl = 0.0
-                pdf.cell(16, row_h, f"{day_pnl:+.0f}", border=1, align="C", new_x="RIGHT")
-                ch_tot_day_pnl[i] += day_pnl
+                if day_pnl == 0:
+                    cell_text = "0"
+                else:
+                    cell_text = f"{day_pnl:+.0f}"
+                pdf.cell(16, 6, cell_text, border=1, align="C", fill=True, new_x="RIGHT")
 
-            pdf.cell(22, row_h, f"{c_pnl:+.2f}$", border=1, align="C")
-            pdf.cell(14, row_h, f"{c_wr:.0f}%", border=1, align="C")
+            # P&L Total coloré
+            if c_pnl >= 0:
+                pdf.set_text_color(0, 130, 0)
+            else:
+                pdf.set_text_color(200, 0, 0)
+            pdf.cell(22, 6, _fmt_pnl(c_pnl), border=1, align="C", fill=True)
+            pdf.set_text_color(0, 0, 0)
+
+            pdf.cell(16, 6, f"{c_wr:.0f}%", border=1, align="C", fill=True)
             pdf.ln()
+
             ch_tot_pnl += c_pnl
             ch_tot_trades += c_trades
-            ch_tot_signals += c_signals
             ch_tot_wins += c_wins
 
         # Ligne TOTAL
         ch_tot_wr = ch_tot_wins / ch_tot_trades * 100 if ch_tot_trades > 0 else 0
         pdf.set_font("Helvetica", "B", 8)
-        pdf.cell(16, 7, "TOTAL", border=1)
-        pdf.cell(34, 7, f"{len(sorted_channels)} canaux", border=1)
-        pdf.cell(14, 7, str(ch_tot_signals), border=1, align="C")
-        pdf.cell(14, 7, str(ch_tot_trades), border=1, align="C")
+        pdf.set_fill_color(230, 230, 240)
+        pdf.cell(14, 7, "TOTAL", border=1, fill=True)
+        pdf.cell(50, 7, f"{len(sorted_channels)} canaux", border=1, fill=True)
         for i in range(5):
-            pdf.cell(16, 7, f"{ch_tot_day_pnl[i]:+.0f}", border=1, align="C", new_x="RIGHT")
-        pdf.cell(22, 7, f"{ch_tot_pnl:+.2f}$", border=1, align="C")
-        pdf.cell(14, 7, f"{ch_tot_wr:.0f}%", border=1, align="C")
+            day_total = sum(channel_by_day.get(i, {}).get(ch, {}).get('pnl', 0)
+                           for ch in channel_totals)
+            cell_text = f"{day_total:+.0f}" if day_total != 0 else "0"
+            pdf.cell(16, 7, cell_text, border=1, align="C", fill=True, new_x="RIGHT")
+        if ch_tot_pnl >= 0:
+            pdf.set_text_color(0, 130, 0)
+        else:
+            pdf.set_text_color(200, 0, 0)
+        pdf.cell(22, 7, _fmt_pnl(ch_tot_pnl), border=1, align="C", fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(16, 7, f"{ch_tot_wr:.0f}%", border=1, align="C", fill=True)
         pdf.ln()
         pdf.set_font("Helvetica", "", 8)
 
     pdf._current_table_headers = None
+    pdf.ln(6)
+
+    # ══════════════════════════════════════════════════════════════
+    # SIGNAUX SUPPRIMÉS PAR LES CANAUX
+    # ══════════════════════════════════════════════════════════════
+    if deleted_by_channel:
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_fill_color(220, 220, 235)
+        pdf.set_text_color(40, 40, 60)
+        pdf.cell(0, 9, "  SIGNAUX SUPPRIMES PAR LES CANAUX (SYNTHESE)",
+                 new_x="LMARGIN", new_y="NEXT", fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 7, "    Canaux les plus actifs dans la suppression de signaux cette semaine :",
+                 new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(1)
+
+        # Trier par nombre de suppressions décroissant
+        sorted_deleted = sorted(deleted_by_channel.items(),
+                                key=lambda kv: -kv[1]['count'])
+
+        for ch_num, info in sorted_deleted:
+            ch_name = _sanitize(info['name'], 30)
+            count = info['count']
+            examples = info.get('examples', [])
+
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.cell(8, 6, "-", new_x="RIGHT")
+            pdf.cell(0, 6, f"{ch_name} : {count} signaux supprimes",
+                     new_x="LMARGIN", new_y="NEXT")
+
+            if examples:
+                pdf.set_font("Helvetica", "", 8)
+                pdf.set_text_color(80, 80, 80)
+                for ex in examples[:2]:
+                    pdf.cell(16, 5, "", new_x="RIGHT")
+                    pdf.cell(0, 5, f"  {ex}", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(0, 0, 0)
+
+        pdf.ln(3)
 
     # ── Sauvegarde ──
     filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             f"weekly_report_{week_start}_{week_end}.pdf")
     try:
         pdf.output(filepath)
-        log.info(f"PDF rapport hebdo généré: {filepath}")
+        log.info(f"PDF rapport hebdo genere: {filepath}")
         return filepath
     except Exception as e:
-        log.error(f"Erreur génération PDF hebdo: {e}")
+        log.error(f"Erreur generation PDF hebdo: {e}")
         return ""
 
 
