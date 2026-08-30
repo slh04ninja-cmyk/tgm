@@ -69,7 +69,7 @@ ORDER_FILLING_RETURN = 0
 ORDER_FILLING_FOK = 1
 ORDER_FILLING_IOC = 2
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ------------------------------------------------------------------
 # CONFIG
@@ -809,6 +809,15 @@ class MT5Bridge:
     _sym_cache: dict = {}
 
     def connect(self) -> bool:
+        # ★ FIX (v15.3) : si MT5_PATH est défini, on force la connexion à CE terminal
+        # avec les credentials — sinon mt5.initialize() sans args s'attache au premier
+        # terminal ouvert (conflit quand 2 bots/comptes tournent en parallèle).
+        if MT5_PATH and os.path.exists(MT5_PATH):
+            if not mt5.initialize(login=MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER,
+                                  path=MT5_PATH):
+                log.error(f"MT5 initialize failed: {mt5.last_error()}")
+                return False
+            return self._finish_connect()
         if mt5.initialize():
             info = mt5.account_info()
             if info and info.login > 0:
@@ -4448,7 +4457,7 @@ async def main():
         news_mgr = NewsManager(bridge)
         news_mgr.set_manager(manager)
 
-        client = TelegramClient("session_trading", API_ID, API_HASH)
+        client = TelegramClient(os.getenv("TG_SESSION_NAME", "session_trading"), API_ID, API_HASH)
         await client.start()
         _alert_client = client
         log.info("Telegram connecté.")
