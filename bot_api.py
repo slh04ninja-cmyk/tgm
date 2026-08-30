@@ -142,10 +142,17 @@ class BotProcess:
                             capture_output=True, text=True, timeout=5
                         )
                         if BOT_SCRIPT in wmic.stdout:
-                            # Sauvegarder le PID pour les prochaines vérifications
-                            with open(PID_FILE, "w") as f:
-                                f.write(str(pid))
-                            return pid
+                            # ★ FIX (v15.3) : en multi-bots, plusieurs listeners portent le
+                            # même nom de script — vérifier que le process tourne depuis CE
+                            # dossier (BOT_WORKDIR) pour ne pas attraper l'autre bot.
+                            # ⚠️ Matcher avec séparateur "\" : "C:\TradingBot" est un préfixe
+                            # de "C:\TradingBot2" — un simple "in" attraperait le mauvais bot.
+                            workdir_marker = (BOT_WORKDIR.rstrip("\\") + "\\").lower()
+                            if workdir_marker in wmic.stdout.lower() or wmic.stdout.lower().strip().endswith(BOT_SCRIPT.lower()):
+                                # Sauvegarder le PID pour les prochaines vérifications
+                                with open(PID_FILE, "w") as f:
+                                    f.write(str(pid))
+                                return pid
                     except (ValueError, subprocess.TimeoutExpired):
                         continue
         except Exception:
