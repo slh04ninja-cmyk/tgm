@@ -177,6 +177,18 @@ EXCLUDE_KEYWORDS = [
 ]
 SPAM_STANDALONE = ["target", "running"]
 
+# ★ FIX (v15.2) : mots FORTS — marqueurs de RÉSULTATS/recaps. Ils restent du spam
+# MÊME si le message contient BUY/SELL (ex: "GOLD BUY : +170pips" = résultat).
+# Tous les autres mots d'EXCLUDE_KEYWORDS (analysis, join, vip, motivation...) 
+# gardent l'exception BUY/SELL : un vrai signal peut contenir un disclaimer
+# ("Educational market analysis only") ou une promo sans être du spam.
+STRONG_EXCLUDE_KEYWORDS = [
+    "hit", "pips", "tp hit", "tp1 hit", "tp2 hit", "tp3 hit", "all tp hit",
+    "mission acomplished", "boom boom boom", "my signal are on fire",
+    "closed at", "exit at", "sl hit", "stopped", "secured", "hit target",
+    "recap", "result",
+]
+
 def is_spam(text: str) -> bool:
     low = text.lower()
     lines = low.split("\n")
@@ -186,10 +198,13 @@ def is_spam(text: str) -> bool:
         stripped = line.strip().strip("📍🎯📊📈📉❌✅🔴🟢⚪")
         if stripped.endswith(" active") or stripped == "active":
             return True
+    has_direction = bool(re.search(r'\b(buy|sell|long|short)\b', low))
     for kw in EXCLUDE_KEYWORDS:
         if kw in low:
             # ★ FIX (v15.1) : low est en minuscules — l'exception BUY/SELL ne matchait jamais
-            if re.search(r'\b(buy|sell|long|short)\b', low):
+            # ★ FIX (v15.2) : les mots forts (result/recap/hit/pips...) = toujours spam ;
+            # les autres mots (analysis, join, vip...) laissent passer un vrai signal.
+            if kw not in STRONG_EXCLUDE_KEYWORDS and has_direction:
                 continue
             return True
     for kw in SPAM_STANDALONE:

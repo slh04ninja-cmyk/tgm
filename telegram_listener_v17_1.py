@@ -4407,11 +4407,20 @@ def merge_quick_alert(qa: dict, key: str, full_signal: dict,
 # MAIN
 # =============================================================
 def _is_signal_message(text: str) -> bool:
+    # ★ FIX (v15.2) : normaliser le texte (NFKC) AVANT le test — les canaux qui
+    # utilisent l'Unicode gras (𝐆𝐎𝐋𝐃 𝐒𝐄𝐋𝐋 4590) ne matchent pas BUY/SELL ASCII
+    # ni \d+\.\d+ sinon, et tous leurs signaux sont filtrés à tort ici.
+    text = unicodedata.normalize('NFKC', text)
     if re.search(r'\d+\.\d+', text):
         return True
     if "CLOSE" in text.upper():
         return True
     if "BUY" in text.upper() or "SELL" in text.upper():
+        return True
+    # ★ FIX (v15.2) : canaux qui masquent BUY/SELL (emoji 🔤) et donnent des prix
+    # entiers (CH9 "Entry: 4610 / TP1: 4605 / SL: 4615") → détecter les mots-clés
+    # de signal Entry/TP/SL/ZONE même sans direction ni décimale.
+    if re.search(r'\b(entry|tp\s*\d*|take\s*profit|sl|stop\s*loss|zone|buy\s*now|sell\s*now)\b', text, re.IGNORECASE):
         return True
     return False
 
