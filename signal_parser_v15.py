@@ -172,7 +172,7 @@ EXCLUDE_KEYWORDS = [
     "closed at", "exit at", "sl hit", "stopped", "secured", "hit target",
     "be safe", "good luck", "market update", "analysis", "are you in big loss",
     "contact", "good morning", "good night", "hello", "welcome", "thank",
-    "recap", "result", "motivation", "join", "vip", "subscribe", "premium",
+    "recap", "result", "motivation", "join", "vip", "subscribe",
     "will", "analysis only", "not signal",
 ]
 SPAM_STANDALONE = ["target", "running"]
@@ -188,7 +188,8 @@ def is_spam(text: str) -> bool:
             return True
     for kw in EXCLUDE_KEYWORDS:
         if kw in low:
-            if re.search(r'\b(BUY|SELL|LONG|SHORT)\b', low):
+            # ★ FIX (v15.1) : low est en minuscules — l'exception BUY/SELL ne matchait jamais
+            if re.search(r'\b(buy|sell|long|short)\b', low):
                 continue
             return True
     for kw in SPAM_STANDALONE:
@@ -696,6 +697,31 @@ class SignalParser:
             log.debug(f"[PARSING] Symbole non trouvé → fallback XAUUSD : {normalized_text[:80]}")
 
         action = _extract_action(normalized_text)
+
+        # ★ FIX (v15.1) : canaux qui masquent BUY/SELL (image jointe au lieu du mot)
+        # Déduire la direction depuis la structure Entry/TP/SL :
+        #   - TPs au-dessus de l'entrée → BUY ; TPs en dessous → SELL
+        #   - SL en dessous de l'entrée → BUY ; SL au-dessus → SELL
+        if not action:
+            sl_tmp = _extract_sl(normalized_text)
+            zone_tmp, zone_tmp_h, is_single_tmp = _extract_entry_and_zone(normalized_text)
+            tps_tmp = _extract_all_tps(normalized_text)
+            if zone_tmp is not None:
+                entry_mid = (zone_tmp + zone_tmp_h) / 2
+                if tps_tmp:
+                    above = sum(1 for tp in tps_tmp if tp > entry_mid)
+                    below = sum(1 for tp in tps_tmp if tp < entry_mid)
+                    if above > below:
+                        action = "BUY"
+                    elif below > above:
+                        action = "SELL"
+                if not action and sl_tmp is not None:
+                    if sl_tmp < entry_mid:
+                        action = "BUY"
+                    elif sl_tmp > entry_mid:
+                        action = "SELL"
+                if action:
+                    log.info(f"[PARSING] Direction déduite Entry/TP/SL → {action} : {normalized_text[:80]}")
         if not action:
             log.debug(f"[PARSING] Action non trouvée dans : {normalized_text[:100]}")
             return None

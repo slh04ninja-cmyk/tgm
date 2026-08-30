@@ -167,6 +167,16 @@ TOLERANCE_PU = float(os.getenv("TOLERANCE_PU", "3.0"))
 TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "5.0"))
 TP_PAR_DEFAUT = float(os.getenv("TP_PAR_DEFAUT", "15.0"))
 
+# === TRADE HORS ZONE (booléen d'activation, défaut FALSE) ===
+# Si le prix est hors zone (signaux type zone uniquement), placer 2 LIMITs :
+#   L3 = bord de la zone, L4 = milieu de zone (mid_zone)
+# TP : cas1 (2 pending) = TP_PAR_DEFAUT ; cas2 (L3 rempli) = PnL total = TP_FIXED_GAIN_USD ;
+#      cas3 (L3+L4 remplis) = PnL total = TP_FIXED_GAIN_USD * TP_MULTIPE1
+# Expiration : cas1 prix dépasse MAX_DISTANCE ; cas2 attente > MAX_TEMPS min
+TRADE_HORS_ZONE = os.getenv("TRADE_HORS_ZONE", "false").lower() == "true"
+MAX_DISTANCE = float(os.getenv("MAX_DISTANCE", "5.0"))
+MAX_TEMPS = float(os.getenv("MAX_TEMPS", "5.0"))
+
 # === AUTRES ===
 TG_ALERT_CHANNEL = os.getenv("TG_ALERT_CHANNEL", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "true").lower() == "true"
@@ -1153,8 +1163,70 @@ class TradeManager:
     # =============================================================
     def _recover_open_positions(self):
         """Au démarrage, lit les positions ouvertes dans MT5 et reconstruit
-        self.active pour que le bot puisse gérer TP dynamique, P&L cible, etc."""
+        self.active pour que le bot puisse gérer TP dynamique, P&L cible, etc.
+        Reconstruit aussi les entrées hors-zone (L3/L4 pending) depuis orders_get()."""
         try:
+            # --- Reconstruction des entrées HORS-ZONE depuis les ordres pending ---
+            # Doit tourner MÊME si aucune position ouverte (return anticipé ci-dessous),
+            # sinon L3/L4 pending seraient perdus côté logique au restart.
+            try:
+                pending_orders = mt5.orders_get() or []
+                # Préfixes déjà couverts par des positions ouvertes (L3 rempli → position)
+                # → ne PAS dupliquer l'entrée (le grouping positions plus bas s'en charge)
+                filled_prefixes = set()
+                for p in (mt5.positions_get() or []):
+                    if p.magic != MAGIC_NUMBER:
+                        continue
+                    cparts = (p.comment or "").split("-")
+                    if len(cparts) >= 2 and cparts[0].startswith("CH"):
+                        filled_prefixes.add(f"{cparts[0]}-{cparts[1]}")
+                hz_groups = {}  # "CH{num}-ZN" -> {"tickets": [...], ...}
+                for order in pending_orders:
+                    if order.magic != MAGIC_NUMBER:
+                        continue
+                    ocomment = order.comment or ""
+                    oparts = ocomment.split("-")
+                    if len(oparts) >= 3 and oparts[0].startswith("CH") and oparts[2] in ("L3", "L4"):
+                        prefix = f"{oparts[0]}-{oparts[1]}"
+                        if prefix in filled_prefixes:
+                            continue  # L3 déjà rempli → entrée reconstruite par le grouping positions
+                        hz_groups.setdefault(prefix, {"tickets": [], "symbol": order.symbol,
+                                                       "action": "BUY" if order.type == mt5.ORDER_TYPE_BUY_LIMIT else "SELL"})
+                        hz_groups[prefix]["tickets"].append({
+                            "ticket": order.ticket, "lot": order.volume_current, "role": "limit",
+                            "entry_price": order.price_open, "tp_final": order.tp,
+                        })
+                if hz_groups:
+                    for prefix, g in hz_groups.items():
+                        # Trier les tickets par prix (L3 = bord, L4 = mid)
+                        g["tickets"].sort(key=lambda t: t["entry_price"])
+                        ch_parts = prefix.split("-")
+                        ch_num = ch_parts[0].replace("CH", "")
+                        entry = {
+                            "signal": {
+                                "action": g["action"],
+                                "symbol": g["symbol"],
+                                "source_channel": f"Canal_{ch_num}",
+                            },
+                            "tickets": g["tickets"],
+                            "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            "_signal_id": f"{g['symbol']}_{g['action']}_hz_recovered_{int(time.time())}",
+                            "_mt5_comment": prefix,
+                            "_market_ticket": None,
+                            "_limit_cancelled": False,
+                            "_hors_zone": True,
+                            "_hz_recovered": True,
+                            # Zone inconnue après restart → pas de vérification MAX_DISTANCE,
+                            # seule l'expiration MT5 native (MAX_TEMPS) s'applique
+                            "_hz_zone_low": None,
+                            "_hz_zone_high": None,
+                        }
+                        self.active.append(entry)
+                        log.info(f"[RECOVERY] HORS-ZONE {prefix} | {g['action']} {g['symbol']} | {len(g['tickets'])} LIMITs pending reconstruits")
+                    log.info(f"[RECOVERY] {len(hz_groups)} entrées hors-zone reconstruites depuis les ordres pending")
+            except Exception as e:
+                log.error(f"[RECOVERY] Erreur reconstruction hors-zone: {e}", exc_info=True)
+
             positions = mt5.positions_get()
             if not positions:
                 log.info("[RECOVERY] Aucune position ouverte dans MT5")
@@ -1242,6 +1314,9 @@ class TradeManager:
             # --- Nettoyage des LIMIT orphelins ---
             # Si un MK a touché son TP avant le redémarrage, les LIMIT restent
             # en attente dans mt5.orders_get(). On les annule.
+            # ★ EXCEPTION : les LIMITs hors-zone (L3/L4) n'ont JAMAIS de MARKET
+            # (le signal a été placé hors zone). Ils ont leur propre expiration
+            # MT5 (ORDER_TIME_SPECIFIED = MAX_TEMPS min) → ne pas les annuler ici.
             recovered_prefixes = set(e["_mt5_comment"] for e in self.active)
             pending_orders = mt5.orders_get() or []
             orphan_limits = []
@@ -1251,6 +1326,9 @@ class TradeManager:
                 ocomment = order.comment or ""
                 oparts = ocomment.split("-")
                 if len(oparts) >= 3 and oparts[0].startswith("CH") and oparts[2].startswith("L"):
+                    # Hors-zone : commentaire CH{num}-ZN-L3 / CH{num}-ZN-L4
+                    if oparts[2] in ("L3", "L4"):
+                        continue
                     prefix = f"{oparts[0]}-{oparts[1]}"
                     if prefix not in recovered_prefixes:
                         orphan_limits.append(order)
@@ -2126,6 +2204,42 @@ class TradeManager:
                     all_limits = [t for t in entry["tickets"] if t.get("role") == "limit"]
                     logged_limits = [t for t in all_limits if t.get("_expired_logged")]
                     entry["_limit_expired_logged"] = len(all_limits) == len(logged_limits)
+
+            # ══════════════════════════════════════════════════════════════
+            # ★★★ PHASE 3b : EXPIRATION TRADE HORS ZONE ★★★
+            # Cas 1 : le prix dépasse MAX_DISTANCE de la zone → annuler les LIMITs
+            # Cas 2 : temps d'attente > MAX_TEMPS min → annuler les LIMITs
+            # ══════════════════════════════════════════════════════════════
+            if entry.get("_hors_zone") and not entry.get("_limit_cancelled") and not entry.get("_hz_expired"):
+                _hz_zl = entry.get("_hz_zone_low")
+                _hz_zh = entry.get("_hz_zone_high")
+                if _hz_zl is not None and _hz_zh is not None:
+                    _hz_mid = (_hz_zl + _hz_zh) / 2
+                    _hz_sym = entry.get("signal", {}).get("symbol", symbol)
+                    _hz_act = entry.get("signal", {}).get("action", action)
+                    _hz_now_price = None
+                    try:
+                        _hz_now_price = self.bridge.current_price(_hz_sym, _hz_act)
+                    except Exception:
+                        pass
+                    _hz_reason = None
+                    if _hz_now_price is not None:
+                        _hz_dist = abs(_hz_now_price - _hz_mid)
+                        if _hz_dist > MAX_DISTANCE:
+                            _hz_reason = f"prix {_hz_now_price} à {_hz_dist:.2f}$ de la zone (MAX_DISTANCE={MAX_DISTANCE})"
+                    if not _hz_reason:
+                        try:
+                            _hz_open = datetime.strptime(entry["_open_date"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                            _hz_wait_min = (now - _hz_open).total_seconds() / 60
+                            if _hz_wait_min > MAX_TEMPS:
+                                _hz_reason = f"attente {_hz_wait_min:.1f} min (MAX_TEMPS={MAX_TEMPS} min)"
+                        except Exception:
+                            pass
+                    if _hz_reason:
+                        _hz_cancelled = self.bridge.cancel_pending_limits(entry)
+                        entry["_limit_cancelled"] = True
+                        entry["_hz_expired"] = True
+                        log.info(f"{mt5_comment} | HORS-ZONE EXPIRE ({_hz_reason}) | {_hz_cancelled} LIMIT annulés")
 
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 4 : TP DYNAMIQUE (recalcul si LIMIT rempli) ★★★
@@ -3725,6 +3839,112 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
     return True
 
 
+def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
+                           action: str, symbol: str, current: float,
+                           zone_low: float, zone_high: float,
+                           ch_num, canal: str) -> bool:
+    """TRADE_HORS_ZONE : prix hors zone → placer 2 LIMITs (pas de MARKET).
+    L3 = bord de zone côté prix, L4 = mid_zone.
+    TP initial (cas 1) = TP_PAR_DEFAUT ; SL = MAX_SL_USD depuis L3 (commun aux 2).
+    Le TP dynamique cas 2/3 est géré par _recalculate_tp (nb positions).
+    Retourne True si au moins un LIMIT est placé.
+    """
+    mid_zone = round((zone_low + zone_high) / 2, 2)
+    # Bord de zone côté prix actuel
+    if action == "BUY":
+        l3_price = round(zone_high, 2)   # prix au-dessus de la zone → bord haut
+        order_type = mt5.ORDER_TYPE_BUY_LIMIT
+    else:
+        l3_price = round(zone_low, 2)    # prix en dessous de la zone → bord bas
+        order_type = mt5.ORDER_TYPE_SELL_LIMIT
+    l4_price = mid_zone
+
+    # SL commun = MAX_SL_USD depuis L3
+    if action == "BUY":
+        sl = round(l3_price - MAX_SL_USD, 2)
+    else:
+        sl = round(l3_price + MAX_SL_USD, 2)
+    _log_mgmt(f"[HORS-ZONE] {action} {symbol} zone={zone_low}-{zone_high} | L3@{l3_price} L4@{l4_price} | SL={sl} (MAX_SL_USD={MAX_SL_USD})")
+
+    # TP initial cas 1 = TP_PAR_DEFAUT depuis chaque entrée
+    if action == "BUY":
+        tp_l3 = round(l3_price + TP_PAR_DEFAUT, 2)
+        tp_l4 = round(l4_price + TP_PAR_DEFAUT, 2)
+    else:
+        tp_l3 = round(l3_price - TP_PAR_DEFAUT, 2)
+        tp_l4 = round(l4_price - TP_PAR_DEFAUT, 2)
+
+    # Résolution symbole + filling modes (comme _open_market_limit)
+    _sym_limit = bridge._sym(symbol)
+    _digits = _sym_limit.digits if _sym_limit else 2
+    _resolved_symbol = _sym_limit.name if _sym_limit else symbol
+    _filling_modes = []
+    if _sym_limit:
+        _fm = _sym_limit.filling_mode
+        if _fm & SYMBOL_FILLING_FOK:
+            _filling_modes.append(ORDER_FILLING_FOK)
+        if _fm & SYMBOL_FILLING_IOC:
+            _filling_modes.append(ORDER_FILLING_IOC)
+    _filling_modes.append(ORDER_FILLING_RETURN)
+
+    tickets = []
+    orders_desc = []
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=MAX_TEMPS)
+
+    for label, price, tp in [("L3", l3_price, tp_l3), ("L4", l4_price, tp_l4)]:
+        mt5_comment = f"CH{ch_num}-ZN-{label}"
+        for fill_mode in _filling_modes:
+            try:
+                result = mt5.order_send({
+                    "action": mt5.TRADE_ACTION_PENDING,
+                    "symbol": _resolved_symbol,
+                    "volume": LOT_LIMIT1,
+                    "type": order_type,
+                    "price": round(price, _digits),
+                    "sl": round(sl, _digits) if sl else 0,
+                    "tp": round(tp, _digits) if tp else 0,
+                    "deviation": SLIPPAGE,
+                    "magic": MAGIC_NUMBER,
+                    "comment": mt5_comment,
+                    "type_time": mt5.ORDER_TIME_SPECIFIED,
+                    "type_filling": fill_mode,
+                    "expiration": int(expiry.timestamp()),
+                })
+                if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    tickets.append({
+                        "ticket": result.order, "lot": LOT_LIMIT1, "role": "limit",
+                        "entry_price": round(price, _digits), "tp_final": tp,
+                    })
+                    orders_desc.append(f"{label}={result.order} @{price}")
+                    break
+            except Exception as e:
+                log.error(f"  HORS-ZONE {label} EXCEPTION: {e}")
+                break
+
+    if not tickets:
+        log.warning(f"  ✗ HORS-ZONE: aucun LIMIT placé | zone={zone_low}-{zone_high} current={current}")
+        return False
+
+    entry = {
+        "signal": signal,
+        "tickets": tickets,
+        "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "_signal_id": f"{symbol}_{action}_hz_{int(time.time())}",
+        "_mt5_comment": f"CH{ch_num}-ZN",
+        "_market_ticket": None,
+        "_limit_cancelled": False,
+        "_hors_zone": True,
+        "_hz_zone_low": zone_low,
+        "_hz_zone_high": zone_high,
+    }
+    manager.register(entry)
+
+    orders_str = " | ".join(orders_desc)
+    log.info(f"CH{ch_num}-ZN | HORS-ZONE | {action} {symbol} | {orders_str} | SL={sl} | TP1={tp_l3}/{tp_l4}")
+    _log_mgmt(f"OPEN {action} CH{ch_num}-ZN HORS-ZONE | {orders_str}")
+    return True
+
+
 def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
     action = signal["action"]
     symbol = signal["symbol"]
@@ -3838,6 +4058,10 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             below_zone = zone_low - TOLERANCE_ZN <= current < zone_low
 
         if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
+            if TRADE_HORS_ZONE:
+                _open_limits_hors_zone(signal, bridge, manager, action, symbol, current,
+                                       zone_low, zone_high, ch_num, canal)
+                return
             log.info(f"CH{ch_num}-ZN | REFUSE HORS ZONE")
             return
 
