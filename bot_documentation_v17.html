@@ -284,29 +284,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <li>Logs : <code>bot_trading.log</code> (API) / <code>stdout.log</code> (bot, lancé via start_bot1.py)</li>
 </ul>
 
-<h2>10. API REST (port 8000)</h2>
-<table>
-<tr><th>Endpoint</th><th>Méthode</th><th>Rôle</th></tr>
-<tr><td class="mono">/api/status</td><td>GET</td><td>État du bot + compte MT5</td></tr>
-<tr><td class="mono">/api/dashboard</td><td>GET</td><td>Tableau de bord</td></tr>
-<tr><td class="mono">/api/positions</td><td>GET</td><td>Positions ouvertes</td></tr>
-<tr><td class="mono">/api/trades</td><td>GET</td><td>Historique des trades (7 jours)</td></tr>
-<tr><td class="mono">/api/config</td><td>GET/PUT</td><td>Lire/modifier la config (.env)</td></tr>
-<tr><td class="mono">/api/config/raw</td><td>GET/PUT</td><td>Contenu brut du .env</td></tr>
-<tr><td class="mono">/api/logs</td><td>GET</td><td>Dernières lignes du log</td></tr>
-<tr><td class="mono">/ws/logs</td><td>WS</td><td>Logs en temps réel</td></tr>
-<tr><td class="mono">/api/positions/{ticket}/close</td><td>POST</td><td>Fermer une position</td></tr>
-<tr><td class="mono">/api/positions/close-all</td><td>POST</td><td>Fermer toutes les positions</td></tr>
-<tr><td class="mono">/api/exec</td><td>POST</td><td>Exécuter une commande shell</td></tr>
-<tr><td class="mono">/api/file</td><td>GET/POST</td><td>Lire/écrire un fichier</td></tr>
-<tr><td class="mono">/api/files</td><td>GET</td><td>Lister les fichiers</td></tr>
-<tr><td class="mono">/api/bot/start</td><td>POST</td><td>Démarrer le bot</td></tr>
-<tr><td class="mono">/api/bot/stop</td><td>POST</td><td>Arrêter le bot</td></tr>
-<tr><td class="mono">/api/restart</td><td>POST</td><td>Redémarrer l'API (os.execv)</td></tr>
-</table>
-<div class="warn"><b>⚠️ SÉCURITÉ :</b> l'API est exposée sur Internet (0.0.0.0:8000) <b>sans authentification</b> — API_TOKEN est défini mais jamais vérifié. /api/exec = exécution de commandes arbitraires. <b>À corriger en priorité.</b></div>
-
-<h2>11. Configuration complète (.env)</h2>
+<h2>10. Configuration complète (.env)</h2>
 <p class="small">Colonne « Serveur » = valeur actuelle du bot 1 (31/08/2026). Les secrets ne sont pas documentés.</p>
 <table>
 <tr><th>Variable</th><th>Défaut</th><th>Serveur</th><th>Description</th></tr>
@@ -343,7 +321,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">ALERT_DAILY_PERFORMANCE / ALERT_TRADE_MANAGEMENT / LOG_TRADE_MANAGEMENT</td><td>true ×3</td><td>true / <b>false</b> / true</td><td>Alertes et logs de gestion (LOG actif, ALERT_TRADE_MANAGEMENT désactivé)</td></tr>
 </table>
 
-<h2>12. Opérations</h2>
+<h2>11. Opérations</h2>
 <ul>
 <li><b>Démarrer le bot :</b> <code>python start_bot1.py</code> (détaché, log → stdout.log). <b>Ne jamais lancer dans une console RDP</b> (fermeture = mort du bot)</li>
 <li><b>Redémarrer l'API :</b> <code>restart.bat</code> (attention : /api/restart tue uvicorn)</li>
