@@ -147,7 +147,7 @@ check("QA SELL prix=4443.01 -> REFUSE", qa_decision("SELL", 4443.01, 4440) == "R
 check("QA SELL prix=4430 -> REFUSE", qa_decision("SELL", 4430, 4440) == "REFUSE")
 
 print()
-print("=== 8. FUSION par TEMPS (TEMPS_DE_FUSION=2 min) — PU/ZN après QA/MP ===")
+print("=== 8. ANTI-DOUBLON par TEMPS (TEMPS_DE_FUSION=2 min) — PU/ZN après QA/MP ===")
 from datetime import datetime, timezone, timedelta
 TEMPS_DE_FUSION = 2.0
 def fusion_cas1(qa_time, now=None):
@@ -157,11 +157,11 @@ def fusion_cas1(qa_time, now=None):
     age_min = (now - qa_time).total_seconds() / 60.0
     return age_min <= TEMPS_DE_FUSION
 now = datetime.now(timezone.utc)
-check("FUSION QA age 1 min (<= 2) -> cas 1 ACCEPTE", fusion_cas1(now - timedelta(minutes=1)) is True)
-check("FUSION QA age 119.9 s (< 2 min) -> cas 1 ACCEPTE", fusion_cas1(now - timedelta(seconds=119.9)) is True)
-check("FUSION QA age 2 min 1s (> 2) -> cas 2 ECHOUE", fusion_cas1(now - timedelta(minutes=2, seconds=1)) is False)
-check("FUSION QA age 30 min -> cas 2 ECHOUE", fusion_cas1(now - timedelta(minutes=30)) is False)
-check("FUSION QA sans timestamp (None) -> cas 2 ECHOUE", fusion_cas1(None) is False)
+check("DOUBLON: QA age 1 min (<= 2) -> meme signal IGNORE", fusion_cas1(now - timedelta(minutes=1)) is True)
+check("DOUBLON: QA age 119.9 s (< 2 min) -> meme signal IGNORE", fusion_cas1(now - timedelta(seconds=119.9)) is True)
+check("DOUBLON: QA age 2 min 1s (> 2) -> nouveau signal", fusion_cas1(now - timedelta(minutes=2, seconds=1)) is False)
+check("DOUBLON: QA age 30 min -> nouveau signal", fusion_cas1(now - timedelta(minutes=30)) is False)
+check("DOUBLON: QA sans timestamp (None) -> nouveau signal", fusion_cas1(None) is False)
 
 print()
 print("=== 9. TP initial UNIFIÉ (current ± TP_FIXED_GAIN_USD=7) — tous types ===")

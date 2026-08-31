@@ -1631,11 +1631,6 @@ class TradeManager:
             if pdf_path:
                 _send_telegram_document(pdf_path, f"📊 Rapport {today}")
 
-            # ★ Générer et envoyer le XLSX des deals du jour
-            xlsx_path = _export_daily_xlsx(today)
-            if xlsx_path:
-                _send_telegram_document(xlsx_path, f"📋 Deals {today}")
-
             # ★ Rapport hebdomadaire le vendredi
             from datetime import date as date_cls
             if date_cls.today().weekday() == 4:  # 4 = vendredi
@@ -2548,49 +2543,6 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                 manager.active.remove(entry)
                 return True
     return False
-
-
-def _market_in_zone(canal: str, signal: dict, manager: TradeManager) -> tuple:
-    """Verifie si une position MARKET existante (QA/MP) du meme canal est deja dans
-    la zone du nouveau signal PU/ZN. Si oui, le nouveau signal est ignore (pas besoin
-    de fermer/rouvrir — la position existante couvre deja la zone).
-
-    Returns:
-        (True, mt5_comment) si le MARKET entry est dans la zone → ignorer le nouveau signal
-        (False, "") sinon → laisser le mecanisme existant gerer le double signal
-    """
-    zone_low = signal.get("zone_low")
-    zone_high = signal.get("zone_high")
-    if zone_low is None or zone_high is None:
-        return False, ""
-
-    with manager._lock:
-        for entry in list(manager.active):
-            sig = entry.get("signal", {})
-            entry_canal = sig.get("source_channel", "Inconnu")
-            # ★ v17.4g : matcher par nom OU par numéro
-            same_canal = entry_canal == canal
-            if not same_canal:
-                _cn = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-")))
-                _en = CHANNEL_NUM_MAP.get(entry_canal, CHANNEL_NUM_MAP.get(entry_canal.lstrip("-")))
-                if _cn is not None and _en is not None and str(_en) == str(_cn):
-                    same_canal = True
-            if not same_canal:
-                continue
-            # Chercher le ticket MARKET de cette entree
-            mt5_comment = entry.get("_mt5_comment", "")
-            # Ne considerer que les entrees QA/MP (quick alerts)
-            if "-QA" not in mt5_comment and "-MP" not in mt5_comment:
-                continue
-            for t in entry.get("tickets", []):
-                if t.get("role") == "market":
-                    market_entry = t.get("entry_price", 0)
-                    if zone_low <= market_entry <= zone_high:
-                        return True, mt5_comment
-                    else:
-                        return False, mt5_comment
-    return False, ""
-
 
 def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float) -> float:
     """Plafonne le SL à max_sl_usd$ de l'entrée.
@@ -3605,212 +3557,6 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         return ""
 
 
-def _export_daily_xlsx(date_str: str) -> str:
-    """Exporte les deals du jour en XLSX au format MT5.
-    Reproduit le format Trade History Report avec sections Positions et Deals."""
-    try:
-        import openpyxl
-        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    except ImportError:
-        try:
-            import subprocess, sys
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl", "-q"])
-            import openpyxl
-            from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-        except Exception as e:
-            log.error(f"openpyxl non disponible: {e}")
-            return ""
-
-    try:
-        start = get_trading_day_start()
-        now = datetime.now(timezone.utc)
-        deals = mt5.history_deals_get(start, now)
-        if deals is None or len(deals) == 0:
-            log.warning("Export XLSX: aucun deal trouvé")
-            return ""
-
-        # Filtrer les deals du bot
-        bot_deals = []
-        for d in deals:
-            if d.magic == MAGIC_NUMBER:
-                bot_deals.append(d)
-            elif hasattr(d, 'comment') and d.comment and re.match(r'CH\d+-', d.comment):
-                bot_deals.append(d)
-
-        if not bot_deals:
-            log.warning("Export XLSX: aucun deal bot trouvé")
-            return ""
-
-        # Styles
-        header_font = Font(bold=True)
-        section_font = Font(bold=True, size=12)
-        thin_border = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'), bottom=Side(style='thin')
-        )
-        profit_font = Font(color="00B050")
-        loss_font = Font(color="FF0000")
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Trade History Report"
-
-        # ── En-tête du rapport (comme MT5) ──
-        ws.cell(row=1, column=1, value="Trade History Report")
-        ws.cell(row=2, column=1, value="Name:")
-        ws.cell(row=2, column=4, value="GZL TradingBot V16")
-        ws.cell(row=3, column=1, value="Account:")
-        ws.cell(row=3, column=4, value=f"{MT5_LOGIN} (USD, {MT5_SERVER}, demo, Hedge)")
-        ws.cell(row=4, column=1, value="Company:")
-        ws.cell(row=4, column=4, value="Exness Technologies Ltd")
-        ws.cell(row=5, column=1, value="Date:")
-        ws.cell(row=5, column=4, value=now.strftime("%Y.%m.%d %H:%M"))
-
-        row = 7
-
-        # ── SECTION POSITIONS ──
-        ws.cell(row=row, column=1, value="Positions").font = section_font
-        row += 1
-
-        pos_headers = ["Time", "Position", "Symbol", "Type", "Volume", "Price",
-                       "S / L", "T / P", "Time", "Price", "Commission", "Swap", "Profit"]
-        for col, h in enumerate(pos_headers, 1):
-            cell = ws.cell(row=row, column=col, value=h)
-            cell.font = header_font
-            cell.border = thin_border
-        row += 1
-
-        # Construire les positions depuis les deals IN/OUT
-        # Indexer les deals IN par position_id
-        open_positions = {}  # position_id -> deal IN
-        close_positions = {}  # position_id -> deal OUT
-        for d in bot_deals:
-            if d.entry == mt5.DEAL_ENTRY_IN:
-                open_positions[d.position_id] = d
-            elif d.entry == mt5.DEAL_ENTRY_OUT:
-                close_positions[d.position_id] = d
-
-        pos_data = []
-        for pos_id, open_d in open_positions.items():
-            close_d = close_positions.get(pos_id)
-            open_time = datetime.fromtimestamp(open_d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S")
-            close_time = datetime.fromtimestamp(close_d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S") if close_d else ""
-            close_price = close_d.price if close_d else 0
-            profit = close_d.profit if close_d else 0
-            commission = (open_d.commission or 0) + (close_d.commission if close_d else 0)
-            swap = (open_d.swap or 0) + (close_d.swap if close_d else 0)
-            pos_type = "buy" if open_d.type == mt5.DEAL_TYPE_BUY else "sell"
-            # SL/TP depuis l'ordre d'ouverture
-            sl = 0
-            tp = 0
-            if open_d.order:
-                orders = mt5.history_orders_get(ticket=open_d.order)
-                if orders:
-                    sl = orders[0].sl if orders[0].sl else 0
-                    tp = orders[0].tp if orders[0].tp else 0
-            pos_data.append({
-                'open_time': open_time, 'pos_id': pos_id, 'symbol': open_d.symbol,
-                'type': pos_type, 'volume': open_d.volume, 'open_price': open_d.price,
-                'sl': sl, 'tp': tp, 'close_time': close_time, 'close_price': close_price,
-                'commission': commission, 'swap': swap, 'profit': profit,
-            })
-
-        for p in pos_data:
-            values = [p['open_time'], p['pos_id'], p['symbol'], p['type'], p['volume'],
-                      p['open_price'], p['sl'], p['tp'], p['close_time'], p['close_price'],
-                      p['commission'], p['swap'], p['profit']]
-            for col, val in enumerate(values, 1):
-                cell = ws.cell(row=row, column=col, value=val)
-                cell.border = thin_border
-                if col == 13:  # Profit
-                    cell.font = profit_font if val >= 0 else loss_font
-                    cell.number_format = '+#,##0.00;-#,##0.00'
-            row += 1
-
-        row += 1
-
-        # ── SECTION DEALS ──
-        ws.cell(row=row, column=1, value="Deals").font = section_font
-        row += 1
-
-        deal_headers = ["Time", "Deal", "Symbol", "Type", "Direction", "Volume",
-                        "Price", "Order", "Commission", "Fee", "Swap", "Profit", "Balance", "Comment"]
-        for col, h in enumerate(deal_headers, 1):
-            cell = ws.cell(row=row, column=col, value=h)
-            cell.font = header_font
-            cell.border = thin_border
-        row += 1
-
-        running_balance = 0
-        for d in sorted(bot_deals, key=lambda x: x.time):
-            direction = "in" if d.entry == mt5.DEAL_ENTRY_IN else "out"
-            deal_type = "buy" if d.type == mt5.DEAL_TYPE_BUY else "sell"
-            running_balance += d.profit + (d.commission or 0) + (d.swap or 0)
-            values = [
-                datetime.fromtimestamp(d.time, tz=timezone.utc).strftime("%Y.%m.%d %H:%M:%S"),
-                d.deal, d.symbol, deal_type, direction, d.volume,
-                d.price, d.order, d.commission or 0, 0, d.swap or 0,
-                d.profit, running_balance, getattr(d, 'comment', ''),
-            ]
-            for col, val in enumerate(values, 1):
-                cell = ws.cell(row=row, column=col, value=val)
-                cell.border = thin_border
-                if col == 12:  # Profit
-                    cell.font = profit_font if val >= 0 else loss_font
-                    cell.number_format = '+#,##0.00;-#,##0.00'
-            row += 1
-
-        row += 1
-
-        # ── SECTION RESULTS ──
-        ws.cell(row=row, column=1, value="Results").font = section_font
-        row += 1
-
-        total_pnl = sum(p['profit'] for p in pos_data)
-        gross_profit = sum(p['profit'] for p in pos_data if p['profit'] > 0)
-        gross_loss = sum(p['profit'] for p in pos_data if p['profit'] < 0)
-        total_trades = len(pos_data)
-        short_trades = [p for p in pos_data if p['type'] == 'sell']
-        long_trades = [p for p in pos_data if p['type'] == 'buy']
-        short_won = len([p for p in short_trades if p['profit'] > 0])
-        long_won = len([p for p in long_trades if p['profit'] > 0])
-        profit_trades = [p for p in pos_data if p['profit'] > 0]
-        loss_trades = [p for p in pos_data if p['profit'] < 0]
-        winrate = len(profit_trades) / total_trades * 100 if total_trades > 0 else 0
-        avg_win = sum(p['profit'] for p in profit_trades) / len(profit_trades) if profit_trades else 0
-        avg_loss = sum(p['profit'] for p in loss_trades) / len(loss_trades) if loss_trades else 0
-        largest_win = max((p['profit'] for p in pos_data), default=0)
-        largest_loss = min((p['profit'] for p in pos_data), default=0)
-        pf = abs(gross_profit / gross_loss) if gross_loss != 0 else 0
-
-        results = [
-            ("Total Net Profit:", total_pnl, "Gross Profit:", gross_profit, "Gross Loss:", gross_loss),
-            ("Profit Factor:", round(pf, 6), "Expected Payoff:", round(total_pnl / total_trades, 6) if total_trades else 0),
-            (f"Total Trades:", total_trades, f"Short Trades (won %):", f"{len(short_trades)} ({short_won/len(short_trades)*100:.2f}%)" if short_trades else "0", f"Long Trades (won %):", f"{len(long_trades)} ({long_won/len(long_trades)*100:.2f}%)" if long_trades else "0"),
-            ("Profit Trades (% of total):", f"{len(profit_trades)} ({winrate:.2f}%)", "Loss Trades (% of total):", f"{len(loss_trades)} ({100-winrate:.2f}%)") if total_trades > 0 else ("Profit Trades:", 0, "Loss Trades:", 0),
-            ("Largest profit trade:", largest_win, "Largest loss trade:", largest_loss),
-            ("Average profit trade:", round(avg_win, 6), "Average loss trade:", round(avg_loss, 6)),
-        ]
-        for r in results:
-            for col, val in enumerate(r, 1):
-                if val is not None:
-                    ws.cell(row=row, column=col, value=val)
-            row += 1
-
-        # Largeurs colonnes
-        col_widths = [20, 14, 12, 8, 10, 8, 12, 12, 10, 8, 8, 12, 12, 25]
-        for col, w in enumerate(col_widths, 1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = w
-
-        filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"deals_{date_str}.xlsx")
-        wb.save(filepath)
-        log.info(f"Export XLSX: {filepath} ({len(bot_deals)} deals)")
-        return filepath
-
-    except Exception as e:
-        log.error(f"Erreur export XLSX: {e}")
-        return ""
-
 def _send_telegram_document(filepath: str, caption: str):
     """Envoie un fichier document à Telegram via l'alert client."""
     if not TG_ALERT_CHANNEL or not _alert_client or not _main_loop:
@@ -4421,65 +4167,6 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     })
     log.debug(f"Quick Alert enregistré: {key}")
 
-def merge_quick_alert(qa: dict, key: str, full_signal: dict,
-                      bridge: MT5Bridge, manager: TradeManager,
-                      quick_alerts: dict):
-    qa_ticket = qa["ticket"]
-    entry     = qa["entry"]
-    real_sl   = full_signal["sl"]
-    tp_final  = full_signal["tps"][-1] if full_signal["tps"] else 0
-    canal     = full_signal.get("source_channel", "Inconnu")
-    # ★ FIX (v16) : ch_num_fusion défini AVANT le if/else pour être disponible dans les deux branches
-    ch_num_fusion = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-
-    # Fusion : mettre à jour SL/TP du QA existant, jamais de 2e position.
-    pos = mt5.positions_get(ticket=qa_ticket)
-    if not pos:
-        # QA déjà fermé (SL/TP touché) → ignorer le signal complet
-        since = datetime.now(timezone.utc) - timedelta(minutes=30)
-        deals = mt5.history_deals_get(since, datetime.now(timezone.utc))
-        deal_pnl = 0.0
-        close_reason = "unknown"
-        if deals:
-            for deal in reversed(deals):
-                if deal.symbol == full_signal["symbol"] and (
-                    deal.position_id == qa_ticket or deal.order == qa_ticket
-                ):
-                    if deal.entry == mt5.DEAL_ENTRY_OUT:
-                        deal_pnl = deal.profit + deal.commission + deal.swap
-                        if deal.reason == mt5.DEAL_REASON_SL:
-                            close_reason = "SL"
-                        elif deal.reason == mt5.DEAL_REASON_TP:
-                            close_reason = "TP"
-                        break
-        log.info(f"CH{ch_num_fusion}-{qa_label} | FUSION REFUSE | QA #{qa_ticket} deja ferme ({close_reason})")
-        _alert_mgmt(msg.alert_qa_already_closed(full_signal['action'], full_signal['symbol'], ch_num_fusion, qa_ticket, deal_pnl, close_reason))
-    else:
-        # QA actif -> mettre a jour SL uniquement (TP gardé depuis TP_FIXED_GAIN_USD)
-        # ★ SL plafonné aussi lors de la fusion
-        qa_entry_price = qa.get("entry_price", 0)
-        real_sl = _cap_sl(full_signal["action"], qa_entry_price, real_sl, MAX_SL_USD)
-        log.info(f"CH{ch_num_fusion}-{qa_label} | FUSION ACCEPTE")
-        # ★ FIX : ne modifier que le SL, pas le TP (garder TP_FIXED_GAIN_USD)
-        pos_data = mt5.positions_get(ticket=qa_ticket)
-        if pos_data:
-            current_tp = pos_data[0].tp
-            bridge.modify_sl_tp(qa_ticket, real_sl, current_tp, "[FUSION-SL-ONLY]")
-        entry["signal"]          = full_signal
-        entry["_is_quick_alert"] = False
-        _alert_mgmt(msg.alert_fusion(full_signal['action'], ch_num_fusion, qa_ticket, real_sl, tp_final))
-
-    # Nettoyer quick_alerts
-    if key in quick_alerts and qa in quick_alerts[key]:
-        quick_alerts[key].remove(qa)
-        if not quick_alerts[key]:
-            del quick_alerts[key]
-    _log_mgmt(msg.log_merge_done(full_signal['action'], full_signal['symbol']))
-
-
-# =============================================================
-# MAIN
-# =============================================================
 def _is_signal_message(text: str) -> bool:
     # ★ FIX (v15.2) : normaliser le texte (NFKC) AVANT le test — les canaux qui
     # utilisent l'Unicode gras (𝐆𝐎𝐋𝐃 𝐒𝐄𝐋𝐋 4590) ne matchent pas BUY/SELL ASCII
@@ -5069,62 +4756,29 @@ async def main():
                 key = _qa_key(sig_dict["symbol"], sig_dict["action"], canal_name)
                 qa_list = _quick_alerts.get(key, [])
                 found_qa = None
-                found_idx = -1
-                zone_low = sig_dict["zone_low"]
-                zone_high = sig_dict["zone_high"]
 
-                # ★ v17.4h : fusion par TEMPS (TEMPS_DE_FUSION minutes) — plus de fusion par prix
+                # ★ v17.4h : anti-doublon par TEMPS (TEMPS_DE_FUSION minutes)
+                # Un PU/ZN qui arrive juste après un QA/MP du même canal/symbole/action
+                # est le MÊME signal (même entry) → ignoré. Après TEMPS_DE_FUSION min,
+                # c'est un NOUVEAU signal → exécution normale.
                 for idx, qa in enumerate(qa_list):
                     qa_time = qa.get("time")
                     if qa_time is not None:
                         qa_age_min = (datetime.now(timezone.utc) - qa_time).total_seconds() / 60.0
                         if qa_age_min <= TEMPS_DE_FUSION:
                             found_qa = qa
-                            found_idx = idx
                             break
 
                 if found_qa is not None:
-                    # Cas 1 : PU/ZN dans les TEMPS_DE_FUSION min après QA/MP → FUSION ACCEPTE (pas de doublon)
-                    merge_quick_alert(found_qa, key, sig_dict, bridge, manager, _quick_alerts)
-                else:
-                    # Cas 2 : PU/ZN après TEMPS_DE_FUSION min → FUSION ECHOUE → _close_previous_signal
-                    if qa_list:
-                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | FUSION ECHOUE (QA > {TEMPS_DE_FUSION:.0f} min) → _close_previous_signal")
-                        _close_previous_signal(canal_name, bridge, manager)
-                    # ★ Vérifier si un MARKET existant (QA/MP) couvre déjà la zone
-                    in_zone, existing_comment = _market_in_zone(canal_name, sig_dict, manager)
-                    if existing_comment:
-                        if in_zone:
-                            # ★ FUSION ACCEPTE : mettre à jour SL de TOUTES les positions (MK + L1 + L2)
-                            new_sl = sig_dict.get("sl")
-                            if new_sl is not None:
-                                with manager._lock:
-                                    for entry in manager.active:
-                                        if entry.get("_mt5_comment") != existing_comment:
-                                            continue
-                                        for t in entry.get("tickets", []):
-                                            ticket = t.get("ticket")
-                                            if not ticket:
-                                                continue
-                                            pos = manager._get_pos(ticket)
-                                            if pos:
-                                                # Ne modifier que si le nouveau SL est plus restrictif
-                                                action = sig_dict.get("action", "")
-                                                if action == "BUY" and new_sl > pos.sl:
-                                                    bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
-                                                    log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
-                                                elif action == "SELL" and new_sl < pos.sl:
-                                                    bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
-                                                    log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
-                                        # Mettre à jour le signal de l'entrée
-                                        entry["signal"]["sl"] = new_sl
-                                        break
-                            log.info(f"{existing_comment} | FUSION ACCEPTE |")
-                            return  # MARKET déjà dans la zone → ignorer le signal
-                        else:
-                            log.info(f"{existing_comment} | FUSION IGNORE HORS ZONE |")
-                    # Aucun QA trouvé → exécuter le signal complet normalement
-                    execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
+                    # Cas 1 : PU/ZN ≤ TEMPS_DE_FUSION min après QA/MP = MÊME signal
+                    # → ignorer le nouveau (le QA/MP reste intact, pas de doublon)
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | DOUBLON IGNORE (QA/MP ≤ {TEMPS_DE_FUSION:.0f} min) → meme signal")
+                    return
+                # Cas 2 : PU/ZN > TEMPS_DE_FUSION min après QA/MP = NOUVEAU signal
+                # → execute_signal (ferme l'ancien du canal via _close_previous_signal puis ouvre)
+                if qa_list:
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | NOUVEAU SIGNAL (QA/MP > {TEMPS_DE_FUSION:.0f} min)")
+                execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
 
         # ★ Démarrer les boucles APRÈS le chargement des canaux
         await manager.start()
