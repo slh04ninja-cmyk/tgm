@@ -81,7 +81,7 @@ tr:nth-child(even) td { background: rgba(255,255,255,.02); }
 <tr><th>Type</th><th>Origine</th><th>Comportement</th></tr>
 <tr><td class="mono">ZN</td><td>Zone réelle (low &lt; high) + TP</td><td>Prix dans la zone (± TOLERANCE_ZN) → MK+L1+L2. Hors zone → L3/L4 (si TRADE_HORS_ZONE=true) sinon <b>REFUSE HORS ZONE</b></td></tr>
 <tr><td class="mono">PU</td><td>Prix unique (entry)</td><td>Zone convertie = [entry ± TOLERANCE_PU]. Prix dans la zone → <b>MK+L1+L2</b> ; sinon REFUSE HORS ZONE</td></tr>
-<tr><td class="mono">QA</td><td>Quick Alert <b>avec prix</b> (« BUY 4439 »)</td><td>Zone = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; au-delà → LIMITs seules ; sinon REFUSE HORS ZONE. SL = entry ± QUICK_ALERT_SL_OFFSET (capé MAX_SL_USD)</td></tr>
+<tr><td class="mono">QA</td><td>Quick Alert <b>avec prix</b> (« BUY 4439 »)</td><td>Zone = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; sinon REFUSE HORS ZONE. SL = entry ± QUICK_ALERT_SL_OFFSET (capé MAX_SL_USD)</td></tr>
 <tr><td class="mono">MP</td><td>Quick Alert <b>sans prix</b> (« BUY NOW »)</td><td>Zone = [current ± TOLERANCE_MP] (2$ par défaut) → prix toujours dans la zone → MK+L1+L2. SL = current ± QUICK_ALERT_SL_OFFSET, TP = TP_PAR_DEFAUT</td></tr>
 <tr><td class="mono">AL</td><td>Annonce des quick alerts (log)</td><td>Ce n'est pas un signal distinct : le log d'entrée affiche « CH{num}-AL » pour un quick alert, l'exécution utilise le label QA ou MP. Commentaire MT5 = CH{num}-QA / CH{num}-MP (jamais -AL)</td></tr>
 <tr><td class="mono">CLOSE</td><td>Message de clôture du canal</td><td>Ferme <b>toutes</b> les positions du canal + annule ses LIMITs en attente</td></tr>
@@ -194,17 +194,17 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <div class="card">
 <ul>
 <li><b>Entry :</b> prix annoncé dans le message</li>
-<li><b>Vérification prix défavorable</b> (<code>QA_PRICE_TOLERANCE</code> = 3$) : BUY et prix &gt; entry + 3, ou SELL et prix &lt; entry − 3 → <code>REFUSE HORS ZONE</code> (log <code>CH{num}-AL | REFUSE HORS ZONE</code>) — un prix favorable (meilleur) est accepté</li>
-<li><b>Zone :</b> <code>[entry ± TOLERANCE_PU]</code> (3$) :
+<li><b>Vérification prix défavorable</b> (<code>QA_PRICE_TOLERANCE</code> = 3$) : BUY et prix &gt; entry + 3, ou SELL et prix &lt; entry − 3 → <code>REFUSE HORS ZONE</code> (log <code>CH{num}-AL | REFUSE HORS ZONE</code>) — un prix favorable (meilleur) est accepté s'il reste dans la zone</li>
+<li><b>Zone convertie :</b> <code>[entry ± TOLERANCE_PU]</code> (3$) :
 <ul>
-<li>Prix dans la zone → <b>MK + L1 + L2</b></li>
-<li>Prix dans la bande étendue (± TOLERANCE_ZN = 1$) → <b>LIMITs seules (L1 + L2, sans MARKET)</b> — on attend le retour du prix</li>
-<li>Sinon → <code>REFUSE HORS ZONE</code></li>
+<li>BUY : <code>in_zone = entry − TOLERANCE_PU ≤ prix ≤ entry + TOLERANCE_PU</code></li>
+<li>SELL : <code>in_zone = entry − TOLERANCE_PU ≤ prix ≤ entry + TOLERANCE_PU</code></li>
+<li>Prix dans la zone → <b>MK + L1 + L2</b> ; sinon → <code>REFUSE HORS ZONE</code> (même logique que PU — pas de bande étendue)</li>
 </ul></li>
 <li><b>SL :</b> SL du message sinon <code>entry ± QUICK_ALERT_SL_OFFSET</code>, capé <code>MAX_SL_USD</code> ; ajusté si invalide (SL &lt; entry BUY / &gt; entry SELL, sinon ±10)</li>
 <li><b>TP :</b> <code>entry ± TP_FIXED_GAIN_USD</code> (7$) si TP présent dans le message, sinon <code>entry ± TP_PAR_DEFAUT</code> (15$), puis recalcul dynamique</li>
 <li><b>Filtre distance TP :</b> prix trop proche du TP (&lt; 30% du trajet restant, TP_DISTANCE_MIN_RATIO) → signal ignoré</li>
-<li>Log : <code>CH{num}-QA | ACCEPTE | MK=... | L1=... | L2=...</code> (zone) ou <code>CH{num}-QA | ACCEPTE | L1=... | L2=...</code> (LIMITs seules)</li>
+<li>Log : <code>CH{num}-QA | ACCEPTE | MK=... | L1=... | L2=...</code></li>
 </ul>
 </div>
 
