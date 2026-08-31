@@ -194,7 +194,6 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <div class="card">
 <ul>
 <li><b>Entry :</b> prix annoncé dans le message</li>
-<li><b>Vérification prix défavorable</b> (<code>QA_PRICE_TOLERANCE</code> = 3$) : BUY et prix &gt; entry + 3, ou SELL et prix &lt; entry − 3 → <code>REFUSE HORS ZONE</code> (log <code>CH{num}-AL | REFUSE HORS ZONE</code>) — un prix favorable (meilleur) est accepté s'il reste dans la zone</li>
 <li><b>Zone convertie :</b> <code>[entry ± TOLERANCE_PU]</code> (3$) :
 <ul>
 <li>BUY : <code>in_zone = entry − TOLERANCE_PU ≤ prix ≤ entry + TOLERANCE_PU</code></li>
@@ -247,7 +246,6 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td>TradingView</td><td class="mono">TV_FILTER_ENABLED</td><td>OFF (bot 1)</td><td>Filtre GOLD 5m (TVC/cfd), seuils BUY/SELL/STRONG</td></tr>
 <tr><td>Spread</td><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>Refus si spread trop large</td></tr>
 <tr><td>Distance TP</td><td class="mono">TP_DISTANCE_MIN_RATIO</td><td>0.3</td><td>Prix trop proche du TP → signal ignoré</td></tr>
-<tr><td>Prix QA</td><td class="mono">QA_PRICE_TOLERANCE</td><td>3.0$</td><td>Prix défavorable de &gt; 3$ → annulé</td></tr>
 <tr><td>Max signaux</td><td class="mono">MAX_POSITIONS</td><td>60</td><td>Au-delà → Quick Alert ignorée</td></tr>
 <tr><td>Fusion QA/MP + PU/ZN</td><td class="mono">FUSION_TOLERANCE</td><td>3</td><td>Un signal QA/MP déjà dans la zone couvre le nouveau signal PU/ZN (pas de doublon)</td></tr>
 </table>
@@ -338,7 +336,6 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">TV_NEUTRAL_ALLOW</td><td>true</td><td>—</td><td>Autoriser les signaux neutres</td></tr>
 <tr><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>50</td><td>Spread max accepté</td></tr>
 <tr><td class="mono">TP_DISTANCE_MIN_RATIO</td><td>0.3</td><td>0.3</td><td>Ratio min distance restante TP</td></tr>
-<tr><td class="mono">QA_PRICE_TOLERANCE</td><td>3.0</td><td>3.0</td><td>Tolérance prix Quick Alert ($)</td></tr>
 <tr><td class="mono">TOLERANCE_MP / TOLERANCE_PU / TOLERANCE_ZN</td><td>5.0 / 3.0 / 1.0</td><td><b>2.0</b> / 3.0 / 1.0</td><td>Zones de tolérance par type (TOLERANCE_MP passé à 2.0)</td></tr>
 <tr><td class="mono">FUSION_TOLERANCE</td><td>3</td><td>3</td><td>Fusion QA/MP + PU/ZN</td></tr>
 <tr><td class="mono">MAX_POSITIONS</td><td>3</td><td><b>60</b></td><td>Max signaux actifs</td></tr>
