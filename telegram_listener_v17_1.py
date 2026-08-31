@@ -3772,6 +3772,16 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
     tickets = []
     orders_desc = []
 
+    # ★ v17.4f : SL UNIQUE pour MK+L1+L2 — capé sur le prix d'exécution RÉEL
+    # (pas l'entrée prévue du signal). Sinon MK et LIMIT ont des SL différents
+    # et le market se fait stopper avant les limites. Ne rapproche jamais le SL
+    # contre le trade : min/max garde le SL le plus proche du prix.
+    if sl:
+        if action == "BUY":
+            sl = max(sl, round(current - MAX_SL_USD, 2))
+        else:
+            sl = min(sl, round(current + MAX_SL_USD, 2))
+
     # === MARKET ORDER ===
     mt5_comment_mk = f"CH{ch_num}-{prefix}-MK"
     try:
