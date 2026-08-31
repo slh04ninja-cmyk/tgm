@@ -182,7 +182,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <div class="card">
 <ul>
 <li><b>Entry :</b> prix courant au moment du signal (<code>entry_price = current</code>)</li>
-<li><b>Zone :</b> BUY <code>[current − TOLERANCE_MP, current]</code> ; SELL <code>[current, current + TOLERANCE_MP]</code> (5$) → le prix est <b>toujours dans la zone</b> → <b>jamais refusé</b> pour position hors zone (seuls les filtres généraux s'appliquent)</li>
+<li><b>Zone :</b> BUY <code>[current − TOLERANCE_MP, current + TOLERANCE_MP]</code> ; SELL <code>[current − TOLERANCE_MP, current + TOLERANCE_MP]</code> (avec <code>TOLERANCE_MP</code> = 2 par défaut) → le prix est <b>toujours dans la zone</b> → <b>jamais refusé</b> pour position hors zone (seuls les filtres généraux s'appliquent)</li>
 <li><b>SL :</b> <code>current ± QUICK_ALERT_SL_OFFSET</code> (12$) — jamais de SL dans le message</li>
 <li><b>TP :</b> <code>current ± TP_PAR_DEFAUT</code> (15$) — jamais TP_FIXED (pas de TP dans le message), puis recalcul dynamique au remplissage</li>
 <li><b>Exécution :</b> MK + L1 + L2 (LOT_MARKET 0.01)</li>
