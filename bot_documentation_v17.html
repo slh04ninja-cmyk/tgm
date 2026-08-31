@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bot Trading V17.4g — Documentation complète</title>
+<title>Bot Trading V17.4h — Documentation complète</title>
 <style>
 :root {
   --bg: #0d1117;
@@ -54,8 +54,8 @@ tr:nth-child(even) td { background: rgba(255,255,255,.02); }
 <body>
 <div class="container">
 
-<h1>Bot Trading V17.4g</h1>
-<p class="subtitle">Copy trading Telegram → MT5 (XAUUSD) — Documentation complète &nbsp;|&nbsp; Commit <code>03ffe37</code> &nbsp;|&nbsp; Bot 1 — C:\TradingBot</p>
+<h1>Bot Trading V17.4h</h1>
+<p class="subtitle">Copy trading Telegram → MT5 (XAUUSD) — Documentation complète &nbsp;|&nbsp; Commit <code>af10893</code> &nbsp;|&nbsp; Bot 1 — C:\TradingBot</p>
 
 <div class="card">
 <span class="badge b-green">ACTIF</span><span class="badge b-blue">XAUUSD only</span><span class="badge b-orange">DEMO</span><span class="badge b-purple">91 canaux</span>
@@ -80,7 +80,7 @@ tr:nth-child(even) td { background: rgba(255,255,255,.02); }
 <table>
 <tr><th>Type</th><th>Origine</th><th>Comportement</th></tr>
 <tr><td class="mono">ZN</td><td>Zone réelle (low &lt; high) + TP</td><td>Prix dans la zone (± TOLERANCE_ZN) → MK+L1+L2. Hors zone → L3/L4 (si TRADE_HORS_ZONE=true) sinon <b>REFUSE HORS ZONE</b></td></tr>
-<tr><td class="mono">PU</td><td>Prix unique (entry)</td><td>Zone convertie = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; légèrement au-delà (± TOLERANCE_ZN) → <b>LIMITs seules (sans MK)</b> ; sinon REFUSE HORS ZONE</td></tr>
+<tr><td class="mono">PU</td><td>Prix unique (entry)</td><td>Zone convertie = [entry ± TOLERANCE_PU]. Prix dans la zone ou légèrement au-delà (± TOLERANCE_ZN) → <b>MK+L1+L2</b> (toujours) ; sinon REFUSE HORS ZONE</td></tr>
 <tr><td class="mono">QA</td><td>Quick Alert <b>avec prix</b> (« BUY 4439 »)</td><td>Zone = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; au-delà → LIMITs seules ; sinon REFUSE HORS ZONE. SL = entry ± QUICK_ALERT_SL_OFFSET (capé MAX_SL_USD)</td></tr>
 <tr><td class="mono">MP</td><td>Quick Alert <b>sans prix</b> (« BUY NOW »)</td><td>Zone = [current ∓ TOLERANCE_MP] → prix toujours dans la zone → MK+L1+L2. SL = current ± QUICK_ALERT_SL_OFFSET, TP = TP_PAR_DEFAUT</td></tr>
 <tr><td class="mono">AL</td><td>Annonce des quick alerts (log)</td><td>Ce n'est pas un signal distinct : le log d'entrée affiche « CH{num}-AL » pour un quick alert, l'exécution utilise le label QA ou MP. Commentaire MT5 = CH{num}-QA / CH{num}-MP (jamais -AL)</td></tr>
@@ -162,14 +162,69 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <div class="warn"><b>REFUSE HORS ZONE (dist &gt; 3$) :</b> prix = 4445 → dist = 4445 − 4441 = 4$ &gt; 3$ → <code>CH110-ZN | REFUSE HORS ZONE (dist 4.00$ &gt; MAX_DISTANCE=3)</code> — rien n'est ouvert.</div>
 <div class="info"><b>Autres types :</b> PU / QA → <code>REFUSE HORS ZONE</code> (refus simple, jamais de L3/L4) — AL n'est que le mode log des QA ; MP → jamais refusé (sa zone est créée autour du prix courant).</div>
 
-<h2>4. Gestion du TP</h2>
-<h3>4.1 TP initial (par type)</h3>
+<h2>4. Gestion des trades PU / MP / QA</h2>
+<p>Les signaux à prix unique (PU) et les quick alerts (QA avec prix, MP sans prix) sont convertis en zone autour de l'entrée puis gérés en MARKET + LIMITs. <b>Jamais de L3/L4</b> pour ces types : soit acceptés (MK+L1+L2 ou LIMITs seules), soit <code>REFUSE HORS ZONE</code>.</p>
+
+<h3>4.1 PU — Prix unique (Entry)</h3>
+<div class="card">
+<p><b>Zone convertie :</b> <code>[entry ± TOLERANCE_PU]</code> (3$)</p>
+<ul>
+<li>BUY : <code>in_zone = entry − 3 ≤ prix ≤ entry + 3</code> ; bande étendue : <code>entry + 3 &lt; prix ≤ entry + 3 + TOLERANCE_ZN</code></li>
+<li>SELL : <code>in_zone = entry − 3 ≤ prix ≤ entry + 3</code> ; bande étendue : <code>entry − 3 − TOLERANCE_ZN ≤ prix &lt; entry − 3</code></li>
+<li>Prix dans la zone <b>ou</b> dans la bande étendue (± TOLERANCE_ZN = 1$) → <b>MK + L1 + L2</b> (toujours, même au-delà) ; sinon → <code>REFUSE HORS ZONE</code></li>
+<li><b>SL :</b> <code>_cap_sl(action, entry, sl, MAX_SL_USD)</code> — SL du signal plafonné à 12$ de l'entrée</li>
+<li><b>TP :</b> <code>current ± TP_FIXED_GAIN_USD</code> (7$, le TP du signal est ignoré) puis recalcul dynamique au remplissage (identique ZN cas 1)</li>
+<li>Log : <code>CH{num}-PU | ACCEPTE | MK=... | L1=... | L2=...</code></li>
+</ul>
+</div>
+
+<h3>4.2 MP — Quick Alert sans prix (« BUY NOW »)</h3>
+<div class="card">
+<ul>
+<li><b>Entry :</b> prix courant au moment du signal (<code>entry_price = current</code>)</li>
+<li><b>Zone :</b> BUY <code>[current − TOLERANCE_MP, current]</code> ; SELL <code>[current, current + TOLERANCE_MP]</code> (5$) → le prix est <b>toujours dans la zone</b> → <b>jamais refusé</b> pour position hors zone (seuls les filtres généraux s'appliquent)</li>
+<li><b>SL :</b> <code>current ± QUICK_ALERT_SL_OFFSET</code> (12$) — jamais de SL dans le message</li>
+<li><b>TP :</b> <code>current ± TP_PAR_DEFAUT</code> (15$) — jamais TP_FIXED (pas de TP dans le message), puis recalcul dynamique au remplissage</li>
+<li><b>Exécution :</b> MK + L1 + L2 (LOT_MARKET 0.01)</li>
+<li>Log : <code>CH{num}-MP | ACCEPTE | MK=... | L1=... | L2=...</code></li>
+</ul>
+</div>
+
+<h3>4.3 QA — Quick Alert avec prix (« BUY 4439 »)</h3>
+<div class="card">
+<ul>
+<li><b>Entry :</b> prix annoncé dans le message</li>
+<li><b>Vérification prix défavorable</b> (<code>QA_PRICE_TOLERANCE</code> = 3$) : BUY et prix &gt; entry + 3, ou SELL et prix &lt; entry − 3 → <code>REFUSE HORS ZONE</code> (log <code>CH{num}-AL | REFUSE HORS ZONE</code>) — un prix favorable (meilleur) est accepté</li>
+<li><b>Zone :</b> <code>[entry ± TOLERANCE_PU]</code> (3$) :
+<ul>
+<li>Prix dans la zone → <b>MK + L1 + L2</b></li>
+<li>Prix dans la bande étendue (± TOLERANCE_ZN = 1$) → <b>LIMITs seules (L1 + L2, sans MARKET)</b> — on attend le retour du prix</li>
+<li>Sinon → <code>REFUSE HORS ZONE</code></li>
+</ul></li>
+<li><b>SL :</b> SL du message sinon <code>entry ± QUICK_ALERT_SL_OFFSET</code>, capé <code>MAX_SL_USD</code> ; ajusté si invalide (SL &lt; entry BUY / &gt; entry SELL, sinon ±10)</li>
+<li><b>TP :</b> <code>entry ± TP_FIXED_GAIN_USD</code> (7$) si TP présent dans le message, sinon <code>entry ± TP_PAR_DEFAUT</code> (15$), puis recalcul dynamique</li>
+<li><b>Filtre distance TP :</b> prix trop proche du TP (&lt; 30% du trajet restant, TP_DISTANCE_MIN_RATIO) → signal ignoré</li>
+<li>Log : <code>CH{num}-QA | ACCEPTE | MK=... | L1=... | L2=...</code> (zone) ou <code>CH{num}-QA | ACCEPTE | L1=... | L2=...</code> (LIMITs seules)</li>
+</ul>
+</div>
+
+<h3>4.4 Règles communes PU / MP / QA</h3>
+<ul>
+<li><b>1 signal par canal :</b> un nouveau signal du même canal ferme l'ancien (<code>_close_previous_signal</code>, commentaire <code>NEW-SIGNAL</code>)</li>
+<li><b>Fusion QA/MP + PU/ZN</b> (<code>FUSION_TOLERANCE</code> = 3$) : un quick alert déjà dans la zone couvre le nouveau signal PU/ZN (pas de doublon) ; hors tolérance → mise à jour du SL uniquement</li>
+<li><b>TP dynamique identique au ZN cas 1 :</b> MK seul → <code>entry_MK ± 7</code> (cible 7$) ; MK+L1 → <code>avg ± 5.25</code> (10.5$) ; MK+L1+L2 → <code>avg ± 4.67</code> (14$)</li>
+<li><b>MK fermé (TP/SL/manuel) → L1/L2 annulées</b> (PHASE 5 : pas de LIMIT orpheline qui se remplirait après la clôture du trade)</li>
+<li>AL n'est qu'un label de log (annonce de quick alert) : l'exécution est <b>QA</b> ou <b>MP</b>, le commentaire MT5 est <code>CH{num}-QA</code> / <code>CH{num}-MP</code> (jamais -AL)</li>
+</ul>
+
+<h2>5. Gestion du TP</h2>
+<h3>5.1 TP initial (par type)</h3>
 <ul>
 <li><b>ZN / PU</b> → TP = <code>current ± TP_FIXED_GAIN_USD</code> (7$) — depuis le <b>prix d'exécution du MK</b> (le TP du signal est ignoré)</li>
 <li><b>MP</b> (sans prix) → TP = <code>current ± TP_PAR_DEFAUT</code> (15$)</li>
 <li><b>QA</b> (avec prix) → TP = <code>entry ± TP_FIXED_GAIN_USD</code> (7$)</li>
 </ul>
-<h3>4.2 TP dynamique (recalculé au remplissage des LIMITs)</h3>
+<h3>5.2 TP dynamique (recalculé au remplissage des LIMITs)</h3>
 <table>
 <tr><th>Cas</th><th>Positions</th><th>P&L cible</th><th>TP = avg_entry ± (cible / nb)</th></tr>
 <tr><td>1</td><td>1 position (MK seul, ou L3 seule)</td><td>7.0 × 1 = 7.0$</td><td>± 7.00$</td></tr>
@@ -178,15 +233,15 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 </table>
 <p>Le TP est recalculé quand le <b>nombre de positions change</b> (guard <code>_tp_calculated_for</code>) et appliqué à <b>toutes</b> les positions. Le SL ne bouge jamais.</p>
 <div class="info"><b>Comportement réel vérifié (deals) :</b> le recalcul <b>cas 1</b> s'exécute dès le 1er cycle de la boucle (les LIMITs en attente ne comptent pas comme positions) → le TP initial est immédiatement remplacé par <code>entry_MK ± 7</code>. Résultat : tout MK seul ferme à <b>+7.00$ exactement</b> (115 trades confirmés sur la semaine, ex. CH85-ZN-MK open 4450.91 → close 4457.91 = +7.00$). Le TP initial (milieu de zone ± 7 dans le code actuel) ne survit que si le bot est down au moment du remplissage.</div>
-<h3>4.3 P&L cible (clôture globale)</h3>
+<h3>5.3 P&L cible (clôture globale)</h3>
 <p>Si le P&L flottant total (profit + swap) ≥ <code>pnl_cible</code> → le bot ferme <b>toutes</b> les positions et annule les LIMITs restantes (commentaire <code class="mono">PNL-TARGET</code>).</p>
 <div class="warn"><b>Conflit conceptuel connu :</b> les TPs individuels MT5 ferment chaque position seule si atteints avant le P&L cible → fermetures partielles possibles (ex. cas CH110 du 31/08 : MK+L1 fermés au TP 4427.75, L2 restée avec son TP initial car le bot était down au moment du remplissage de L2).</div>
 
 
-<h2>5. Filtres</h2>
+<h2>6. Filtres</h2>
 <table>
 <tr><th>Filtre</th><th>Variable</th><th>Serveur</th><th>Effet</th></tr>
-<tr><td>Horaire</td><td class="mono">TRADING_START/END_HOUR</td><td>5h – 17h UTC</td><td>REFUSE HORAIRE en dehors de la fenêtre</td></tr>
+<tr><td>Horaire</td><td class="mono">TRADING_START/END_HOUR</td><td>5h – 21h UTC</td><td>REFUSE HORAIRE en dehors de la fenêtre</td></tr>
 <tr><td>News</td><td class="mono">NEWS_FILTER_ENABLED</td><td>ON (impact HIGH)</td><td>Bloc 15 min avant, close 5 min avant, 15 min après</td></tr>
 <tr><td>Conflit</td><td class="mono">CONFLIT_FILTER_ENABLED</td><td>true</td><td>1 signal par canal ; check_conflict avant exécution</td></tr>
 <tr><td>TradingView</td><td class="mono">TV_FILTER_ENABLED</td><td>OFF (bot 1)</td><td>Filtre GOLD 5m (TVC/cfd), seuils BUY/SELL/STRONG</td></tr>
@@ -197,7 +252,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td>Fusion QA/MP + PU/ZN</td><td class="mono">FUSION_TOLERANCE</td><td>3</td><td>Un signal QA/MP déjà dans la zone couvre le nouveau signal PU/ZN (pas de doublon)</td></tr>
 </table>
 
-<h2>6. Cycle de vie d'un signal</h2>
+<h2>7. Cycle de vie d'un signal</h2>
 <div class="flow">
 <div class="step"><span class="num">1</span><div>Message Telegram reçu (Telethon) → anti-spam → parser (NFKC, extraction Entry/TP/SL)</div></div>
 <div class="step"><span class="num">2</span><div>Traçage dans <code>signal_tracker.json</code> (msg_id unique → dédoublonnage)</div></div>
@@ -209,7 +264,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <div class="step"><span class="num">8</span><div>P&L reporté (<code>_get_last_pnl</code>), rapport quotidien</div></div>
 </div>
 
-<h2>7. Recovery au redémarrage (v17.4g)</h2>
+<h2>8. Recovery au redémarrage (v17.4g)</h2>
 <ul>
 <li>Au démarrage, le bot scanne les <b>positions MT5 existantes</b> (par magic + commentaire CH{num}-{prefix}) et reconstruit les entrées perdues</li>
 <li>Résout le <b>vrai nom du canal</b> (source_channel) même si le canal a été renommé</li>
@@ -219,7 +274,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <li>Nettoyage des <b>LIMITs orphelines</b> (annulation, sauf L3/L4 hors-zone)</li>
 </ul>
 
-<h2>8. Rapports et alertes</h2>
+<h2>9. Rapports et alertes</h2>
 <ul>
 <li><b>Rapport quotidien PDF</b> envoyé sur <code>@TrdReport</code> (fpdf2) : P&L, positions, signaux du jour</li>
 <li><code>ALERT_DAILY_PERFORMANCE</code> : performance quotidienne</li>
@@ -229,7 +284,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <li>Logs : <code>bot_trading.log</code> (API) / <code>stdout.log</code> (bot, lancé via start_bot1.py)</li>
 </ul>
 
-<h2>9. API REST (port 8000)</h2>
+<h2>10. API REST (port 8000)</h2>
 <table>
 <tr><th>Endpoint</th><th>Méthode</th><th>Rôle</th></tr>
 <tr><td class="mono">/api/status</td><td>GET</td><td>État du bot + compte MT5</td></tr>
@@ -251,7 +306,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 </table>
 <div class="warn"><b>⚠️ SÉCURITÉ :</b> l'API est exposée sur Internet (0.0.0.0:8000) <b>sans authentification</b> — API_TOKEN est défini mais jamais vérifié. /api/exec = exécution de commandes arbitraires. <b>À corriger en priorité.</b></div>
 
-<h2>10. Configuration complète (.env)</h2>
+<h2>11. Configuration complète (.env)</h2>
 <p class="small">Colonne « Serveur » = valeur actuelle du bot 1 (31/08/2026). Les secrets ne sont pas documentés.</p>
 <table>
 <tr><th>Variable</th><th>Défaut</th><th>Serveur</th><th>Description</th></tr>
@@ -272,10 +327,10 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">MAX_SL_USD</td><td>10.0</td><td>12.0</td><td>SL maximal en $ (capé)</td></tr>
 <tr><td class="mono">QUICK_ALERT_SL_OFFSET</td><td>10.0</td><td>12.0</td><td>SL des Quick Alerts (entry ± offset)</td></tr>
 <tr><td class="mono">SLIPPAGE</td><td>20</td><td>—</td><td>Déviation max (points)</td></tr>
-<tr><td class="mono">TRADE_HORS_ZONE</td><td>false</td><td><b>false</b></td><td>L3/L4 hors zone (désactivé)</td></tr>
+<tr><td class="mono">TRADE_HORS_ZONE</td><td>false</td><td><b>true</b></td><td>L3/L4 hors zone (activé 31/08)</td></tr>
 <tr><td class="mono">MAX_DISTANCE</td><td>5.0</td><td>3</td><td>Distance max du prix au bord de zone (L3) pour le cas hors-zone — au-delà : REFUSE HORS ZONE (l'expiration est gérée par LIMIT_EXPIRY_MIN)</td></tr>
 <tr><td class="mono">RR_RATIO_DEFAULT</td><td>1.5</td><td>—</td><td>Ratio R/R par défaut</td></tr>
-<tr><td class="mono">TIME_FILTER_ENABLED / TRADING_START_HOUR / TRADING_END_HOUR</td><td>true / 3 / 20</td><td>true / <b>5</b> / <b>17</b></td><td>Fenêtre de trading (UTC)</td></tr>
+<tr><td class="mono">TIME_FILTER_ENABLED / TRADING_START_HOUR / TRADING_END_HOUR</td><td>true / 3 / 20</td><td>true / <b>5</b> / <b>21</b></td><td>Fenêtre de trading (UTC)</td></tr>
 <tr><td class="mono">NEWS_FILTER_ENABLED / NEWS_MIN_IMPACT</td><td>false / high</td><td><b>ON</b> / HIGH</td><td>Filtre news (bloc 15 / close 5 / après 15 min)</td></tr>
 <tr><td class="mono">CONFLIT_FILTER_ENABLED</td><td>true</td><td>true</td><td>Filtre de conflit (1 signal par canal)</td></tr>
 <tr><td class="mono">TV_FILTER_ENABLED / TV_FILTER_TIMEFRAME</td><td>false / 5m</td><td>OFF</td><td>Filtre TradingView GOLD 5m</td></tr>
@@ -289,20 +344,20 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">MAX_POSITIONS</td><td>3</td><td><b>60</b></td><td>Max signaux actifs</td></tr>
 <tr><td class="mono">POLL_INTERVAL_SEC</td><td>1</td><td><b>0.3</b></td><td>Fréquence de la boucle de gestion (s)</td></tr>
 <tr><td class="mono">DAILY_PROFIT_LIMIT</td><td>200.0</td><td><b>400</b></td><td>Objectif quotidien</td></tr>
-<tr><td class="mono">ALERT_DAILY_PERFORMANCE / ALERT_TRADE_MANAGEMENT / LOG_TRADE_MANAGEMENT</td><td>true ×3</td><td>true</td><td>Alertes et logs de gestion</td></tr>
+<tr><td class="mono">ALERT_DAILY_PERFORMANCE / ALERT_TRADE_MANAGEMENT / LOG_TRADE_MANAGEMENT</td><td>true ×3</td><td>true / <b>false</b> / true</td><td>Alertes et logs de gestion (LOG actif, ALERT_TRADE_MANAGEMENT désactivé)</td></tr>
 </table>
 
-<h2>11. Opérations</h2>
+<h2>12. Opérations</h2>
 <ul>
 <li><b>Démarrer le bot :</b> <code>python start_bot1.py</code> (détaché, log → stdout.log). <b>Ne jamais lancer dans une console RDP</b> (fermeture = mort du bot)</li>
 <li><b>Redémarrer l'API :</b> <code>restart.bat</code> (attention : /api/restart tue uvicorn)</li>
 <li><b>Watchdog :</b> vérification toutes les 2 min du statut → alerte + relance auto si le bot tombe (cron local Hermes)</li>
 <li><b>Terminal MT5 du bot 1 :</b> <code>C:\Program Files\MetaTrader 5 EXNESS</code> (NE PAS initialiser avec un autre compte — casse l'AutoTrading, erreurs 10027)</li>
-<li><b>Fenêtre de trading :</b> 5h–17h UTC</li>
+<li><b>Fenêtre de trading :</b> 5h–21h UTC</li>
 </ul>
 
 <div class="footer">
-Bot Trading V17.4g — Documentation générée le 31/08/2026 · Repo tgm (commit 03ffe37) · Langue : français
+Bot Trading V17.4h — Documentation générée le 31/08/2026 · Repo tgm (commit af10893) · Langue : français
 </div>
 </div>
 </body>
