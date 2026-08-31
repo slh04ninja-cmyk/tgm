@@ -234,8 +234,9 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 </table>
 <p>Le TP est recalculé quand le <b>nombre de positions change</b> (guard <code>_tp_calculated_for</code>) et appliqué à <b>toutes</b> les positions. Le SL ne bouge jamais.</p>
 <div class="info"><b>Comportement réel vérifié (deals) :</b> le recalcul <b>cas 1</b> s'exécute dès le 1er cycle de la boucle (les LIMITs en attente ne comptent pas comme positions) → le TP initial est immédiatement remplacé par <code>entry_MK ± 7</code>. Résultat : tout MK seul ferme à <b>+7.00$ exactement</b> (115 trades confirmés sur la semaine, ex. CH85-ZN-MK open 4450.91 → close 4457.91 = +7.00$). Le TP initial (milieu de zone ± 7 dans le code actuel) ne survit que si le bot est down au moment du remplissage.</div>
-<h3>5.3 P&L cible (clôture globale)</h3>
-<p>Si le P&L flottant total (profit + swap) ≥ <code>pnl_cible</code> → le bot ferme <b>toutes</b> les positions et annule les LIMITs restantes (commentaire <code class="mono">PNL-TARGET</code>).</p>
+<h3>5.3 P&L cible (clôture par trade)</h3>
+<p>⚠️ Ce n'est <b>pas</b> la limite quotidienne (<code>DAILY_PROFIT_LIMIT</code>, §9) : c'est la cible de gain d'un <b>trade individuel</b> (un signal), vérifiée en continu par la PHASE 4b.</p>
+<p>Si le <b>P&L flottant cumulé</b> de <b>toutes</b> les positions du trade (<code>profit + swap</code> de chaque position ouverte) ≥ <code>pnl_cible</code> (cas 1 = 7$ / cas 2 = 10.5$ / cas 3 = 14$, cf. 5.2) → le bot ferme <b>toutes</b> les positions et annule les LIMITs restantes (commentaire <code class="mono">PNL-TARGET</code>), une seule fois par trade (guard <code>_pnl_close_done</code>).</p>
 <div class="warn"><b>Conflit conceptuel connu :</b> les TPs individuels MT5 ferment chaque position seule si atteints avant le P&L cible → fermetures partielles possibles (ex. cas CH110 du 31/08 : MK+L1 fermés au TP 4427.75, L2 restée avec son TP initial car le bot était down au moment du remplissage de L2).</div>
 
 
