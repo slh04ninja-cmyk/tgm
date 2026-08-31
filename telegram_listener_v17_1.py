@@ -165,13 +165,11 @@ CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == 
 TOLERANCE_ZN = float(os.getenv("TOLERANCE_ZN", "1.0"))
 TOLERANCE_PU = float(os.getenv("TOLERANCE_PU", "3.0"))
 TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "2.0"))
-TP_PAR_DEFAUT = float(os.getenv("TP_PAR_DEFAUT", "15.0"))
 
 # === TRADE HORS ZONE (booléen d'activation, défaut FALSE) ===
 # Si le prix est hors zone (signaux type zone uniquement), placer 2 LIMITs :
 #   L3 = bord de la zone, L4 = milieu de zone (mid_zone)
-# TP : cas1 (2 pending) = TP_PAR_DEFAUT ; cas2 (L3 rempli) = PnL total = TP_FIXED_GAIN_USD ;
-#      cas3 (L3+L4 remplis) = PnL total = TP_FIXED_GAIN_USD * TP_MULTIPE1
+# TP initial unifié : current ± TP_FIXED_GAIN_USD (7$), puis recalcul dynamique
 # Expiration : cas1 prix dépasse MAX_DISTANCE ; cas2 attente > MAX_TEMPS min
 TRADE_HORS_ZONE = os.getenv("TRADE_HORS_ZONE", "false").lower() == "true"
 MAX_DISTANCE = float(os.getenv("MAX_DISTANCE", "5.0"))
@@ -4299,11 +4297,11 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         zone_low_mp = round(entry_price - TOLERANCE_MP, 2)
         zone_high_mp = round(entry_price + TOLERANCE_MP, 2)
         signal["sl"] = round(sl, 2)
-        signal["tps"] = []  # TP = TP_PAR_DEFAUT
+        signal["tps"] = []  # TP initial unifié (current ± TP_FIXED_GAIN_USD)
         signal["zone_mid"] = entry_price
         signal["zone_low"] = zone_low_mp
         signal["zone_high"] = zone_high_mp
-        _log_mgmt(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP=TP_PAR_DEFAUT({TP_PAR_DEFAUT}$)")
+        _log_mgmt(f"[MARKET PRICE] Résolu: entry={entry_price}, SL={sl}, TP=TP_FIXED_GAIN_USD({TP_FIXED_GAIN_USD}$)")
 
     canal = signal.get("source_channel", "Inconnu")
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
@@ -4312,21 +4310,14 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
     _close_previous_signal(canal, bridge, manager)
 
-    # TP : signal TP ou TP_FIXED_GAIN_USD
-    if signal.get("tps") and len(signal["tps"]) > 0:
-        # ★ FIX : ignorer le TP du parser, utiliser TP_FIXED_GAIN_USD comme execute_signal
-        # Le TP sera recalculé dynamiquement par _recalculate_tp si LIMIT se remplit
-        if action == "BUY":
-            default_tp = round(entry_price + TP_FIXED_GAIN_USD, 2)
-        else:
-            default_tp = round(entry_price - TP_FIXED_GAIN_USD, 2)
-        log.debug(f"Quick Alert : TP override = {default_tp} (TP_FIXED_GAIN_USD={TP_FIXED_GAIN_USD})")
+    # ★ v17.4h : TP initial UNIFIÉ pour tous les types (ZN/PU/MP/QA)
+    # current ± TP_FIXED_GAIN_USD depuis le prix d'exécution RÉEL du MK —
+    # le TP du signal est ignoré, même TP pour MK, L1 et L2.
+    if action == "BUY":
+        default_tp = round(current + TP_FIXED_GAIN_USD, 2)
     else:
-        if action == "BUY":
-            default_tp = round(entry_price + TP_PAR_DEFAUT, 2)
-        else:
-            default_tp = round(entry_price - TP_PAR_DEFAUT, 2)
-        log.debug(f"Quick Alert : TP par défaut = {default_tp} ({TP_PAR_DEFAUT}$)")
+        default_tp = round(current - TP_FIXED_GAIN_USD, 2)
+    log.debug(f"Quick Alert : TP initial = {default_tp} (TP_FIXED_GAIN_USD={TP_FIXED_GAIN_USD})")
 
     if sl is None:
         sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
@@ -4355,19 +4346,6 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # ★ GARDE : entry_price requis pour les filtres suivants
     if entry_price is None:
         _log_mgmt(f"Quick Alert ignorée — entry_price manquant | {symbol} {action}")
-        return
-
-    # ★ FILTRE DISTANCE TP pour Quick Alert
-    TP_DISTANCE_MIN_RATIO = float(os.getenv("TP_DISTANCE_MIN_RATIO", "0.3"))
-    if action == "BUY":
-        dist_remaining = abs(default_tp - current)
-        dist_total = abs(default_tp - entry_price)
-    else:
-        dist_remaining = abs(current - default_tp)
-        dist_total = abs(entry_price - default_tp)
-    if dist_total > 0 and (dist_remaining / dist_total) < TP_DISTANCE_MIN_RATIO:
-        _log_mgmt(f"Quick Alert ignorée — prix trop proche du TP ({dist_remaining/dist_total:.0%} restant) | "
-                    f"prix={current} entry={entry_price} TP={default_tp}")
         return
 
     key = _qa_key(symbol, action, canal)

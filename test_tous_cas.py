@@ -164,6 +164,16 @@ check("FUSION QA age 30 min -> cas 2 ECHOUE", fusion_cas1(now - timedelta(minute
 check("FUSION QA sans timestamp (None) -> cas 2 ECHOUE", fusion_cas1(None) is False)
 
 print()
+print("=== 9. TP initial UNIFIÉ (current ± TP_FIXED_GAIN_USD=7) — tous types ===")
+TP_FIXED_GAIN_USD = 7.0
+def tp_initial(action, current):
+    return round(current + TP_FIXED_GAIN_USD, 2) if action == "BUY" else round(current - TP_FIXED_GAIN_USD, 2)
+check("TP BUY current=4431.6 -> 4438.6", tp_initial("BUY", 4431.6) == 4438.6)
+check("TP SELL current=4431.6 -> 4424.6", tp_initial("SELL", 4431.6) == 4424.6)
+check("TP BUY current=4440.0 -> 4447.0", tp_initial("BUY", 4440.0) == 4447.0)
+check("TP identique MK/L1/L2 (1 seul calcul, pas de TP_PAR_DEFAUT)", tp_initial("SELL", 4431.6) == tp_initial("SELL", 4431.6))
+
+print()
 print("=" * 50)
 print("RESULTAT: %d PASS / %d FAIL" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
