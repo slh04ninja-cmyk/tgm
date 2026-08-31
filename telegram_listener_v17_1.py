@@ -158,7 +158,7 @@ TV_SELL = int(os.getenv("TV_SELL", "10"))                 # ≥ 10 SELL → SELL
 TV_NEUTRAL_ALLOW = os.getenv("TV_NEUTRAL_ALLOW", "true").lower() == "true"  # NEUTRAL accepte BUY+SELL
 
 # === PARAMÈTRES SL (définis dans .env) ===
-FUSION_TOLERANCE = float(os.getenv("FUSION_TOLERANCE", "3"))
+TEMPS_DE_FUSION = float(os.getenv("TEMPS_DE_FUSION", "2"))  # ★ v17.4h : fusion QA/MP + PU/ZN par TEMPS (minutes)
 CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == "true"
 
 # === TOLÉRANCES ===
@@ -5095,85 +5095,58 @@ async def main():
                 zone_low = sig_dict["zone_low"]
                 zone_high = sig_dict["zone_high"]
 
+                # ★ v17.4h : fusion par TEMPS (TEMPS_DE_FUSION minutes) — plus de fusion par prix
                 for idx, qa in enumerate(qa_list):
-                    qa_price = qa["entry_price"]
-                    if zone_low - FUSION_TOLERANCE <= qa_price <= zone_high + FUSION_TOLERANCE:
-                        found_qa = qa
-                        found_idx = idx
-                        break
+                    qa_time = qa.get("time")
+                    if qa_time is not None:
+                        qa_age_min = (datetime.now(timezone.utc) - qa_time).total_seconds() / 60.0
+                        if qa_age_min <= TEMPS_DE_FUSION:
+                            found_qa = qa
+                            found_idx = idx
+                            break
 
                 if found_qa is not None:
+                    # Cas 1 : PU/ZN dans les TEMPS_DE_FUSION min après QA/MP → FUSION ACCEPTE (pas de doublon)
                     merge_quick_alert(found_qa, key, sig_dict, bridge, manager, _quick_alerts)
                 else:
-                    # --- Hors tolérance de fusion : mettre à jour SL/TP du QA existant
-                    # (pas de fermeture, pas de 2ème position) ---
-                    updated_qa = False
-                    real_sl = sig_dict["sl"]
-                    tp_final_fusion = sig_dict["tps"][-1] if sig_dict["tps"] else 0
-                    for idx, qa in enumerate(qa_list):
-                        ticket = qa.get("ticket")
-                        if ticket:
-                            pos = mt5.positions_get(ticket=ticket)
-                            if pos:
-                                # QA actif → mettre à jour SL uniquement (garder TP_FIXED_GAIN_USD)
-                                current_tp = pos[0].tp
-                                bridge.modify_sl_tp(ticket, real_sl, current_tp, "[FUSION-SL-ONLY-OOT]")
-                                entry_qa = qa.get("entry")
-                                if entry_qa:
-                                    entry_qa["signal"] = sig_dict
-                                    entry_qa["_is_quick_alert"] = False
-                                updated_qa = True
-                                _log_mgmt(f"[FUSION OOT] QA #{ticket} SL mis à jour (hors ±{FUSION_TOLERANCE}) SL={real_sl} TP={current_tp} (gardé)")
-                                _alert_mgmt(msg.alert_fusion_oot(sig_dict["action"], _sig_ch_num, ticket, real_sl, current_tp))
-                                # ★ FIX : retirer le QA traité pour éviter les mises à jour multiples
-                                qa_list.pop(idx)
-                                if not qa_list:
-                                    _quick_alerts.pop(key, None)
-                                break
-                            else:
-                                # QA déjà fermé → ignorer le signal complet
-                                _log_mgmt(f"[FUSION OOT] QA #{ticket} déjà fermé → signal complet ignoré")
-                                qa_list.pop(idx)
-                                if not qa_list:
-                                    _quick_alerts.pop(key, None)
-                                updated_qa = True
-                                break
-
-                    if not updated_qa:
-                        # ★ Vérifier si un MARKET existant (QA/MP) couvre déjà la zone
-                        in_zone, existing_comment = _market_in_zone(canal_name, sig_dict, manager)
-                        if existing_comment:
-                            if in_zone:
-                                # ★ FUSION ACCEPTE : mettre à jour SL de TOUTES les positions (MK + L1 + L2)
-                                new_sl = sig_dict.get("sl")
-                                if new_sl is not None:
-                                    with manager._lock:
-                                        for entry in manager.active:
-                                            if entry.get("_mt5_comment") != existing_comment:
+                    # Cas 2 : PU/ZN après TEMPS_DE_FUSION min → FUSION ECHOUE → _close_previous_signal
+                    if qa_list:
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | FUSION ECHOUE (QA > {TEMPS_DE_FUSION:.0f} min) → _close_previous_signal")
+                        _close_previous_signal(canal_name, bridge, manager)
+                    # ★ Vérifier si un MARKET existant (QA/MP) couvre déjà la zone
+                    in_zone, existing_comment = _market_in_zone(canal_name, sig_dict, manager)
+                    if existing_comment:
+                        if in_zone:
+                            # ★ FUSION ACCEPTE : mettre à jour SL de TOUTES les positions (MK + L1 + L2)
+                            new_sl = sig_dict.get("sl")
+                            if new_sl is not None:
+                                with manager._lock:
+                                    for entry in manager.active:
+                                        if entry.get("_mt5_comment") != existing_comment:
+                                            continue
+                                        for t in entry.get("tickets", []):
+                                            ticket = t.get("ticket")
+                                            if not ticket:
                                                 continue
-                                            for t in entry.get("tickets", []):
-                                                ticket = t.get("ticket")
-                                                if not ticket:
-                                                    continue
-                                                pos = manager._get_pos(ticket)
-                                                if pos:
-                                                    # Ne modifier que si le nouveau SL est plus restrictif
-                                                    action = sig_dict.get("action", "")
-                                                    if action == "BUY" and new_sl > pos.sl:
-                                                        bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
-                                                        log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
-                                                    elif action == "SELL" and new_sl < pos.sl:
-                                                        bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
-                                                        log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
-                                            # Mettre à jour le signal de l'entrée
-                                            entry["signal"]["sl"] = new_sl
-                                            break
-                                log.info(f"{existing_comment} | FUSION ACCEPTE |")
-                                return  # MARKET déjà dans la zone → ignorer le signal
-                            else:
-                                log.info(f"{existing_comment} | FUSION IGNORE HORS ZONE |")
-                        # Aucun QA trouvé → exécuter le signal complet normalement
-                        execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
+                                            pos = manager._get_pos(ticket)
+                                            if pos:
+                                                # Ne modifier que si le nouveau SL est plus restrictif
+                                                action = sig_dict.get("action", "")
+                                                if action == "BUY" and new_sl > pos.sl:
+                                                    bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
+                                                    log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
+                                                elif action == "SELL" and new_sl < pos.sl:
+                                                    bridge.modify_sl_tp(ticket, new_sl, pos.tp, "[FUSION-SL]")
+                                                    log.info(f"FUSION SL: #{ticket} SL {pos.sl} → {new_sl}")
+                                        # Mettre à jour le signal de l'entrée
+                                        entry["signal"]["sl"] = new_sl
+                                        break
+                            log.info(f"{existing_comment} | FUSION ACCEPTE |")
+                            return  # MARKET déjà dans la zone → ignorer le signal
+                        else:
+                            log.info(f"{existing_comment} | FUSION IGNORE HORS ZONE |")
+                    # Aucun QA trouvé → exécuter le signal complet normalement
+                    execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
 
         # ★ Démarrer les boucles APRÈS le chargement des canaux
         await manager.start()
