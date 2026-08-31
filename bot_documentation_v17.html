@@ -82,7 +82,7 @@ tr:nth-child(even) td { background: rgba(255,255,255,.02); }
 <tr><td class="mono">ZN</td><td>Zone réelle (low &lt; high) + TP</td><td>Prix dans la zone (± TOLERANCE_ZN) → MK+L1+L2. Hors zone → L3/L4 (si TRADE_HORS_ZONE=true) sinon <b>REFUSE HORS ZONE</b></td></tr>
 <tr><td class="mono">PU</td><td>Prix unique (entry)</td><td>Zone convertie = [entry ± TOLERANCE_PU]. Prix dans la zone → <b>MK+L1+L2</b> ; sinon REFUSE HORS ZONE</td></tr>
 <tr><td class="mono">QA</td><td>Quick Alert <b>avec prix</b> (« BUY 4439 »)</td><td>Zone = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; au-delà → LIMITs seules ; sinon REFUSE HORS ZONE. SL = entry ± QUICK_ALERT_SL_OFFSET (capé MAX_SL_USD)</td></tr>
-<tr><td class="mono">MP</td><td>Quick Alert <b>sans prix</b> (« BUY NOW »)</td><td>Zone = [current ∓ TOLERANCE_MP] → prix toujours dans la zone → MK+L1+L2. SL = current ± QUICK_ALERT_SL_OFFSET, TP = TP_PAR_DEFAUT</td></tr>
+<tr><td class="mono">MP</td><td>Quick Alert <b>sans prix</b> (« BUY NOW »)</td><td>Zone = [current ± TOLERANCE_MP] (2$ par défaut) → prix toujours dans la zone → MK+L1+L2. SL = current ± QUICK_ALERT_SL_OFFSET, TP = TP_PAR_DEFAUT</td></tr>
 <tr><td class="mono">AL</td><td>Annonce des quick alerts (log)</td><td>Ce n'est pas un signal distinct : le log d'entrée affiche « CH{num}-AL » pour un quick alert, l'exécution utilise le label QA ou MP. Commentaire MT5 = CH{num}-QA / CH{num}-MP (jamais -AL)</td></tr>
 <tr><td class="mono">CLOSE</td><td>Message de clôture du canal</td><td>Ferme <b>toutes</b> les positions du canal + annule ses LIMITs en attente</td></tr>
 <tr><td class="mono">SL_MOVE</td><td>Message « SL à X »</td><td>Déplace le SL de toutes les positions du canal (update_sl_by_channel)</td></tr>
@@ -339,7 +339,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>50</td><td>Spread max accepté</td></tr>
 <tr><td class="mono">TP_DISTANCE_MIN_RATIO</td><td>0.3</td><td>0.3</td><td>Ratio min distance restante TP</td></tr>
 <tr><td class="mono">QA_PRICE_TOLERANCE</td><td>3.0</td><td>3.0</td><td>Tolérance prix Quick Alert ($)</td></tr>
-<tr><td class="mono">TOLERANCE_MP / TOLERANCE_PU / TOLERANCE_ZN</td><td>5.0 / 3.0 / 1.0</td><td>—</td><td>Zones de tolérance par type</td></tr>
+<tr><td class="mono">TOLERANCE_MP / TOLERANCE_PU / TOLERANCE_ZN</td><td>5.0 / 3.0 / 1.0</td><td><b>2.0</b> / 3.0 / 1.0</td><td>Zones de tolérance par type (TOLERANCE_MP passé à 2.0)</td></tr>
 <tr><td class="mono">FUSION_TOLERANCE</td><td>3</td><td>3</td><td>Fusion QA/MP + PU/ZN</td></tr>
 <tr><td class="mono">MAX_POSITIONS</td><td>3</td><td><b>60</b></td><td>Max signaux actifs</td></tr>
 <tr><td class="mono">POLL_INTERVAL_SEC</td><td>1</td><td><b>0.3</b></td><td>Fréquence de la boucle de gestion (s)</td></tr>
