@@ -164,7 +164,7 @@ CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == 
 # === TOLÉRANCES ===
 TOLERANCE_ZN = float(os.getenv("TOLERANCE_ZN", "1.0"))
 TOLERANCE_PU = float(os.getenv("TOLERANCE_PU", "3.0"))
-TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "5.0"))
+TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "2.0"))
 TP_PAR_DEFAUT = float(os.getenv("TP_PAR_DEFAUT", "15.0"))
 
 # === TRADE HORS ZONE (booléen d'activation, défaut FALSE) ===
@@ -4224,19 +4224,16 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
         entry_price = zone_mid
         prefix = "PU"
 
-        # Créer zone autour du prix d'entrée
+        # Créer zone autour du prix d'entrée — ★ v17.4h : zone STRICTE [entry ± TOLERANCE_PU],
+        # pas de bande étendue TOLERANCE_ZN (comme MP — le prix doit être proche de l'entrée)
+        zone_low_pu = round(entry_price - TOLERANCE_PU, 2)
+        zone_high_pu = round(entry_price + TOLERANCE_PU, 2)
         if action == "BUY":
-            zone_low_pu = round(entry_price - TOLERANCE_PU, 2)
-            zone_high_pu = round(entry_price + TOLERANCE_PU, 2)
-            in_zone = zone_low_pu <= current <= zone_high_pu
-            above_zone = zone_high_pu < current <= zone_high_pu + TOLERANCE_ZN
+            in_zone = current > zone_low_pu and current <= zone_high_pu
         else:
-            zone_low_pu = round(entry_price - TOLERANCE_PU, 2)
-            zone_high_pu = round(entry_price + TOLERANCE_PU, 2)
-            in_zone = zone_low_pu <= current <= zone_high_pu
-            below_zone = zone_low_pu - TOLERANCE_ZN <= current < zone_low_pu
+            in_zone = current >= zone_low_pu and current < zone_high_pu
 
-        if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
+        if not in_zone:
             log.info(f"CH{ch_num}-PU | REFUSE HORS ZONE")
             return
 
@@ -4291,18 +4288,16 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         log.error(f"Quick alert rejeté — prix indisponible: {symbol}")
         return
 
-    # --- MARKET PRICE : zone = [current - TOLERANCE_MP, current] (BUY) / [current, current + TOLERANCE_MP] (SELL)
+    # --- MARKET PRICE : zone SYMÉTRIQUE [current ± TOLERANCE_MP] (BUY et SELL)
     if is_market_price and entry_price is None:
         entry_price = current
         sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
         if action == "BUY":
             sl = entry_price - sl_offset
-            zone_low_mp = round(entry_price - TOLERANCE_MP, 2)
-            zone_high_mp = entry_price
         else:
             sl = entry_price + sl_offset
-            zone_low_mp = entry_price
-            zone_high_mp = round(entry_price + TOLERANCE_MP, 2)
+        zone_low_mp = round(entry_price - TOLERANCE_MP, 2)
+        zone_high_mp = round(entry_price + TOLERANCE_MP, 2)
         signal["sl"] = round(sl, 2)
         signal["tps"] = []  # TP = TP_PAR_DEFAUT
         signal["zone_mid"] = entry_price
@@ -4357,26 +4352,6 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
             default_tp = entry_price - 10.0
             _log_mgmt(f"Quick Alert : TP ajusté à {default_tp} (doit être < entry)")
 
-    # ★ VÉRIFICATION TOLÉRANCE DE PRIX (QA avec prix)
-    # Si le prix a bougé dans le sens du TP (favorable) → MARKET (meilleur prix, pas de limite).
-    # Si le prix a bougé CONTRE le signal de > QA_PRICE_TOLERANCE → annulé.
-    # Ex: BUY 4000, prix actuel 3990 → favorable (meilleur prix) → MARKET
-    # Ex: BUY 4000, prix actuel 4004 → défavorable (> 3$ contre) → annulé
-    QA_PRICE_TOLERANCE = float(os.getenv("QA_PRICE_TOLERANCE", "3.0"))
-    if not is_market_price and entry_price is not None:
-        if action == "BUY":
-            # Favorable: prix <= entry (on achète moins cher)
-            # Défavorable: prix > entry + tolerance
-            is_unfavorable = current > entry_price + QA_PRICE_TOLERANCE
-        else:  # SELL
-            # Favorable: prix >= entry (on vend plus cher)
-            # Défavorable: prix < entry - tolerance (le prix descend trop contre le SELL)
-            is_unfavorable = current < entry_price - QA_PRICE_TOLERANCE
-        if is_unfavorable:
-            log.info(f"CH{ch_num}-AL | REFUSE HORS ZONE")
-            _alert_mgmt(msg.alert_qa_cancelled(action, symbol, ch_num, current, entry_price, QA_PRICE_TOLERANCE))
-            return
-
     # ★ GARDE : entry_price requis pour les filtres suivants
     if entry_price is None:
         _log_mgmt(f"Quick Alert ignorée — entry_price manquant | {symbol} {action}")
@@ -4412,27 +4387,17 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # ★ DÉTERMINER LE TYPE ET LOGIQUE
     if is_market_price:
         qa_label = "MP"
-        # Zone MP : [current - TOLERANCE_MP, current] pour BUY
-        if action == "BUY":
-            in_zone = zone_low_mp <= current <= zone_high_mp
-            above_zone = zone_high_mp < current <= zone_high_mp + TOLERANCE_ZN
-        else:
-            in_zone = zone_low_mp <= current <= zone_high_mp
-            below_zone = zone_low_mp - TOLERANCE_ZN <= current < zone_low_mp
+        # Zone MP : symétrique [current ± TOLERANCE_MP] → le prix est toujours dans la zone
+        in_zone = zone_low_mp <= current <= zone_high_mp
     else:
         qa_label = "QA"
-        # Zone QA : [entry - TOLERANCE_PU, entry + TOLERANCE_PU]
+        # Zone QA : [entry ± TOLERANCE_PU] — ★ v17.4h : zone STRICTE comme PU (pas de bande étendue)
         zone_low_qa = round(entry_price - TOLERANCE_PU, 2)
         zone_high_qa = round(entry_price + TOLERANCE_PU, 2)
-        if action == "BUY":
-            in_zone = zone_low_qa <= current <= zone_high_qa
-            above_zone = zone_high_qa < current <= zone_high_qa + TOLERANCE_ZN
-        else:
-            in_zone = zone_low_qa <= current <= zone_high_qa
-            below_zone = zone_low_qa - TOLERANCE_ZN <= current < zone_low_qa
+        in_zone = zone_low_qa <= current <= zone_high_qa
 
     # Vérifier si le prix est acceptable
-    if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
+    if not in_zone:
         log.info(f"CH{ch_num}-{qa_label} | REFUSE HORS ZONE")
         return
 
@@ -4444,22 +4409,15 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         l1_price = round(current + LIMIT_OFFSET_1, 2)
         l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-    if in_zone:
-        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
-    else:
-        log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
+    log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
 
     # SL plafonné
     entry_for_sl = entry_price if entry_price else current
     sl = _cap_sl(action, entry_for_sl, sl, MAX_SL_USD)
 
-    # MARKET + LIMITS (ou LIMITS seules si légèrement au-dessus)
-    if in_zone:
-        ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                                sl, default_tp, LOT_MARKET, ch_num, canal, qa_label, tv_filter=tv_filter)
-    else:
-        ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                                sl, default_tp, 0, ch_num, canal, qa_label, tv_filter=tv_filter)
+    # MARKET + LIMITS (toujours LOT_MARKET — plus de LIMITs seules)
+    ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
+                            sl, default_tp, LOT_MARKET, ch_num, canal, qa_label, tv_filter=tv_filter)
     if not ok:
         log.error("✗ QUICK MARKET échoué")
         return

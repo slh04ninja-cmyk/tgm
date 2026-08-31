@@ -134,6 +134,43 @@ check("L3 seule -> TP = 4447 (4440+7)", 4440 + 7 == 4447, "")
 # L3+L4 : cible 10.5, movement 5.25
 avg34 = round((4440 + 4438.5) / 2, 2); check("L3+L4: TP = avg(4440,4438.5) ± 5.25", round(avg34 - 5.25, 2) == 4434.0, (avg34,))
 
+print("=== 5. PU : zone stricte [entry ± TOLERANCE_PU] (v17.4h) ===")
+def pu_in_zone(action, entry, current, tol_pu=3.0):
+    zone_low = round(entry - tol_pu, 2)
+    zone_high = round(entry + tol_pu, 2)
+    if action == "BUY":
+        return current > zone_low and current <= zone_high
+    return current >= zone_low and current < zone_high
+
+entry = 4440
+check("PU BUY prix=4443 dans zone (4440±3)", pu_in_zone("BUY", entry, 4443) is True, "")
+check("PU BUY prix=4443.5 > entry+3 -> REFUSE", pu_in_zone("BUY", entry, 4443.5) is False, "")
+check("PU BUY prix=4437 = entry-3 (strict) -> REFUSE", pu_in_zone("BUY", entry, 4437) is False, "")
+check("PU BUY prix=4437.01 > entry-3 -> accepte", pu_in_zone("BUY", entry, 4437.01) is True, "")
+check("PU SELL prix=4437 (>= entry-3) -> accepte", pu_in_zone("SELL", entry, 4437) is True, "")
+check("PU SELL prix=4443 = entry+3 (strict) -> REFUSE", pu_in_zone("SELL", entry, 4443) is False, "")
+check("PU SELL prix=4442.99 -> accepte", pu_in_zone("SELL", entry, 4442.99) is True, "")
+check("PU SELL prix=4436.99 < entry-3 -> REFUSE", pu_in_zone("SELL", entry, 4436.99) is False, "")
+
+print("=== 6. QA : zone stricte inclusive [entry ± TOLERANCE_PU] (v17.4h) ===")
+def qa_in_zone(entry, current, tol_pu=3.0):
+    zone_low = round(entry - tol_pu, 2)
+    zone_high = round(entry + tol_pu, 2)
+    return zone_low <= current <= zone_high
+
+check("QA prix=4437 (= entry-3, inclusif) -> accepte", qa_in_zone(entry, 4437) is True, "")
+check("QA prix=4443 (= entry+3, inclusif) -> accepte", qa_in_zone(entry, 4443) is True, "")
+check("QA prix=4436.99 -> REFUSE", qa_in_zone(entry, 4436.99) is False, "")
+check("QA prix=4443.01 -> REFUSE", qa_in_zone(entry, 4443.01) is False, "")
+
+print("=== 7. MP : zone symétrique [current ± TOLERANCE_MP=2] (v17.4h) ===")
+def mp_in_zone(current, tol_mp=2.0):
+    zone_low = round(current - tol_mp, 2)
+    zone_high = round(current + tol_mp, 2)
+    return zone_low <= current <= zone_high
+
+check("MP prix toujours dans la zone (BUY/SELL)", mp_in_zone(4431.6) is True, "")
+
 print()
 print("RESULTAT: %d PASS / %d FAIL" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)
