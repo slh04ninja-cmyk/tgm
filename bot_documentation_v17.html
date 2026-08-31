@@ -169,8 +169,8 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <div class="card">
 <p><b>Zone convertie :</b> <code>[entry ± TOLERANCE_PU]</code> (3$)</p>
 <ul>
-<li>BUY : <code>in_zone = entry + 3 &lt; prix ≤ entry + 3 + TOLERANCE_ZN</code></li>
-<li>SELL : <code>in_zone = entry − 3 − TOLERANCE_ZN ≤ prix &lt; entry − 3</code></li>
+<li>BUY : <code>in_zone = entry − TOLERANCE_PU &lt; prix ≤ entry + TOLERANCE_PU + TOLERANCE_ZN</code></li>
+<li>SELL : <code>in_zone = entry − TOLERANCE_PU − TOLERANCE_ZN ≤ prix &lt; entry + TOLERANCE_PU</code></li>
 <li>Prix dans la zone → <b>MK + L1 + L2</b> ; sinon → <code>REFUSE HORS ZONE</code></li>
 <li><b>SL :</b> <code>_cap_sl(action, entry, sl, MAX_SL_USD)</code> — SL du signal plafonné à 12$ de l'entrée</li>
 <li><b>TP :</b> <code>current ± TP_FIXED_GAIN_USD</code> (7$, le TP du signal est ignoré) puis recalcul dynamique au remplissage (identique ZN cas 1)</li>
