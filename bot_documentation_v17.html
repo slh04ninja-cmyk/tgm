@@ -207,10 +207,15 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 </ul>
 </div>
 
-<h3>4.4 Règles communes PU / MP / QA</h3>
+<h3>4.4 Règles communes PU / MP / QA / ZN</h3>
 <ul>
 <li><b>1 signal par canal :</b> un nouveau signal du même canal ferme l'ancien (<code>_close_previous_signal</code>, commentaire <code>NEW-SIGNAL</code>)</li>
-<li><b>Fusion QA/MP + PU/ZN</b> (<code>FUSION_TOLERANCE</code> = 3$) : un quick alert déjà dans la zone couvre le nouveau signal PU/ZN (pas de doublon) ; hors tolérance → mise à jour du SL uniquement</li>
+<li><b>Fusion QA/MP + PU/ZN</b> (<code>TEMPS_DE_FUSION</code> = 2 minutes) :
+<ul>
+<li><b>Cas 1 :</b> le signal de fusion PU/ZN arrive <b>dans les 2 min</b> après le signal QA/MP → <code>FUSION ACCEPTE</code> (pas de doublon)</li>
+<li><b>Cas 2 :</b> le signal de fusion PU/ZN arrive <b>après 2 min</b> après le signal QA/MP → <code>FUSION ECHOUE</code> → <code>_close_previous_signal</code> (le nouveau signal ferme l'ancien)</li>
+</ul>
+</li>
 <li><b>TP dynamique identique au ZN cas 1 :</b> MK seul → <code>entry_MK ± 7</code> (cible 7$) ; MK+L1 → <code>avg ± 5.25</code> (10.5$) ; MK+L1+L2 → <code>avg ± 4.67</code> (14$)</li>
 <li><b>MK fermé (TP/SL/manuel) → L1/L2 annulées</b> (PHASE 5 : pas de LIMIT orpheline qui se remplirait après la clôture du trade)</li>
 <li>AL n'est qu'un label de log (annonce de quick alert) : l'exécution est <b>QA</b> ou <b>MP</b>, le commentaire MT5 est <code>CH{num}-QA</code> / <code>CH{num}-MP</code> (jamais -AL)</li>
@@ -247,7 +252,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td>Spread</td><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>Refus si spread trop large</td></tr>
 <tr><td>Distance TP</td><td class="mono">TP_DISTANCE_MIN_RATIO</td><td>0.3</td><td>Prix trop proche du TP → signal ignoré</td></tr>
 <tr><td>Max signaux</td><td class="mono">MAX_POSITIONS</td><td>60</td><td>Au-delà → Quick Alert ignorée</td></tr>
-<tr><td>Fusion QA/MP + PU/ZN</td><td class="mono">FUSION_TOLERANCE</td><td>3</td><td>Un signal QA/MP déjà dans la zone couvre le nouveau signal PU/ZN (pas de doublon)</td></tr>
+<tr><td>Fusion QA/MP + PU/ZN</td><td class="mono">TEMPS_DE_FUSION</td><td>2 (min)</td><td>PU/ZN dans les 2 min après QA/MP → FUSION ACCEPTE ; après 2 min → FUSION ECHOUE (_close_previous_signal)</td></tr>
 </table>
 
 <h2>7. Cycle de vie d'un signal</h2>
@@ -337,7 +342,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>50</td><td>Spread max accepté</td></tr>
 <tr><td class="mono">TP_DISTANCE_MIN_RATIO</td><td>0.3</td><td>0.3</td><td>Ratio min distance restante TP</td></tr>
 <tr><td class="mono">TOLERANCE_MP / TOLERANCE_PU / TOLERANCE_ZN</td><td>5.0 / 3.0 / 1.0</td><td><b>2.0</b> / 3.0 / 1.0</td><td>Zones de tolérance par type (TOLERANCE_MP passé à 2.0)</td></tr>
-<tr><td class="mono">FUSION_TOLERANCE</td><td>3</td><td>3</td><td>Fusion QA/MP + PU/ZN</td></tr>
+<tr><td class="mono">TEMPS_DE_FUSION</td><td>2</td><td>2</td><td>Fusion QA/MP + PU/ZN (minutes)</td></tr>
 <tr><td class="mono">MAX_POSITIONS</td><td>3</td><td><b>60</b></td><td>Max signaux actifs</td></tr>
 <tr><td class="mono">POLL_INTERVAL_SEC</td><td>1</td><td><b>0.3</b></td><td>Fréquence de la boucle de gestion (s)</td></tr>
 <tr><td class="mono">DAILY_PROFIT_LIMIT</td><td>200.0</td><td><b>400</b></td><td>Objectif quotidien</td></tr>
