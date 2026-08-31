@@ -4289,7 +4289,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     # --- MARKET PRICE : zone SYMÉTRIQUE [current ± TOLERANCE_MP] (BUY et SELL)
     if is_market_price and entry_price is None:
         entry_price = current
-        sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
+        sl_offset = MAX_SL_USD  # ★ v17.4h : QUICK_ALERT_SL_OFFSET remplacé par MAX_SL_USD
         if action == "BUY":
             sl = entry_price - sl_offset
         else:
@@ -4320,7 +4320,7 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     log.debug(f"Quick Alert : TP initial = {default_tp} (TP_FIXED_GAIN_USD={TP_FIXED_GAIN_USD})")
 
     if sl is None:
-        sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
+        sl_offset = MAX_SL_USD  # ★ v17.4h : QUICK_ALERT_SL_OFFSET remplacé par MAX_SL_USD
         if action == "BUY":
             sl = entry_price - sl_offset
         else:

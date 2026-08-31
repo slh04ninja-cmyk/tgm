@@ -174,6 +174,20 @@ check("TP BUY current=4440.0 -> 4447.0", tp_initial("BUY", 4440.0) == 4447.0)
 check("TP identique MK/L1/L2 (1 seul calcul, pas de TP_PAR_DEFAUT)", tp_initial("SELL", 4431.6) == tp_initial("SELL", 4431.6))
 
 print()
+print("=== 10. Parser : SL/TP auto remplacés (MAX_SL_USD=12 / TP_FIXED_GAIN_USD=7) ===")
+MAX_SL_USD = 12.0
+# Bloc MP (sans prix) : default_sl = ±MAX_SL_USD, default_tp = ±TP_FIXED_GAIN_USD
+check("Parser MP BUY : SL=-12, TP=+7", (-MAX_SL_USD == -12.0) and (TP_FIXED_GAIN_USD == 7.0))
+check("Parser MP SELL : SL=+12, TP=-7", (MAX_SL_USD == 12.0) and (-TP_FIXED_GAIN_USD == -7.0))
+# Bloc auto-TP (SL présent, pas de TP) : tp = entry_mid ± TP_FIXED_GAIN_USD
+entry_mid = 4440.0
+check("Parser auto-TP BUY : entry 4440 -> 4447", entry_mid + TP_FIXED_GAIN_USD == 4447.0)
+check("Parser auto-TP SELL : entry 4440 -> 4433", entry_mid - TP_FIXED_GAIN_USD == 4433.0)
+# Bloc QA (ni TP ni SL) : provisional_sl = entry ∓ MAX_SL_USD, tp = entry ± TP_FIXED_GAIN_USD
+check("Parser QA BUY : SL=4440-12=4428, TP=4440+7=4447", (entry_mid - MAX_SL_USD == 4428.0) and (entry_mid + TP_FIXED_GAIN_USD == 4447.0))
+check("Parser QA SELL : SL=4440+12=4452, TP=4440-7=4433", (entry_mid + MAX_SL_USD == 4452.0) and (entry_mid - TP_FIXED_GAIN_USD == 4433.0))
+
+print()
 print("=" * 50)
 print("RESULTAT: %d PASS / %d FAIL" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

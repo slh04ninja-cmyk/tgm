@@ -161,7 +161,6 @@ RE_SYMBOL = re.compile(
 )
 
 RE_NUM = r"(\d{4,6}(?:\.\d+)?)"
-QUICK_ALERT_SL_OFFSET = 10.0
 
 # =============================================================
 # SPAM FILTER
@@ -750,14 +749,14 @@ class SignalParser:
             # --- MARKET PRICE : signal sans prix (ex: GOLD BUY NOW, BUY XAUUSD NOW) ---
             if self._is_market_now(normalized_text):
                 log.debug(f"[PARSING] Market price signal détecté: {action} {symbol}")
-                sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
-                RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
+                sl_offset = float(os.getenv("MAX_SL_USD", "12.0"))
+                TP_FIXED_GAIN_USD = float(os.getenv("TP_FIXED_GAIN_USD", "7.0"))
                 if action == "BUY":
                     default_sl = -sl_offset  # offset relatif, le prix réel sera résolu à l'exécution
-                    default_tp = sl_offset * RR_RATIO
+                    default_tp = TP_FIXED_GAIN_USD
                 else:
                     default_sl = sl_offset
-                    default_tp = -(sl_offset * RR_RATIO)
+                    default_tp = -TP_FIXED_GAIN_USD
                 return TradeSignal(
                     signal_type="TRADE",
                     direction=action,
@@ -820,27 +819,27 @@ class SignalParser:
 
         # Génération auto TP si SL présent mais pas de TPs
         if sl is not None and not tps:
-            RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
+            TP_FIXED_GAIN_USD = float(os.getenv("TP_FIXED_GAIN_USD", "7.0"))
             entry_mid = (zone_low + zone_high) / 2
             if action == "BUY":
-                tp = entry_mid + (entry_mid - sl) * RR_RATIO
+                tp = entry_mid + TP_FIXED_GAIN_USD
             else:
-                tp = entry_mid - (sl - entry_mid) * RR_RATIO
+                tp = entry_mid - TP_FIXED_GAIN_USD
             tps = [round(tp, 2)]
-            log.debug(f"TP généré automatiquement : {tps[0]} (RR={RR_RATIO})")
+            log.debug(f"TP généré automatiquement : {tps[0]} (TP_FIXED_GAIN_USD={TP_FIXED_GAIN_USD})")
 
         # Quick alert si ni TP ni SL
         if not tps and sl is None:
             log.debug(f"Quick alert détecté: {action} {symbol} @{zone_low}")
-            sl_offset = float(os.getenv("QUICK_ALERT_SL_OFFSET", "10.0"))
-            RR_RATIO = float(os.getenv("RR_RATIO_DEFAULT", "1.5"))
+            sl_offset = float(os.getenv("MAX_SL_USD", "12.0"))
+            TP_FIXED_GAIN_USD = float(os.getenv("TP_FIXED_GAIN_USD", "7.0"))
             entry_mid = (zone_low + zone_high) / 2
             if action == "BUY":
                 provisional_sl = entry_mid - sl_offset
-                default_tp = entry_mid + sl_offset * RR_RATIO
+                default_tp = entry_mid + TP_FIXED_GAIN_USD
             else:
                 provisional_sl = entry_mid + sl_offset
-                default_tp = entry_mid - sl_offset * RR_RATIO
+                default_tp = entry_mid - TP_FIXED_GAIN_USD
             return TradeSignal(
                 signal_type="TRADE",
                 direction=action,

@@ -81,8 +81,8 @@ tr:nth-child(even) td { background: rgba(255,255,255,.02); }
 <tr><th>Type</th><th>Origine</th><th>Comportement</th></tr>
 <tr><td class="mono">ZN</td><td>Zone réelle (low &lt; high) + TP</td><td>Prix dans la zone (± TOLERANCE_ZN) → MK+L1+L2. Hors zone → L3/L4 (si TRADE_HORS_ZONE=true) sinon <b>REFUSE HORS ZONE</b></td></tr>
 <tr><td class="mono">PU</td><td>Prix unique (entry)</td><td>Zone convertie = [entry ± TOLERANCE_PU]. Prix dans la zone → <b>MK+L1+L2</b> ; sinon REFUSE HORS ZONE</td></tr>
-<tr><td class="mono">QA</td><td>Quick Alert <b>avec prix</b> (« BUY 4439 »)</td><td>Zone = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; sinon REFUSE HORS ZONE. SL = entry ± QUICK_ALERT_SL_OFFSET (capé MAX_SL_USD)</td></tr>
-<tr><td class="mono">MP</td><td>Quick Alert <b>sans prix</b> (« BUY NOW »)</td><td>Zone = [current ± TOLERANCE_MP] (2$ par défaut) → prix toujours dans la zone → MK+L1+L2. SL = current ± QUICK_ALERT_SL_OFFSET, TP = current ± TP_FIXED_GAIN_USD (7$)</td></tr>
+<tr><td class="mono">QA</td><td>Quick Alert <b>avec prix</b> (« BUY 4439 »)</td><td>Zone = [entry ± TOLERANCE_PU]. Prix dans la zone → MK+L1+L2 ; sinon REFUSE HORS ZONE. SL = entry ± MAX_SL_USD (capé MAX_SL_USD)</td></tr>
+<tr><td class="mono">MP</td><td>Quick Alert <b>sans prix</b> (« BUY NOW »)</td><td>Zone = [current ± TOLERANCE_MP] (2$ par défaut) → prix toujours dans la zone → MK+L1+L2. SL = current ± MAX_SL_USD, TP = current ± TP_FIXED_GAIN_USD (7$)</td></tr>
 <tr><td class="mono">AL</td><td>Annonce des quick alerts (log)</td><td>Ce n'est pas un signal distinct : le log d'entrée affiche « CH{num}-AL » pour un quick alert, l'exécution utilise le label QA ou MP. Commentaire MT5 = CH{num}-QA / CH{num}-MP (jamais -AL)</td></tr>
 <tr><td class="mono">CLOSE</td><td>Message de clôture du canal</td><td>Ferme <b>toutes</b> les positions du canal + annule ses LIMITs en attente</td></tr>
 <tr><td class="mono">SL_MOVE</td><td>Message « SL à X »</td><td>Déplace le SL de toutes les positions du canal (update_sl_by_channel)</td></tr>
@@ -183,7 +183,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <ul>
 <li><b>Entry :</b> prix courant au moment du signal (<code>entry_price = current</code>)</li>
 <li><b>Zone :</b> BUY <code>[current − TOLERANCE_MP, current + TOLERANCE_MP]</code> ; SELL <code>[current − TOLERANCE_MP, current + TOLERANCE_MP]</code> (avec <code>TOLERANCE_MP</code> = 2 par défaut) → le prix est <b>toujours dans la zone</b> → <b>jamais refusé</b> pour position hors zone (seuls les filtres généraux s'appliquent)</li>
-<li><b>SL :</b> <code>current ± QUICK_ALERT_SL_OFFSET</code> (12$) — jamais de SL dans le message</li>
+<li><b>SL :</b> <code>current ± MAX_SL_USD</code> (12$) — jamais de SL dans le message</li>
 <li><b>TP :</b> <code>current ± TP_FIXED_GAIN_USD</code> (7$) — unifié (même règle que ZN/PU/QA), puis recalcul dynamique au remplissage</li>
 <li><b>Exécution :</b> MK + L1 + L2 (LOT_MARKET 0.01)</li>
 <li>Log : <code>CH{num}-MP | ACCEPTE | MK=... | L1=... | L2=...</code></li>
@@ -200,7 +200,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <li>SELL : <code>in_zone = entry − TOLERANCE_PU ≤ prix ≤ entry + TOLERANCE_PU</code></li>
 <li>Prix dans la zone → <b>MK + L1 + L2</b> ; sinon → <code>REFUSE HORS ZONE</code> (même logique que PU — pas de bande étendue)</li>
 </ul></li>
-<li><b>SL :</b> SL du message sinon <code>entry ± QUICK_ALERT_SL_OFFSET</code>, capé <code>MAX_SL_USD</code> ; ajusté si invalide (SL &lt; entry BUY / &gt; entry SELL, sinon ±10)</li>
+<li><b>SL :</b> SL du message sinon <code>entry ± MAX_SL_USD</code>, capé <code>MAX_SL_USD</code> ; ajusté si invalide (SL &lt; entry BUY / &gt; entry SELL, sinon ±10)</li>
 <li><b>TP :</b> <code>current ± TP_FIXED_GAIN_USD</code> (7$) — unifié (le TP du signal est ignoré), puis recalcul dynamique</li>
 <li>Log : <code>CH{num}-QA | ACCEPTE | MK=... | L1=... | L2=...</code></li>
 </ul>
@@ -321,14 +321,13 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">LIMIT_ENABLED / LIMIT_COUNT</td><td>true / 2</td><td>true / 2</td><td>Activer les ordres limite, nombre</td></tr>
 <tr><td class="mono">LIMIT_OFFSET_1 / LIMIT_OFFSET_2</td><td>3.0 / 6.0</td><td>3.0 / 6.0</td><td>Distance des LIMITs (en $)</td></tr>
 <tr><td class="mono">LIMIT_EXPIRY_MIN</td><td>30</td><td>30</td><td>Expiration des ordres limite (min)</td></tr>
-<tr><td class="mono">TP_FIXED_ENABLED / TP_FIXED_GAIN_USD</td><td>true / 8.0</td><td>true / 7.0</td><td>Gain fixe par position (base du TP initial unifié + TP dynamique)</td></tr>
+<tr><td class="mono">TP_FIXED_ENABLED / TP_FIXED_GAIN_USD</td><td>true / 8.0</td><td>true / 7.0</td><td>Gain fixe par position (base du TP initial unifié + TP dynamique + TP auto du parser)</td></tr>
 <tr><td class="mono">TP_MULTIPE1 / TP_MULTIPE2</td><td>2.0 / 3.0</td><td>1.5 / 2.0</td><td>Multiplicateurs TP (2 positions / 3 positions)</td></tr>
-<tr><td class="mono">MAX_SL_USD</td><td>10.0</td><td>12.0</td><td>SL maximal en $ (capé)</td></tr>
-<tr><td class="mono">QUICK_ALERT_SL_OFFSET</td><td>10.0</td><td>12.0</td><td>SL des Quick Alerts (entry ± offset)</td></tr>
+<tr><td class="mono">MAX_SL_USD</td><td>10.0</td><td><b>12.0</b></td><td>SL maximal en $ (capé) — sert aussi de SL par défaut des Quick Alerts (entry ± MAX_SL_USD)</td></tr>
 <tr><td class="mono">SLIPPAGE</td><td>20</td><td>—</td><td>Déviation max (points)</td></tr>
 <tr><td class="mono">TRADE_HORS_ZONE</td><td>false</td><td><b>true</b></td><td>L3/L4 hors zone (activé 31/08)</td></tr>
 <tr><td class="mono">MAX_DISTANCE</td><td>5.0</td><td>3</td><td>Distance max du prix au bord de zone (L3) pour le cas hors-zone — au-delà : REFUSE HORS ZONE (l'expiration est gérée par LIMIT_EXPIRY_MIN)</td></tr>
-<tr><td class="mono">RR_RATIO_DEFAULT</td><td>1.5</td><td>—</td><td>Ratio R/R par défaut</td></tr>
+<tr><td class="mono">TP_FIXED_ENABLED / TP_FIXED_GAIN_USD</td><td>true / 8.0</td><td>true / 7.0</td><td>Gain fixe par position (base du TP initial unifié + TP dynamique + TP auto du parser)</td></tr>
 <tr><td class="mono">TIME_FILTER_ENABLED / TRADING_START_HOUR / TRADING_END_HOUR</td><td>true / 3 / 20</td><td>true / <b>5</b> / <b>21</b></td><td>Fenêtre de trading (UTC)</td></tr>
 <tr><td class="mono">NEWS_FILTER_ENABLED / NEWS_MIN_IMPACT</td><td>false / high</td><td><b>ON</b> / HIGH</td><td>Filtre news (bloc 15 / close 5 / après 15 min)</td></tr>
 <tr><td class="mono">CONFLIT_FILTER_ENABLED</td><td>true</td><td>true</td><td>Filtre de conflit (1 signal par canal)</td></tr>
