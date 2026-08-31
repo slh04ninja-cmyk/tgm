@@ -1282,6 +1282,8 @@ class TradeManager:
                         "role": role,
                         "entry_price": pos.price_open,
                         "tp_final": pos.tp,
+                        "sl_wanted": pos.sl,  # ★ v17.4e : permet au fix SL de corriger aussi les positions reprises
+                        "_sl_fix_attempts": 0,
                     })
                     if role == "market":
                         market_ticket = pos.ticket
@@ -2129,6 +2131,44 @@ class TradeManager:
 
                     if ALERT_TRADE_MANAGEMENT:
                         _alert_mgmt(msg.alert_close(label, action, symbol, pnl, idx, total, t['ticket'], daily_pnl_now, mt5_comment))
+
+                # ★ VÉRIFICATION SL POST-OUVERTURE (2-3 polls max) :
+                # le broker peut décaler le SL (stops_level, arrondi digits, slippage).
+                # On compare le SL réel au SL voulu et on corrige si écart significatif,
+                # UNIQUEMENT si le prix est encore du bon côté (pas de SL touché).
+                # ★ v17.4e : le SL cible est recalculé depuis le prix d'OUVERTURE RÉEL
+                # (le SL capé sur l'entrée prévue PE peut dépasser MAX_SL_USD si le prix
+                # d'exécution diffère — ex: SELL exécuté sous le PE).
+                if pos is not None and t.get("sl_wanted") is not None:
+                    if t.get("_sl_fix_attempts", 0) < 3:
+                        wanted = t["sl_wanted"]
+                        real = pos.sl
+                        sym = mt5.symbol_info(pos.symbol)
+                        if sym is not None:
+                            eps = sym.point * 3  # tolérance 3 points
+                            # Corriger seulement si le SL réel est PLUS LOIN du prix que le voulu
+                            # (erreur broker) — jamais le rapprocher contre le trade.
+                            if real:
+                                _tick = mt5.symbol_info_tick(pos.symbol)
+                                if action == "BUY":
+                                    real_cap = round(pos.price_open - MAX_SL_USD, 2)
+                                    target = max(wanted, real_cap)  # le plus proche du prix (jamais contre le trade)
+                                    too_far = real < target  # SL réel plus bas = plus loin pour un BUY
+                                    price_ok = _tick is not None and _tick.bid > target
+                                else:
+                                    real_cap = round(pos.price_open + MAX_SL_USD, 2)
+                                    target = min(wanted, real_cap)  # le plus proche des deux limites
+                                    too_far = real > target  # SL réel plus haut = plus loin pour un SELL
+                                    price_ok = _tick is not None and _tick.ask < target
+                                diff = abs(real - target)
+                                if too_far and diff > eps and price_ok:
+                                    t["_sl_fix_attempts"] = t.get("_sl_fix_attempts", 0) + 1
+                                    if self.bridge.modify_sl_tp(t["ticket"], target, pos.tp, f"[SL-FIX #{t['_sl_fix_attempts']}]"):
+                                        _log_mgmt(f"SL corrigé #{t['ticket']}: {real} → {target} (écart {diff:.2f})")
+                                else:
+                                    t["_sl_fix_attempts"] = 3  # SL déjà bon ou prix passé → ne plus vérifier
+                            else:
+                                pass  # SL à 0 sur un pending non rempli : normal
 
             active_tickets = []
             for t in entry.get("tickets", []):
@@ -3744,6 +3784,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
         tickets.append({
             "ticket": t, "lot": lot_market, "role": "market",
             "entry_price": current, "tp_final": tp_final,
+            "sl_wanted": sl, "_sl_fix_attempts": 0,
         })
         orders_desc.append(f"MK=#{t} @{current}")
         log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final} SL={sl}")
@@ -3805,6 +3846,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                         tickets.append({
                             "ticket": result.order, "lot": limit_lot, "role": "limit",
                             "entry_price": limit_price, "tp_final": tp_final,
+                            "sl_wanted": sl, "_sl_fix_attempts": 0,
                         })
                         orders_desc.append(f"L{i+1}={result.order} @{limit_price}")
                         log.debug(f"  ✓ LIMIT {i+1} #{result.order} @{limit_price} fill={fill_mode}")
