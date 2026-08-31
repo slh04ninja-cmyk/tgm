@@ -1170,6 +1170,32 @@ class TradeManager:
     # =============================================================
     # RECOVERY : reconstruire self.active depuis les positions MT5
     # =============================================================
+    def _resolve_channel_name(self, ch_num) -> str:
+        """★ v17.4g : résout le NOM RÉEL du canal depuis un numéro CHxx.
+        Le recovery reconstruisait source_channel="Canal_{num}" (générique),
+        ce qui cassait _close_previous_signal après un restart : le nouveau
+        signal arrive avec le nom réel du canal, la comparaison échoue, et
+        deux signaux du même canal coexistent. Priorité :
+        1) CHANNEL_NUM_MAP inverse (clé non numérique → nom réel)
+        2) Channels.txt (nom après '#')
+        3) fallback "Canal_{num}"."""
+        try:
+            # 1) inverse de CHANNEL_NUM_MAP : nom → numéro
+            for _name, _num in CHANNEL_NUM_MAP.items():
+                if not _name.lstrip('-').isdigit() and str(_num) == str(ch_num):
+                    return _name
+            # 2) Channels.txt : "Canal_105 : -1001689743078 # Willy Gold Usd"
+            _chf = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Channels.txt')
+            if os.path.exists(_chf):
+                with open(_chf, 'r', encoding='utf-8') as _f:
+                    for _line in _f:
+                        _m = re.match(rf'Canal_{ch_num}\s*:\s*.+?#\s*(.+)', _line.strip())
+                        if _m:
+                            return _m.group(1).strip()
+        except Exception:
+            pass
+        return f"Canal_{ch_num}"
+
     def _recover_open_positions(self):
         """Au démarrage, lit les positions ouvertes dans MT5 et reconstruit
         self.active pour que le bot puisse gérer TP dynamique, P&L cible, etc.
@@ -1215,7 +1241,7 @@ class TradeManager:
                             "signal": {
                                 "action": g["action"],
                                 "symbol": g["symbol"],
-                                "source_channel": f"Canal_{ch_num}",
+                                "source_channel": self._resolve_channel_name(ch_num),
                             },
                             "tickets": g["tickets"],
                             "_open_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
@@ -1295,7 +1321,7 @@ class TradeManager:
                 signal = {
                     "action": action,
                     "symbol": symbol,
-                    "source_channel": f"Canal_{ch_num}",
+                    "source_channel": self._resolve_channel_name(ch_num),
                 }
 
                 entry = {
@@ -2409,9 +2435,16 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
     if not conflict:
         with manager._lock:
             for entry in manager.active:
+                # ★ v17.4g : matcher par nom OU par numéro (même logique que _close_previous_signal)
+                _ec = entry["signal"].get("source_channel", "Inconnu")
+                _same = _ec == canal
+                if not _same and ch_num is not None:
+                    _en = CHANNEL_NUM_MAP.get(_ec, CHANNEL_NUM_MAP.get(_ec.lstrip("-")))
+                    if _en is not None and str(_en) == str(ch_num):
+                        _same = True
                 if (entry["signal"]["symbol"] == symbol
                         and entry["signal"]["action"] == opposite
-                        and entry["signal"].get("source_channel") == canal):
+                        and _same):
                     conflict = True
                     break
     if not conflict:
@@ -2422,7 +2455,14 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
         for entry in manager.active:
             if entry["signal"]["symbol"] != symbol:
                 continue
-            if entry["signal"].get("source_channel") != canal:
+            # ★ v17.4g : matcher par nom OU par numéro
+            _ec = entry["signal"].get("source_channel", "Inconnu")
+            _same = _ec == canal
+            if not _same and ch_num is not None:
+                _en = CHANNEL_NUM_MAP.get(_ec, CHANNEL_NUM_MAP.get(_ec.lstrip("-")))
+                if _en is not None and str(_en) == str(ch_num):
+                    _same = True
+            if not _same:
                 continue
             to_remove.append(entry)
     # Capturer P&L des positions avant fermeture
@@ -2461,10 +2501,18 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
 def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager) -> bool:
     """Ferme le signal actif d'un canal s'il en existe déjà un."""
     with manager._lock:
+        # ★ v17.4g : matcher par nom OU par numéro (après recovery, le nom peut
+        # être "Canal_N" ou périmé si le canal a été renommé)
+        canal_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-")))
         for entry in list(manager.active):
             sig = entry.get("signal", {})
             entry_canal = sig.get("source_channel", "Inconnu")
-            if entry_canal == canal:
+            same_canal = entry_canal == canal
+            if not same_canal and canal_num is not None:
+                entry_num = CHANNEL_NUM_MAP.get(entry_canal, CHANNEL_NUM_MAP.get(entry_canal.lstrip("-")))
+                if entry_num is not None and str(entry_num) == str(canal_num):
+                    same_canal = True
+            if same_canal:
                 sig_type = sig.get("type", "PU")
                 ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
                 # ★ FIX : annuler les LIMITs AVANT de fermer les positions
@@ -2509,7 +2557,14 @@ def _market_in_zone(canal: str, signal: dict, manager: TradeManager) -> tuple:
         for entry in list(manager.active):
             sig = entry.get("signal", {})
             entry_canal = sig.get("source_channel", "Inconnu")
-            if entry_canal != canal:
+            # ★ v17.4g : matcher par nom OU par numéro
+            same_canal = entry_canal == canal
+            if not same_canal:
+                _cn = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-")))
+                _en = CHANNEL_NUM_MAP.get(entry_canal, CHANNEL_NUM_MAP.get(entry_canal.lstrip("-")))
+                if _cn is not None and _en is not None and str(_en) == str(_cn):
+                    same_canal = True
+            if not same_canal:
                 continue
             # Chercher le ticket MARKET de cette entree
             mt5_comment = entry.get("_mt5_comment", "")
