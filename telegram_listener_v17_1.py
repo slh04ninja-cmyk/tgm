@@ -1252,7 +1252,7 @@ class TradeManager:
                             "_hors_zone": True,
                             "_hz_recovered": True,
                             # Zone inconnue après restart → pas de vérification MAX_DISTANCE,
-                            # seule l'expiration MT5 native (MAX_TEMPS) s'applique
+                            # seule l'expiration MT5 native (LIMIT_EXPIRY_MIN) s'applique
                             "_hz_zone_low": None,
                             "_hz_zone_high": None,
                         }
@@ -1353,7 +1353,7 @@ class TradeManager:
             # en attente dans mt5.orders_get(). On les annule.
             # ★ EXCEPTION : les LIMITs hors-zone (L3/L4) n'ont JAMAIS de MARKET
             # (le signal a été placé hors zone). Ils ont leur propre expiration
-            # MT5 (ORDER_TIME_SPECIFIED = MAX_TEMPS min) → ne pas les annuler ici.
+            # MT5 (ORDER_TIME_SPECIFIED = LIMIT_EXPIRY_MIN min) → ne pas les annuler ici.
             recovered_prefixes = set(e["_mt5_comment"] for e in self.active)
             pending_orders = mt5.orders_get() or []
             orphan_limits = []
@@ -2010,20 +2010,30 @@ class TradeManager:
 
         # Mettre à jour le TP sur toutes les positions
         updated = 0
+        already_ok = 0
         for t in active:
             pos = self._get_pos(t["ticket"])
             if pos:
+                # ★ v17.4h : TP déjà à la cible (tolérance 2 digits) → considéré OK,
+                # pas de modify inutile (évite retcode "no changes" et le spam log)
+                if abs(pos.tp - tp_price) < 0.005:
+                    already_ok += 1
+                    continue
                 if self.bridge.modify_sl_tp(t["ticket"], pos.sl, tp_price, f"[DYN-TP x{multiplier}]"):
                     t["tp_final"] = tp_price
                     updated += 1
 
         # ★ FIX : ne marquer comme calculé QUE si au moins un TP a été mis à jour.
         # Sinon, le retry ne se fera jamais si modify_sl_tp échoue.
-        if updated > 0:
+        # ★ v17.4h : si tout est DÉJÀ à la cible, marquer aussi (anti-spam log
+        # "TP dynamique" qui se répétait à chaque cycle sans rien changer).
+        if updated > 0 or already_ok == len(active):
             entry["_tp_calculated_for"] = nb
         entry["_pnl_cible"] = pnl_cible
-        _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
-                  f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated}/{len(active)} mis à jour")
+        # ★ v17.4h : log uniquement en cas de changement effectif (anti-spam)
+        if updated > 0:
+            _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
+                      f"cible={pnl_cible}$ (x{multiplier}) | TP={tp_price} | {updated}/{len(active)} mis à jour")
 
     # =============================================================
     # MÉTHODES UTILITAIRES
@@ -2134,6 +2144,10 @@ class TradeManager:
             for t in entry.get("tickets", []):
                 pos = self._get_pos(t["ticket"])
                 if pos is None and not t.get("_reported"):
+                    # ★ v17.4h FIX : un LIMIT encore en attente n'est pas "fermé"
+                    # (les entrées HORS-ZONE sont 100% pending — pas de MARKET)
+                    if t.get("role") == "limit" and mt5.orders_get(ticket=t["ticket"]):
+                        continue
                     t["_reported"] = True
                     pnl = self._get_last_pnl(t["ticket"], symbol)
                     t["_last_pnl"] = pnl
@@ -2199,6 +2213,10 @@ class TradeManager:
             active_tickets = []
             for t in entry.get("tickets", []):
                 if self._get_pos(t["ticket"]):
+                    active_tickets.append(t)
+                # ★ v17.4h FIX : LIMIT en attente = entrée vivante
+                # (entrées HORS-ZONE sans MARKET ne doivent jamais être "terminées")
+                elif t.get("role") == "limit" and not t.get("_reported") and mt5.orders_get(ticket=t["ticket"]):
                     active_tickets.append(t)
 
             # ★ FIX : race condition — un ticket peut se fermer PILE entre la boucle de
@@ -2289,9 +2307,10 @@ class TradeManager:
                 _hz_zl = entry.get("_hz_zone_low")
                 _hz_zh = entry.get("_hz_zone_high")
                 if _hz_zl is not None and _hz_zh is not None:
-                    _hz_mid = (_hz_zl + _hz_zh) / 2
                     _hz_sym = entry.get("signal", {}).get("symbol", symbol)
                     _hz_act = entry.get("signal", {}).get("action", action)
+                    # ★ v17.4h : référence = L3 (bord de zone côté prix), plus le milieu
+                    _hz_l3 = _hz_zh if _hz_act == "BUY" else _hz_zl
                     _hz_now_price = None
                     try:
                         _hz_now_price = self.bridge.current_price(_hz_sym, _hz_act)
@@ -2299,17 +2318,11 @@ class TradeManager:
                         pass
                     _hz_reason = None
                     if _hz_now_price is not None:
-                        _hz_dist = abs(_hz_now_price - _hz_mid)
+                        _hz_dist = abs(_hz_now_price - _hz_l3)
                         if _hz_dist > MAX_DISTANCE:
-                            _hz_reason = f"prix {_hz_now_price} à {_hz_dist:.2f}$ de la zone (MAX_DISTANCE={MAX_DISTANCE})"
-                    if not _hz_reason:
-                        try:
-                            _hz_open = datetime.strptime(entry["_open_date"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-                            _hz_wait_min = (now - _hz_open).total_seconds() / 60
-                            if _hz_wait_min > MAX_TEMPS:
-                                _hz_reason = f"attente {_hz_wait_min:.1f} min (MAX_TEMPS={MAX_TEMPS} min)"
-                        except Exception:
-                            pass
+                            _hz_reason = f"prix {_hz_now_price} à {_hz_dist:.2f}$ de L3 (MAX_DISTANCE={MAX_DISTANCE})"
+                    # ★ v17.4h : plus de vérification MAX_TEMPS — l'expiration MT5
+                    # (LIMIT_EXPIRY_MIN) gère le temps des ordres L3/L4
                     if _hz_reason:
                         _hz_cancelled = self.bridge.cancel_pending_limits(entry)
                         entry["_limit_cancelled"] = True
@@ -3961,7 +3974,8 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
                            ch_num, canal: str) -> bool:
     """TRADE_HORS_ZONE : prix hors zone → placer 2 LIMITs (pas de MARKET).
     L3 = bord de zone côté prix, L4 = mid_zone.
-    TP initial (cas 1) = TP_PAR_DEFAUT ; SL = MAX_SL_USD depuis L3 (commun aux 2).
+    TP initial (cas 1) = TP_FIXED_GAIN_USD depuis L3 ; SL = MAX_SL_USD depuis L3 (commun aux 2).
+    Expiration = LIMIT_EXPIRY_MIN (30 min).
     Le TP dynamique cas 2/3 est géré par _recalculate_tp (nb positions).
     Retourne True si au moins un LIMIT est placé.
     """
@@ -3982,13 +3996,13 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
         sl = round(l3_price + MAX_SL_USD, 2)
     _log_mgmt(f"[HORS-ZONE] {action} {symbol} zone={zone_low}-{zone_high} | L3@{l3_price} L4@{l4_price} | SL={sl} (MAX_SL_USD={MAX_SL_USD})")
 
-    # TP initial cas 1 = TP_PAR_DEFAUT depuis chaque entrée
+    # TP initial cas 1 = TP_FIXED_GAIN_USD depuis chaque entrée (L3 ± 7)
     if action == "BUY":
-        tp_l3 = round(l3_price + TP_PAR_DEFAUT, 2)
-        tp_l4 = round(l4_price + TP_PAR_DEFAUT, 2)
+        tp_l3 = round(l3_price + TP_FIXED_GAIN_USD, 2)
+        tp_l4 = round(l4_price + TP_FIXED_GAIN_USD, 2)
     else:
-        tp_l3 = round(l3_price - TP_PAR_DEFAUT, 2)
-        tp_l4 = round(l4_price - TP_PAR_DEFAUT, 2)
+        tp_l3 = round(l3_price - TP_FIXED_GAIN_USD, 2)
+        tp_l4 = round(l4_price - TP_FIXED_GAIN_USD, 2)
 
     # Résolution symbole + filling modes (comme _open_market_limit)
     _sym_limit = bridge._sym(symbol)
@@ -4005,7 +4019,7 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
 
     tickets = []
     orders_desc = []
-    expiry = datetime.now(timezone.utc) + timedelta(minutes=MAX_TEMPS)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=LIMIT_EXPIRY_MIN)
 
     for label, price, tp in [("L3", l3_price, tp_l3), ("L4", l4_price, tp_l4)]:
         mt5_comment = f"CH{ch_num}-ZN-{label}"
@@ -4056,7 +4070,7 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
     manager.register(entry)
 
     orders_str = " | ".join(orders_desc)
-    log.info(f"CH{ch_num}-ZN | HORS-ZONE | {action} {symbol} | {orders_str} | SL={sl} | TP1={tp_l3}/{tp_l4}")
+    log.info(f"CH{ch_num}-ZN | {action} | HORS-ZONE | L3={l3_price} | L4={l4_price} | SL={sl}")
     _log_mgmt(f"OPEN {action} CH{ch_num}-ZN HORS-ZONE | {orders_str}")
     return True
 
@@ -4123,13 +4137,14 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
 
     avg_entry = (zone_low + zone_high) / 2
 
-    # ★ OVERRIDE : TP basé sur TP_FIXED_GAIN_USD (ignorer le TP du signal)
-    # Sera recalculé dynamiquement si des LIMIT se remplissent
+    # ★ v17.4h : TP initial basé sur TP_FIXED_GAIN_USD depuis le prix d'exécution RÉEL
+    # du MARKET (current) — pas le milieu de zone. Le TP du signal est ignoré.
+    # Sera recalculé dynamiquement si des LIMIT se remplissent.
     if action == "BUY":
-        tp_final = round(avg_entry + TP_FIXED_GAIN_USD, 2)
+        tp_final = round(current + TP_FIXED_GAIN_USD, 2)
     else:
-        tp_final = round(avg_entry - TP_FIXED_GAIN_USD, 2)
-    _log_mgmt(f"TP initial: {tp_final} (entry={avg_entry:.2f} ± {TP_FIXED_GAIN_USD}$)")
+        tp_final = round(current - TP_FIXED_GAIN_USD, 2)
+    _log_mgmt(f"TP initial: {tp_final} (entry={current:.2f} ± {TP_FIXED_GAIN_USD}$)")
 
     if not SignalParser._validate_sl(action, avg_entry, sl):
         _log_mgmt(msg.log_refuse(ch_num, "", msg.MOTIF_SL_INVALIDE))
@@ -4166,21 +4181,28 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
     # Prix légèrement hors zone (TOLERANCE_ZN) → MARKET + LIMITS aussi
     # Sinon annulé
     if is_zone_signal and len(all_tps) >= 1:
+        # ★ v17.4h : situation du prix — TOLERANCE_ZN incluse dans la zone d'acceptation
         if action == "BUY":
-            in_zone = zone_low <= current <= zone_high
-            above_zone = zone_high < current <= zone_high + TOLERANCE_ZN
+            in_zone = zone_low <= current <= zone_high + TOLERANCE_ZN
+            bord_dist = zone_high + TOLERANCE_ZN
         else:
-            in_zone = zone_low <= current <= zone_high
-            below_zone = zone_low - TOLERANCE_ZN <= current < zone_low
+            in_zone = zone_low - TOLERANCE_ZN <= current <= zone_high
+            bord_dist = zone_low - TOLERANCE_ZN
 
-        if not in_zone and not (action == "BUY" and above_zone) and not (action == "SELL" and below_zone):
-            if TRADE_HORS_ZONE:
-                _open_limits_hors_zone(signal, bridge, manager, action, symbol, current,
-                                       zone_low, zone_high, ch_num, canal)
+        if not in_zone:
+            # CAS 2 : prix hors zone
+            dist = abs(current - bord_dist)
+            if not TRADE_HORS_ZONE:
+                log.info(f"CH{ch_num}-ZN | REFUSE HORS ZONE")
                 return
-            log.info(f"CH{ch_num}-ZN | REFUSE HORS ZONE")
+            if dist > MAX_DISTANCE:
+                log.info(f"CH{ch_num}-ZN | REFUSE HORS ZONE (dist {dist:.2f}$ > MAX_DISTANCE={MAX_DISTANCE})")
+                return
+            _open_limits_hors_zone(signal, bridge, manager, action, symbol, current,
+                                   zone_low, zone_high, ch_num, canal)
             return
 
+        # CAS 1 : prix dans la zone d'acceptation → MK + L1 + L2
         prefix = "ZN"
         avg_entry = (zone_low + zone_high) / 2
         sl = _cap_sl(action, avg_entry, sl, MAX_SL_USD)
