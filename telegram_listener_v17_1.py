@@ -2297,32 +2297,47 @@ class TradeManager:
 
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 3b : EXPIRATION TRADE HORS ZONE ★★★
-            # Le prix dépasse MAX_DISTANCE de la zone → annuler les LIMITs
-            # (le temps d'attente est géré par l'expiration native MT5 LIMIT_EXPIRY_MIN)
+            # ★ 01/09 : MAX_DISTANCE ne s'applique QUE si L3 ET L4 sont encore
+            # TOUTES LES DEUX pendantes (aucune remplie). Dès qu'une LIMIT est
+            # remplie (position ouverte) → plus d'annulation par MAX_DISTANCE
+            # (ni sur la position, ni sur l'autre LIMIT) : seule l'expiration
+            # native MT5 (LIMIT_EXPIRY_MIN) gère les ordres restants.
             # ══════════════════════════════════════════════════════════════
             if entry.get("_hors_zone") and not entry.get("_limit_cancelled") and not entry.get("_hz_expired"):
                 _hz_zl = entry.get("_hz_zone_low")
                 _hz_zh = entry.get("_hz_zone_high")
                 if _hz_zl is not None and _hz_zh is not None:
-                    _hz_sym = entry.get("signal", {}).get("symbol", symbol)
-                    _hz_act = entry.get("signal", {}).get("action", action)
-                    # ★ v17.4h : référence = L3 (bord de zone côté prix), plus le milieu
-                    _hz_l3 = _hz_zh if _hz_act == "BUY" else _hz_zl
-                    _hz_now_price = None
+                    _hz_pending = 0
                     try:
-                        _hz_now_price = self.bridge.current_price(_hz_sym, _hz_act)
+                        for _t in entry.get("tickets", []):
+                            if _t.get("role") == "limit" and mt5.orders_get(ticket=_t["ticket"]):
+                                _hz_pending += 1
                     except Exception:
                         pass
-                    _hz_reason = None
-                    if _hz_now_price is not None:
-                        _hz_dist = abs(_hz_now_price - _hz_l3)
-                        if _hz_dist > MAX_DISTANCE:
-                            _hz_reason = f"prix {_hz_now_price} à {_hz_dist:.2f}$ de L3 (MAX_DISTANCE={MAX_DISTANCE})"
-                    if _hz_reason:
-                        _hz_cancelled = self.bridge.cancel_pending_limits(entry)
-                        entry["_limit_cancelled"] = True
+                    if _hz_pending >= 2:
+                        _hz_sym = entry.get("signal", {}).get("symbol", symbol)
+                        _hz_act = entry.get("signal", {}).get("action", action)
+                        # ★ v17.4h : référence = L3 (bord de zone côté prix), plus le milieu
+                        _hz_l3 = _hz_zh if _hz_act == "BUY" else _hz_zl
+                        _hz_now_price = None
+                        try:
+                            _hz_now_price = self.bridge.current_price(_hz_sym, _hz_act)
+                        except Exception:
+                            pass
+                        _hz_reason = None
+                        if _hz_now_price is not None:
+                            _hz_dist = abs(_hz_now_price - _hz_l3)
+                            if _hz_dist > MAX_DISTANCE:
+                                _hz_reason = f"prix {_hz_now_price} à {_hz_dist:.2f}$ de L3 (MAX_DISTANCE={MAX_DISTANCE})"
+                        if _hz_reason:
+                            _hz_cancelled = self.bridge.cancel_pending_limits(entry)
+                            entry["_limit_cancelled"] = True
+                            entry["_hz_expired"] = True
+                            log.info(f"{mt5_comment} | HORS-ZONE EXPIRE ({_hz_reason}) | {_hz_cancelled} LIMIT annulés")
+                    else:
+                        # Une LIMIT déjà remplie → MAX_DISTANCE désactivé pour cette entrée,
+                        # seule l'expiration native MT5 (LIMIT_EXPIRY_MIN) gère la suite.
                         entry["_hz_expired"] = True
-                        log.info(f"{mt5_comment} | HORS-ZONE EXPIRE ({_hz_reason}) | {_hz_cancelled} LIMIT annulés")
 
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 4 : TP DYNAMIQUE (recalcul si LIMIT rempli) ★★★

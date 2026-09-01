@@ -149,7 +149,7 @@ Log : <code>CH110-ZN | ACCEPTE | MK=4438 | L1=4435 | L2=4432</code></div>
 <h3>Expiration et annulation (cas 2)</h3>
 <ul>
 <li><b>Expiration</b> : <code>LIMIT_EXPIRY_MIN</code> (30 min) — réutilise la variable des ordres normaux</li>
-<li><b>Annulation</b> : si le prix s'éloigne de <b>&gt; MAX_DISTANCE de L3</b> (le bord) → annuler L3/L4 (référence = L3, pas le milieu de zone)</li>
+<li><b>Annulation</b> : si le prix s'éloigne de <b>&gt; MAX_DISTANCE de L3</b> (le bord) → annuler L3/L4 (référence = L3, pas le milieu de zone). <b>★ 01/09 : cette règle ne s'applique QUE si L3 ET L4 sont encore toutes les deux PENDANTES.</b> Dès qu'une LIMIT est remplie (position ouverte) → plus d'annulation par MAX_DISTANCE (ni sur la position, ni sur l'autre LIMIT) : seule l'expiration native MT5 (LIMIT_EXPIRY_MIN, 30 min) gère les ordres restants.</li>
 </ul>
 <div class="ok"><b>Exemple — Cas 2 :</b> « XAUUSD BUY zone 4437–4440 TP 4455 SL 4428 », prix actuel = <b>4442</b> (hors zone : 4442 &gt; 4440 + 1)<br>
 → dist = 4442 − 4441 = <b>1$ ≤ MAX_DISTANCE (3$)</b> ✓ (bord = 4440 + 1)<br>
