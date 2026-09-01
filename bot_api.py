@@ -645,6 +645,11 @@ def update_config(updates: EnvBulkUpdate):
                 incoming_channels.append((key, value))
     incoming_channels.sort()  # TG_CHANNEL_1, TG_CHANNEL_2, ...
 
+    # Clés qui doivent rester présentes même vides (champ texte facultatif).
+    # TG_FOLDER vide = le bot lit les canaux depuis Channels.txt (comportement valide).
+    # TG_ALERT_CHANNEL vide = pas de canal d'alertes dédié.
+    PRESERVE_EMPTY_KEYS = {"TG_FOLDER", "TG_ALERT_CHANNEL"}
+
     # Appliquer les autres mises à jour (non-canaux)
     for key, value in updates.values.items():
         if key.startswith("TG_CHANNEL_"):
@@ -652,7 +657,10 @@ def update_config(updates: EnvBulkUpdate):
         if value == "***":
             continue
         if value == "":
-            existing.pop(key, None)
+            if key in PRESERVE_EMPTY_KEYS:
+                existing[key] = ""  # garder la clé (vide) dans le .env
+            else:
+                existing.pop(key, None)
         else:
             existing[key] = value
     # Réécrire le fichier
