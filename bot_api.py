@@ -399,6 +399,19 @@ def start_bot():
 def stop_bot():
     return bot.stop()
 
+def _restart_bot_after_config():
+    """Redémarre le bot après une sauvegarde config (.env) pour appliquer les nouvelles valeurs.
+    Ne fait rien si le bot n'est pas en cours d'exécution."""
+    try:
+        running = (bot.process and bot.process.poll() is None) or bot.status == "running" or bot._find_running_bot() is not None
+        if not running:
+            return {"restarted": False, "reason": "not_running"}
+        bot.stop()
+        result = bot.start()
+        return {"restarted": True, "pid": result.get("pid"), "status": result.get("status")}
+    except Exception as e:
+        return {"restarted": False, "error": str(e)}
+
 # --- DASHBOARD ---
 @app.get("/api/dashboard")
 def get_dashboard():
@@ -675,7 +688,8 @@ def update_config(updates: EnvBulkUpdate):
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
-    return {"status": "ok", "updated": list(updates.values.keys())}
+    restart = _restart_bot_after_config()
+    return {"status": "ok", "updated": list(updates.values.keys()), "restart": restart}
 
 class RawConfigUpdate(BaseModel):
     content: str
@@ -695,7 +709,8 @@ def update_config_raw(req: RawConfigUpdate):
         raise HTTPException(status_code=400, detail="Le contenu ne peut pas être vide")
     with open(ENV_FILE, "w", encoding="utf-8") as f:
         f.write(req.content)
-    return {"status": "ok"}
+    restart = _restart_bot_after_config()
+    return {"status": "ok", "restart": restart}
 
 # --- LOGS ---
 @app.get("/api/logs")
