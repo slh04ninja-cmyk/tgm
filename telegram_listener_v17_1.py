@@ -1842,8 +1842,8 @@ class TradeManager:
                 channels[ch_num] = {'trades': 0, 'wins': 0, 'losses': 0, 'pnl': 0.0, 'name': ch_name, 'signals': 0}
             channels[ch_num]['trades'] += 1
             channels[ch_num]['pnl'] += pnl
-            # ★ Nombre de signaux = nombre de positions MK (chaque MK = 1 signal reçu)
-            if suffix == 'MK':
+            # ★ Nombre de signaux = positions MK (signal dans-zone) + L3 (signal HORS-ZONE)
+            if suffix in ('MK', 'L3'):
                 channels[ch_num]['signals'] += 1
             if pnl > 0:
                 channels[ch_num]['wins'] += 1
@@ -3029,7 +3029,7 @@ def _collect_weekly_report_data() -> dict:
         channel_by_day[day_idx][ch_num]['pnl'] += pnl
         if pnl > 0:
             channel_by_day[day_idx][ch_num]['wins'] += 1
-        if suffix == 'MK':
+        if suffix in ('MK', 'L3'):
             channel_by_day[day_idx][ch_num]['signals'] += 1
 
         # Totaux semaine
@@ -3046,7 +3046,7 @@ def _collect_weekly_report_data() -> dict:
         channel_totals[ch_num]['pnl'] += pnl
         if pnl > 0:
             channel_totals[ch_num]['wins'] += 1
-        if suffix == 'MK':
+        if suffix in ('MK', 'L3'):
             channel_totals[ch_num]['signals'] += 1
 
     # Max Drawdown: P&L cumulé minimum de la semaine
