@@ -170,10 +170,9 @@ TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "2.0"))
 # Si le prix est hors zone (signaux type zone uniquement), placer 2 LIMITs :
 #   L3 = bord de la zone, L4 = milieu de zone (mid_zone)
 # TP initial unifié : current ± TP_FIXED_GAIN_USD (7$), puis recalcul dynamique
-# Expiration : cas1 prix dépasse MAX_DISTANCE ; cas2 attente > MAX_TEMPS min
+# Expiration : cas1 prix dépasse MAX_DISTANCE ; cas2 expiration native MT5 (LIMIT_EXPIRY_MIN)
 TRADE_HORS_ZONE = os.getenv("TRADE_HORS_ZONE", "false").lower() == "true"
 MAX_DISTANCE = float(os.getenv("MAX_DISTANCE", "5.0"))
-MAX_TEMPS = float(os.getenv("MAX_TEMPS", "5.0"))
 
 # === AUTRES ===
 TG_ALERT_CHANNEL = os.getenv("TG_ALERT_CHANNEL", "")
@@ -2293,8 +2292,8 @@ class TradeManager:
 
             # ══════════════════════════════════════════════════════════════
             # ★★★ PHASE 3b : EXPIRATION TRADE HORS ZONE ★★★
-            # Cas 1 : le prix dépasse MAX_DISTANCE de la zone → annuler les LIMITs
-            # Cas 2 : temps d'attente > MAX_TEMPS min → annuler les LIMITs
+            # Le prix dépasse MAX_DISTANCE de la zone → annuler les LIMITs
+            # (le temps d'attente est géré par l'expiration native MT5 LIMIT_EXPIRY_MIN)
             # ══════════════════════════════════════════════════════════════
             if entry.get("_hors_zone") and not entry.get("_limit_cancelled") and not entry.get("_hz_expired"):
                 _hz_zl = entry.get("_hz_zone_low")
@@ -2314,8 +2313,6 @@ class TradeManager:
                         _hz_dist = abs(_hz_now_price - _hz_l3)
                         if _hz_dist > MAX_DISTANCE:
                             _hz_reason = f"prix {_hz_now_price} à {_hz_dist:.2f}$ de L3 (MAX_DISTANCE={MAX_DISTANCE})"
-                    # ★ v17.4h : plus de vérification MAX_TEMPS — l'expiration MT5
-                    # (LIMIT_EXPIRY_MIN) gère le temps des ordres L3/L4
                     if _hz_reason:
                         _hz_cancelled = self.bridge.cancel_pending_limits(entry)
                         entry["_limit_cancelled"] = True
