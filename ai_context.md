@@ -92,7 +92,7 @@ Telegram (91 canaux) → Parser → Filtres (horaire/news/spread/TV) → Anti-do
 
 ### Phases de gestion (cycle ~1s)
 
-- **PHASE 3b (HORS-ZONE EXPIRE)** : prix s'éloigne > `MAX_DISTANCE` (3$) de L3 → annulation des LIMITs ; le temps d'attente est géré par l'expiration native MT5 (`LIMIT_EXPIRY_MIN`) — `MAX_TEMPS` **supprimé**
+- **PHASE 3b (HORS-ZONE EXPIRE)** : prix s'éloigne > `MAX_DISTANCE` (3$) de L3 → annulation des LIMITs — **uniquement si L3 ET L4 sont encore toutes les deux pendantes** (règle 01/09 : une LIMIT remplie → MAX_DISTANCE désactivé, seule l'expiration native MT5 `LIMIT_EXPIRY_MIN`=30 min gère les ordres restants) — `MAX_TEMPS` **supprimé**
 - **PHASE 4b (P&L CIBLE — clôture PAR TRADE)** : P&L flottant `pos.profit + pos.swap` ≥ pnl_cible (7/10.5/14$) → ferme tout + annule les LIMITs + alerte (garde `_pnl_close_done`)
 - **PHASE 5** : MK fermé → `cancel_pending_limits(entry)` + log `MARKET #ticket fermé -> N LIMIT annulés`
 - **Recovery au redémarrage** : scan MT5, restaure les entrées actives, matching par numéro CHxx
