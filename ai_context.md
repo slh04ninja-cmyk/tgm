@@ -21,7 +21,13 @@
 - **Méthode de travail** : après chaque modif de code → `python -m py_compile`, `test_tous_cas.py` (**76 PASS**) + `test_zn.py` (**45 PASS**), puis upload + restart, puis commit + push (après validation).
 - **Logs** : timestamps **UTC**. Marqueurs utiles : `DOUBLON IGNORE`, `NOUVEAU SIGNAL`, `HORS-ZONE EXPIRE`, `[NEWS] Fermeture`, `TP dynamique`, `[RECOVERY]`, `REFUSE | SYMBOLE INTROUVABLE`.
 - ⚠️ **Leçon 02/09** : un bot peut tourner **aveugle** (connexion MT5 tombée sans que le processus meure — fermetures échouées loggées `P&L: +0.00`, puis `symbole introuvable` en boucle). Le watchdog ne détecte que le processus mort. Toujours vérifier que les logs récents montrent une activité MT5 saine (`MT5 connecté`, ordres exécutés), pas seulement que le process vit.
-- **Ne pas ressusciter** (supprimés par décision) : bot2, génération XLSX, fusion par prix (`merge_quick_alert`, `_market_in_zone`), `MAX_TEMPS`, `SIGNAL_FORWARD_DIR`, `QA_PRICE_TOLERANCE`, `TP_PAR_DEFAUT`, `RR_RATIO_DEFAULT`, `QUICK_ALERT_SL_OFFSET`, `FUSION_TOLERANCE`, `TP_DISTANCE_MIN_RATIO`.
+- **Ne pas ressusciter** (supprimés par décision) : génération XLSX, fusion par prix (`merge_quick_alert`, `_market_in_zone`), `MAX_TEMPS`, `SIGNAL_FORWARD_DIR`, `QA_PRICE_TOLERANCE`, `TP_PAR_DEFAUT`, `RR_RATIO_DEFAULT`, `QUICK_ALERT_SL_OFFSET`, `FUSION_TOLERANCE`, `TP_DISTANCE_MIN_RATIO`.
+
+### Bot 2 — expérience A/B (ABANDONNÉE, ne pas ressusciter)
+
+- **Méthode** : le bot 1 (actuel) forwardait les signaux détectés vers un **2e bot** (dossier `C:\TradingBot2`, via la variable `SIGNAL_FORWARD_DIR` → `C:\TradingBot2\inbox`) qui tradait **les mêmes signaux en ajoutant des filtres** supplémentaires.
+- **But** : **comparer les résultats** (P&L, winrate) entre les deux approches (sans filtres vs avec filtres) pour mesurer l'apport réel des filtres sur les trades.
+- **Statut : ABANDONNÉ** — l'approche a été laissée tombée **à cause de problèmes rencontrés** (gestion de deux bots/instances MT5 simultanées sur le même VPS, suivi compliqué). Ne pas ressusciter : bot 2 oublié, `SIGNAL_FORWARD_DIR` supprimée du .env et du code (0 usage), aucun forward actif.
 
 ### Build de l'app Android (repo `CopyTrading`)
 
