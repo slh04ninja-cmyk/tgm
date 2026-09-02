@@ -9,7 +9,7 @@
 
 - **Lis ce fichier EN ENTIER avant toute action** — c'est la source de vérité (état 02/09, v17.4h).
 - **Règle d'or** : ne modifie AUCUN code sans proposer d'abord — l'utilisateur valide chaque changement (il répond « oui appliquer » ou « non »). Commit + push **seulement après accord explicite**.
-- **GitHub (push)** : repos `slh04ninja-cmyk` (`tgm` + `CopyTrading`). ⚠️ GitHub bloque (push protection) tout fichier contenant un token `ghp_` en clair → **token non stocké ici** : il est déjà configuré dans l'environnement de travail (credential store git — les pushes passent sans le saisir) ; sinon **demander à l'utilisateur**. Toujours demander avant de pusher.
+- **GitHub (push)** : repos `slh04ninja-cmyk` (`tgm` + `CopyTrading`). ⚠️ GitHub bloque (push protection) tout fichier contenant un token `ghp_` en clair → **token à demander à l'utilisateur** (il le fournit en début de session, comme le token API). Toujours demander avant de pusher.
 - **Token API serveur** : **à demander à l'utilisateur** (volontairement pas stocké ici). ⚠️ **Ne JAMAIS le modifier / régénérer** — d'autres consommateurs l'utilisent (app Android + watchdog Hermes). S'il est changé, l'app et le watchdog cassent. Pour rappel : 32 caractères hex, généré le 02/09, présent dans `.env` (`API_TOKEN=...`, lu APRÈS `load_dotenv` dans bot_api.py).
 - **Authentification API** : toute requête porte `Authorization: Bearer <token>` — sans token → **401**. Si l'API refuse tout même avec le bon token → vérifier que `API_TOKEN` est lu **après** `load_dotenv` dans `bot_api.py` (piège connu : avant = toujours vide = 401 partout).
 - **Pièges critiques** :
