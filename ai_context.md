@@ -23,6 +23,21 @@
 - ⚠️ **Leçon 02/09** : un bot peut tourner **aveugle** (connexion MT5 tombée sans que le processus meure — fermetures échouées loggées `P&L: +0.00`, puis `symbole introuvable` en boucle). Le watchdog ne détecte que le processus mort. Toujours vérifier que les logs récents montrent une activité MT5 saine (`MT5 connecté`, ordres exécutés), pas seulement que le process vit.
 - **Ne pas ressusciter** (supprimés par décision) : bot2, génération XLSX, fusion par prix (`merge_quick_alert`, `_market_in_zone`), `MAX_TEMPS`, `SIGNAL_FORWARD_DIR`, `QA_PRICE_TOLERANCE`, `TP_PAR_DEFAUT`, `RR_RATIO_DEFAULT`, `QUICK_ALERT_SL_OFFSET`, `FUSION_TOLERANCE`, `TP_DISTANCE_MIN_RATIO`.
 
+### Build de l'app Android (repo `CopyTrading`)
+
+- **Déclenchement** : le workflow `.github/workflows/build.yml` (« Build Debug APK ») se lance **automatiquement à chaque `git push` sur `main`** (pas de build local) ; `workflow_dispatch` possible aussi.
+- **Étapes du build** : ubuntu-latest → JDK 17 → Gradle 8.5 → `gradle assembleDebug`.
+- **Artifact** : nom `copytrading-debug` (`app/build/outputs/apk/debug/*.apk`).
+- **Récupération de l'APK** (après push) :
+  ```bash
+  gh run watch            # attendre la fin du build
+  gh run download <run_id> -n copytrading-debug -D ~/apk_dl
+  cp ~/apk_dl/app/build/outputs/apk/debug/*.apk ~/CopyTrading.apk
+  ```
+  Puis envoyer `~/CopyTrading.apk` à l'utilisateur (MEDIA: dans le chat Telegram). Vérifier le MD5 si besoin.
+- **Cycle de test** : l'utilisateur installe l'APK sur son téléphone (Xiaomi, Android 13) et teste → rapporte les bugs dans le chat → fix → nouveau push/build/APK.
+- ⚠️ **Règle** : proposer les modifications de l'app AVANT de les faire (validation utilisateur), comme pour le bot. Une modif du bot (listener) nécessite un restart ; une modif de l'app nécessite un nouvel APK.
+
 ---
 
 ## 1. Vue d'ensemble
