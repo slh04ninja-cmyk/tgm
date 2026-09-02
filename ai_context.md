@@ -5,6 +5,26 @@
 
 ---
 
+## 0. Instructions pour l'agent repreneur (ajout 02/09)
+
+- **Lis ce fichier EN ENTIER avant toute action** — c'est la source de vérité (état 02/09, v17.4h).
+- **Règle d'or** : ne modifie AUCUN code sans proposer d'abord — l'utilisateur valide chaque changement (il répond « oui appliquer » ou « non »). Commit + push **seulement après accord explicite**.
+- **GitHub (push)** : repos `slh04ninja-cmyk` (`tgm` + `CopyTrading`). ⚠️ GitHub bloque (push protection) tout fichier contenant un token `ghp_` en clair → **token non stocké ici** : il est déjà configuré dans l'environnement de travail (credential store git — les pushes passent sans le saisir) ; sinon **demander à l'utilisateur**. Toujours demander avant de pusher.
+- **Token API serveur** : **à demander à l'utilisateur** (volontairement pas stocké ici). ⚠️ **Ne JAMAIS le modifier / régénérer** — d'autres consommateurs l'utilisent (app Android + watchdog Hermes). S'il est changé, l'app et le watchdog cassent. Pour rappel : 32 caractères hex, généré le 02/09, présent dans `.env` (`API_TOKEN=...`, lu APRÈS `load_dotenv` dans bot_api.py).
+- **Authentification API** : toute requête porte `Authorization: Bearer <token>` — sans token → **401**. Si l'API refuse tout même avec le bon token → vérifier que `API_TOKEN` est lu **après** `load_dotenv` dans `bot_api.py` (piège connu : avant = toujours vide = 401 partout).
+- **Pièges critiques** :
+  - Upload via `/api/file` transforme **LF → CRLF** : vérifier le MD5 sur la version **CRLF** locale avant de conclure.
+  - `PUT /api/config` (et `/config/raw`) **redémarre le bot automatiquement** ; champ vidé = variable supprimée du `.env` (sauf `TG_FOLDER`/`TG_ALERT_CHANNEL` préservés vides) ; valeur `***` = ignorée (secrets jamais écrasés).
+  - Le `.env` n'est lu **qu'au démarrage** → toute modif nécessite le restart (automatique via l'API).
+  - `~/tgm/.env` est versionné = **reflet exact du serveur** → le garder synchronisé.
+  - Le serveur est la vérité : vérifier par `GET /api/file` + MD5 (version CRLF) avant de conclure.
+- **Méthode de travail** : après chaque modif de code → `python -m py_compile`, `test_tous_cas.py` (**76 PASS**) + `test_zn.py` (**45 PASS**), puis upload + restart, puis commit + push (après validation).
+- **Logs** : timestamps **UTC**. Marqueurs utiles : `DOUBLON IGNORE`, `NOUVEAU SIGNAL`, `HORS-ZONE EXPIRE`, `[NEWS] Fermeture`, `TP dynamique`, `[RECOVERY]`, `REFUSE | SYMBOLE INTROUVABLE`.
+- ⚠️ **Leçon 02/09** : un bot peut tourner **aveugle** (connexion MT5 tombée sans que le processus meure — fermetures échouées loggées `P&L: +0.00`, puis `symbole introuvable` en boucle). Le watchdog ne détecte que le processus mort. Toujours vérifier que les logs récents montrent une activité MT5 saine (`MT5 connecté`, ordres exécutés), pas seulement que le process vit.
+- **Ne pas ressusciter** (supprimés par décision) : bot2, génération XLSX, fusion par prix (`merge_quick_alert`, `_market_in_zone`), `MAX_TEMPS`, `SIGNAL_FORWARD_DIR`, `QA_PRICE_TOLERANCE`, `TP_PAR_DEFAUT`, `RR_RATIO_DEFAULT`, `QUICK_ALERT_SL_OFFSET`, `FUSION_TOLERANCE`, `TP_DISTANCE_MIN_RATIO`.
+
+---
+
 ## 1. Vue d'ensemble
 
 Bot Telegram de **copy trading** qui lit les signaux de **91 canaux Telegram** et exécute des ordres sur **MetaTrader 5 (Exness)**. Le bot tourne sur un **serveur Windows VPS** (`38.247.138.124`, hostname `vps-mt5`, user `Administrator`).
