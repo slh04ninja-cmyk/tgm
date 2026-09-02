@@ -37,7 +37,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -53,11 +54,12 @@ LOG_FILE = os.path.join(BOT_WORKDIR, "bot_trading.log")
 PID_FILE = os.path.join(BOT_WORKDIR, "bot.pid")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_TOKEN = os.getenv("API_TOKEN", "CPG7e5e97dDkHTyMJg8AwIPIcnqeV0gIrPn")  # Token d'authentification (optionnel)
 
 # MT5 connection (reprend les mêmes vars que le bot)
 from dotenv import load_dotenv
 load_dotenv(ENV_FILE)
+
+API_TOKEN = os.getenv("API_TOKEN", "")  # Token d'authentification (Bearer) — vérifié par middleware (★ 01/09), lu APRÈS load_dotenv
 
 MT5_LOGIN = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
@@ -90,6 +92,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# =============================================================
+# AUTHENTIFICATION BEARER TOKEN (★ 01/09)
+# Toutes les routes exigent `Authorization: Bearer <API_TOKEN>`.
+# L'app Android envoie ce header si un token est configuré.
+# =============================================================
+@app.middleware("http")
+async def require_bearer_token(request: Request, call_next):
+    # Laisser passer les preflight CORS (OPTIONS sans header)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {API_TOKEN}":
+        return JSONResponse(status_code=401, content={"detail": "Non autorisé : token API requis"})
+    return await call_next(request)
 
 # =============================================================
 # BOT PROCESS MANAGER

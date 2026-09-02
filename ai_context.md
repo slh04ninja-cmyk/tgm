@@ -20,7 +20,7 @@ Bot Telegram de **copy trading** qui lit les signaux de **91 canaux Telegram** e
 - Dossier bot : `C:\TradingBot\` — fichiers : `telegram_listener_v17_1.py`, `signal_parser_v15.py`, `bot_messages_v15.py`, `bot_api.py`, `.env`, `start_bot1.py`
 - Logs : `C:\TradingBot\bot_trading.log` (API) / `stdout.log` (bot lancé par start_bot1.py)
 - ⚠️ Après reboot du VPS, `bot_api.py` n'est **pas relancé automatiquement** (relance manuelle RDP nécessaire)
-- ⚠️ Fails sécurité connus (décision utilisateur : nettoyage seul, non corrigés) : `/api/exec` = RCE sans auth, `API_TOKEN` défini mais **jamais vérifié**, CORS `*`
+- ⚠️ **Authentification API (02/09)** : TOUTES les routes exigent `Authorization: Bearer <API_TOKEN>` (middleware, 401 sinon) — token 32 hex généré 02/09, dans `.env` (`API_TOKEN=...`), à enregistrer dans l'app. Reste exposé volontairement : `/api/exec` (RCE) et `/api/config/raw` (secrets) **ne sont accessibles qu'avec le token** ; CORS `*`
 
 ---
 
@@ -135,7 +135,7 @@ Groupées en sections commentées : TELEGRAM / MT5 (compte) / LOTS ET ORDRES / G
 ## 7. API REST (port 8000)
 
 - **URL** : `http://38.247.138.124:8000` — format JSON (`Content-Type: application/json`)
-- **Authentification** : header `Authorization: Bearer ***` (⚠️ jamais vérifié par le serveur)
+- **Authentification** : header `Authorization: Bearer <API_TOKEN>` — **OBLIGATOIRE depuis 02/09** (401 sinon). Valeur dans `.env` (`API_TOKEN=...`), masquée `***` par `GET /api/config` et ignorée par `PUT /api/config` si `***`. ⚠️ `API_TOKEN` est lu **APRÈS** `load_dotenv` dans bot_api.py (piège : le placer avant = token toujours vide = 401 partout).
 
 ### Endpoints
 
@@ -165,15 +165,16 @@ Groupées en sections commentées : TELEGRAM / MT5 (compte) / LOTS ET ORDRES / G
 ### Workflow upload code + redémarrage
 
 ```bash
+TOKEN=<API_TOKEN du .env>
 # 1. Upload
-curl -X POST -H "Content-Type: application/json" \
+curl -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
   -d '{"path": "telegram_listener_v17_1.py", "content": "<contenu>"}' \
   http://38.247.138.124:8000/api/file
 # 2. Redémarrer le bot (si listener) ou l'API (si bot_api.py)
-curl -X POST http://38.247.138.124:8000/api/bot/stop && sleep 2 && curl -X POST http://38.247.138.124:8000/api/bot/start
+curl -X POST -H "Authorization: Bearer $TOKEN" http://38.247.138.124:8000/api/bot/stop && sleep 2 && curl -X POST -H "Authorization: Bearer $TOKEN" http://38.247.138.124:8000/api/bot/start
 # (ou /api/restart pour recharger bot_api.py)
 # 3. Vérifier
-curl -s http://38.247.138.124:8000/api/status
+curl -s -H "Authorization: Bearer $TOKEN" http://38.247.138.124:8000/api/status
 ```
 
 ⚠️ **Piège encodage** : l'upload transforme LF → CRLF. Le MD5 serveur se vérifie sur la version **CRLF** locale : `md5(fichier_lu_binaire.replace(b"\n", b"\r\n"))` — sinon faux négatif.
