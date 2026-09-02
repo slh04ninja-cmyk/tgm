@@ -209,10 +209,10 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <h3>4.4 Règles communes PU / MP / QA / ZN</h3>
 <ul>
 <li><b>1 signal par canal :</b> un nouveau signal du même canal ferme l'ancien (<code>_close_previous_signal</code>, commentaire <code>NEW-SIGNAL</code>)</li>
-<li><b>Anti-doublon QA/MP + PU/ZN</b> (<code>TEMPS_DE_FUSION</code> = 2 minutes) :
+<li><b>Anti-doublon QA/MP + PU/ZN</b> (<code>TEMPS_DE_FUSION</code> = 3 minutes) :
 <ul>
-<li><b>Cas 1 :</b> le signal PU/ZN arrive <b>dans les 2 min</b> après le signal QA/MP (même canal/symbole/action) → c'est le <b>même signal</b> (même entry) → <code>DOUBLON IGNORE</code> (le QA/MP reste intact, pas de doublon)</li>
-<li><b>Cas 2 :</b> le signal PU/ZN arrive <b>après 2 min</b> après le signal QA/MP → c'est un <b>NOUVEAU signal</b> → exécution normale (<code>execute_signal</code> ferme l'ancien du canal puis ouvre)</li>
+<li><b>Cas 1 :</b> le signal PU/ZN arrive <b>dans les 3 min</b> après le signal QA/MP (même canal/symbole/action) → c'est le <b>même signal</b> (même entry) → <code>DOUBLON IGNORE</code> (le QA/MP reste intact, pas de doublon)</li>
+<li><b>Cas 2 :</b> le signal PU/ZN arrive <b>après 3 min</b> après le signal QA/MP → c'est un <b>NOUVEAU signal</b> → exécution normale (<code>execute_signal</code> ferme l'ancien du canal puis ouvre)</li>
 </ul>
 </li>
 <li><b>TP dynamique identique au ZN cas 1 :</b> MK seul → <code>entry_MK ± 7</code> (cible 7$) ; MK+L1 → <code>avg ± 5.25</code> (10.5$) ; MK+L1+L2 → <code>avg ± 4.67</code> (14$)</li>
@@ -249,7 +249,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td>TradingView</td><td class="mono">TV_FILTER_ENABLED</td><td>OFF (bot 1)</td><td>Filtre GOLD 5m (TVC/cfd), seuils BUY/SELL/STRONG</td></tr>
 <tr><td>Spread</td><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>Refus si spread trop large</td></tr>
 <tr><td>Max signaux</td><td class="mono">MAX_POSITIONS</td><td>60</td><td>Au-delà → Quick Alert ignorée</td></tr>
-<tr><td>Anti-doublon QA/MP + PU/ZN</td><td class="mono">TEMPS_DE_FUSION</td><td>2 (min)</td><td>PU/ZN ≤ 2 min après QA/MP = même signal → DOUBLON IGNORE ; > 2 min = nouveau signal</td></tr>
+<tr><td>Anti-doublon QA/MP + PU/ZN</td><td class="mono">TEMPS_DE_FUSION</td><td>3 (min)</td><td>PU/ZN ≤ 3 min après QA/MP = même signal → DOUBLON IGNORE ; > 3 min = nouveau signal</td></tr>
 </table>
 
 <h2>7. Cycle de vie d'un signal</h2>
@@ -272,11 +272,13 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <li>Reconstruit avec <code>sl_wanted</code> → le fix SL post-ouverture corrige aussi les positions reprises</li>
 <li>Recalcule le TP dynamique sur l'entrée reconstruite</li>
 <li>Nettoyage des <b>LIMITs orphelines</b> (annulation, sauf L3/L4 hors-zone)</li>
+<li><b>Restart auto après sauvegarde config (depuis 01/09)</b> : toute sauvegarde du .env via l'app (<code>PUT /api/config</code> ou <code>/config/raw</code>) redémarre automatiquement le bot s'il tourne (le .env n'est lu qu'au démarrage) — la réponse API inclut <code>restart: {restarted: true, pid}</code>. Le bot repart alors en recovery.</li>
 </ul>
 
 <h2>9. Rapports et alertes</h2>
 <ul>
 <li><b>Rapport quotidien PDF</b> envoyé sur <code>@TrdReport</code> (fpdf2) : P&L, positions, signaux du jour</li>
+<li><b>Comptage des signaux (SN) = positions MK + L3</b> (depuis 02/09) : chaque entrée MARKET (dans-zone) ou LIMIT 3 remplie (hors-zone) compte 1 signal dans le PDF quotidien, le rapport semaine et les tableaux Performance de l'app. La L4 (2e ordre hors-zone) n'est jamais comptée. Trades/winrate/P&L restent par position (MK+L1+L2 fermé = 3 trades).</li>
 <li><code>ALERT_DAILY_PERFORMANCE</code> : performance quotidienne</li>
 <li><code>ALERT_TRADE_MANAGEMENT</code> : alertes d'ouverture/fermeture</li>
 <li><code>LOG_TRADE_MANAGEMENT</code> : logs de gestion détaillés</li>
@@ -294,7 +296,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">MT5_LOGIN / MT5_PASSWORD / MT5_SERVER</td><td>—</td><td>[REDACTED]</td><td>Compte MT5 (Exness-MT5Trial16, 262342460)</td></tr>
 <tr><td class="mono">MAGIC_NUMBER</td><td>20250226</td><td>20250226</td><td>Identifiant magique des ordres</td></tr>
 <tr><td class="mono">DEMO_MODE</td><td>true</td><td>true</td><td>Mode démo</td></tr>
-<tr><td class="mono">API_HOST / API_PORT / API_TOKEN</td><td>0.0.0.0 / 8000</td><td>—</td><td>API REST (token non vérifié !)</td></tr>
+<tr><td class="mono">API_HOST / API_PORT / API_TOKEN</td><td>0.0.0.0 / 8000</td><td>—</td><td>API REST — token vérifié depuis 02/09 : toute requête exige <code>Authorization: Bearer &lt;API_TOKEN&gt;</code> (401 sinon)</td></tr>
 <tr><td class="mono">LOT_MARKET / LOT_LIMIT1 / LOT_LIMIT2</td><td>0.01 / 0.01 / 0.01</td><td>0.01 ×3</td><td>Lots MARKET, L1, L2 (total 0.03)</td></tr>
 <tr><td class="mono">LIMIT_ENABLED / LIMIT_COUNT</td><td>true / 2</td><td>true / 2</td><td>Activer les ordres limite, nombre</td></tr>
 <tr><td class="mono">LIMIT_OFFSET_1 / LIMIT_OFFSET_2</td><td>3.0 / 6.0</td><td>3.0 / 6.0</td><td>Distance des LIMITs (en $)</td></tr>
@@ -314,7 +316,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td class="mono">TV_NEUTRAL_ALLOW</td><td>true</td><td>—</td><td>Autoriser les signaux neutres</td></tr>
 <tr><td class="mono">MAX_SPREAD_POINTS</td><td>50</td><td>50</td><td>Spread max accepté</td></tr>
 <tr><td class="mono">TOLERANCE_MP / TOLERANCE_PU / TOLERANCE_ZN</td><td>5.0 / 3.0 / 1.0</td><td><b>2.0</b> / 3.0 / 1.0</td><td>Zones de tolérance par type (TOLERANCE_MP passé à 2.0)</td></tr>
-<tr><td class="mono">TEMPS_DE_FUSION</td><td>2</td><td>2</td><td>Anti-doublon QA/MP + PU/ZN (minutes)</td></tr>
+<tr><td class="mono">TEMPS_DE_FUSION</td><td>3</td><td>3</td><td>Anti-doublon QA/MP + PU/ZN (minutes)</td></tr>
 <tr><td class="mono">MAX_POSITIONS</td><td>3</td><td><b>60</b></td><td>Max signaux actifs</td></tr>
 <tr><td class="mono">POLL_INTERVAL_SEC</td><td>1</td><td><b>0.3</b></td><td>Fréquence de la boucle de gestion (s)</td></tr>
 <tr><td class="mono">DAILY_PROFIT_LIMIT</td><td>200.0</td><td><b>400</b></td><td>Objectif quotidien</td></tr>
