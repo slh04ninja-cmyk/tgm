@@ -1316,6 +1316,32 @@ class TradeManager:
                     if role == "market":
                         market_ticket = pos.ticket
 
+                # ★ FIX 02/09 : rattacher les LIMITs (L1/L2) ENCORE PENDANTES du même
+                # préfixe aux tickets de l'entrée reconstruite. Sans cela, après un
+                # restart, l'entrée ne contient que les positions (souvent le MK seul) :
+                # un NEW-SIGNAL ne ferme alors que le MK et laisse L1/L2 orphelines
+                # (cf. incident CH23 bot 2 du 02/09 : L1 remplie + L2 remplie après,
+                # sans MK). Les ordres et positions étant disjoints, pas de doublon.
+                try:
+                    for order in (mt5.orders_get() or []):
+                        if order.magic != MAGIC_NUMBER:
+                            continue
+                        ocomment = order.comment or ""
+                        oparts = ocomment.split("-")
+                        if len(oparts) >= 3 and oparts[0].startswith("CH") and oparts[2] in ("L1", "L2"):
+                            if f"{oparts[0]}-{oparts[1]}" == prefix:
+                                tickets.append({
+                                    "ticket": order.ticket,
+                                    "lot": order.volume_current,
+                                    "role": "limit",
+                                    "entry_price": order.price_open,
+                                    "tp_final": order.tp,
+                                    "sl_wanted": getattr(order, "sl", 0) or 0,
+                                    "_sl_fix_attempts": 0,
+                                })
+                except Exception:
+                    pass
+
                 # Construire le signal minimal
                 ch_parts = prefix.split("-")
                 ch_num = ch_parts[0].replace("CH", "") if len(ch_parts) >= 1 else "?"
@@ -2538,24 +2564,34 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
             if same_canal:
                 sig_type = sig.get("type", "PU")
                 ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-                # ★ FIX : annuler les LIMITs AVANT de fermer les positions
-                if not entry.get("_limit_cancelled"):
-                    cancelled = bridge.cancel_pending_limits(entry)
-                    entry["_limit_cancelled"] = True
-                    if cancelled > 0:
-                        log.info(f"CH{ch_num}-{sig_type} | {cancelled} LIMIT annulés (nouveau signal)")
-                # Fermer les positions ouvertes
-                closed_any = False
-                for t in entry.get("tickets", []):
-                    pos = manager._get_pos(t["ticket"])
-                    if pos:
-                        ticket = t["ticket"]
-                        if bridge.close_position(ticket, "NEW-SIGNAL"):
-                            closed_any = True
-                            log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION")
-                            time.sleep(0.3)
-                            pnl = manager._get_last_pnl(ticket, sig.get("symbol", ""))
-                            manager._update_daily_pnl(pnl)
+                prefix = entry.get("_mt5_comment") or f"CH{ch_num}-{sig_type}"
+                # ★ FIX 02/09 : fermer par PRÉFIXE de commentaire MT5 (scan réel) au lieu
+                # de la liste `tickets` en mémoire — incomplète après un recovery (les
+                # L1/L2 pendantes n'étaient pas rattachées) → NEW-SIGNAL ne fermait que
+                # le MK et laissait L1/L2 orphelines (cf. incident CH23 bot 2 du 02/09).
+                # 1) Annuler les LIMITs pendantes du préfixe
+                try:
+                    for order in (mt5.orders_get() or []):
+                        if order.magic != MAGIC_NUMBER:
+                            continue
+                        if (order.comment or "").startswith(prefix + "-"):
+                            if bridge.cancel_order(order.ticket):
+                                log.info(f"CH{ch_num}-{sig_type} | LIMIT #{order.ticket} annulé (nouveau signal)")
+                except Exception as _e:
+                    log.warning(f"CH{ch_num}-{sig_type} | Erreur annulation LIMITs: {_e}")
+                # 2) Fermer les positions ouvertes du préfixe
+                try:
+                    for pos in (mt5.positions_get() or []):
+                        if pos.magic != MAGIC_NUMBER:
+                            continue
+                        if (pos.comment or "").startswith(prefix + "-"):
+                            if bridge.close_position(pos.ticket, "NEW-SIGNAL"):
+                                log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION #{pos.ticket}")
+                                time.sleep(0.3)
+                                pnl = manager._get_last_pnl(pos.ticket, sig.get("symbol", ""))
+                                manager._update_daily_pnl(pnl)
+                except Exception as _e:
+                    log.warning(f"CH{ch_num}-{sig_type} | Erreur fermeture positions: {_e}")
                 # Retirer l'entrée APRÈS la fermeture
                 manager.active.remove(entry)
                 return True
