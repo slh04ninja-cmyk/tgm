@@ -138,6 +138,52 @@ TOTAL     +579.92  +145.60   +90.82  +236.42   +816.34
 
 Lecture : les filtres aident surtout les canaux **perdants** (CH103 −93→−14, CH8 −56→+2.5, CH30, CH94, CH15) ; ils dégradent quelques gros gagnants (CH105 +176→+127, CH110, CH88, CH92, CH82) — net +236.42. 224 positions marquées REFUSE au total (38 MOVE + 65 KER × MK + leurs L).
 
+### MÉTHODE BACKTEST & CALCUL DES FILTRES — protocole complet (à lire avant TOUTE analyse de résultats)
+
+**1. L'EA évaluateur (0 trade)**
+- L'EA ne passe **aucun ordre** : il reçoit chaque signal du RAW inline, applique les filtres (inputs `InpUseMove`, `InpMoveWin`, `InpMoveUSD`, `InpUseKER`, `InpKERShort/Long/Strong/Accel`, `InpOutFile`…), et écrit **1 ligne CSV par signal** : `timestamp,action,ch,type,entry_mk,l1,l2,sl,Etat,motif` (`Etat` = ACCEPTE/REFUSE, `motif` = MOVE CONTRE / KER CONTRE).
+- Le P&L n'est **jamais** calculé par l'EA : il est calculé APRÈS sur les **deals réels** (le testeur n'a ni les mêmes ticks ni le même volume que le réel).
+- Fichiers : `ea_backtest_signaux.mq5` (campagne KER/ROC/volume) et `ea_backtest_move.mq5` (MOVE+KER, RAW 613 signaux inline, config du pic) — hors repo, synchronisés `~/` ↔ `C:\TradingBot\` ↔ `MQL5\Experts`.
+
+**2. Ajout des signaux dans l'EA (RAW inline)**
+- Le **RAW** = les vrais signaux de la période (timestamp, canal CHx, type PU/ZN/MP/QA/AL, prix), copiés **en dur** dans le .mq5 sous forme de tableau. Un script Python d'assemblage génère le fichier (attention : ne pas déclarer 2× le tableau RAW → erreur de compile).
+- RAW actuel : **613 signaux du 24/08-02/09**. Pour évaluer le 03-04/09 → régénérer un RAW étendu (signaux jusqu'au 04/09) et recompiler.
+
+**3. Compilation (`~/compile_ea.py`)**
+- Copie le `.mq5` (C:\TradingBot\) → `MQL5\Experts` du terminal **53785E099C927DB68A545C249CDBCE06** (EXNESS 1) → lance `metaeditor64.exe /compile:<fichier> /log:...` → vérifier **0 erreur / 0 warning** dans le log (`C:\TradingBot\ea_compile.log`). Le `.ex5` (taille ~45-57 Ko) apparaît à côté.
+
+**4. Run dans le Strategy Tester (exécuté par l'UTILISATEUR — jamais par l'agent)**
+- L'utilisateur configure : EA, symbol XAUUSDm, mode ticks réels, **période** (ex. 24/08 → 03/09 pour couvrir le 02/09), inputs (config exacte), `InpOutFile=verdicts_move.csv` → lance le run → dit « c'est fait ».
+- Sortie : `C:\Users\Administrator\AppData\Roaming\MetaQuotes\Tester\53785E099C927DB68A545C249CDBCE06\Agent-127.0.0.1-3000\MQL5\Files\verdicts_move.csv`.
+- ⚠️ **Chaque run ÉCRASE le CSV** → si le CSV du pic compte (614 lignes), ne pas relancer sans l'avoir préservé. Vérifier la config réellement chargée dans le log du testeur (`…\logs\20260904.log`, encodage UTF-16-le).
+- ⚠️ Pièges testeur : le **jour de fin de période est EXCLU** (fin au 03/09 → couvre le 02/09) ; période plus courte que le RAW → signaux hors période classés ACCEPTE d'office (**artefact, ne pas analyser** — c'est ce qui a faussé les runs nocturnes du 01-02/09) ; tick volume du testeur ≠ réel (3× plus faible, filtre volume inexploitable sur CFD Exness).
+
+**5. Calcul du P&L (méthode deals-only EXACTE)**
+- Connexion : toujours **expliciter** `C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe` + login 262342460 (le terminal par défaut peut être le Trial du bot 2 → résultats faux silencieusement).
+- `history_deals_get(FROM, TO)` avec **les 2 bornes** (1 seule borne → 0 résultat).
+- Baseline = P&L de **toutes les positions CH** (commentaire `CHx-…-MK`/`L1..L4`) fermées dans la fenêtre : P&L d'une position = somme de ses DEAL OUT. Référence vérifiée : 24/08-02/09 = **1422 positions = +579.92$** (sanity : la somme = P&L réel du compte, exact).
+- Scripts serveur : `_baseline_check.py` (P&L réel + par jour), `_tab_exact.py` (tableau par canal exact), `_stats_v3/v4.py` (rapports par canal).
+- **Chaque position compte EXACTEMENT 1× → sanity check obligatoire** : le total doit retomber sur +579.92 (24/08-02/09). Sinon le rattachement est faux.
+
+**6. Matching positions ↔ verdicts (le piège principal)**
+- Les signaux `REFUSE` du CSV ont **vraiment été exécutés** par le bot réel (il n'avait pas les filtres) → leur MK **existe** dans les deals. Le CSV dit simplement ce que les filtres *auraient* refusé (scénario contrefactuel).
+- Rattachement **CORRECT** (position par position, script `_tab_exact.py`) :
+  - **MK** : verdict du CSV à ±5 s (même canal CHx + même type) ;
+  - **L1-L4** : verdict du **dernier MK du même (canal, type) ouvert AVANT la L** (les limites appartiennent au groupe de leur MK) ;
+  - **L3/L4 sans MK** (ZN hors-zone) et **MK orphelins** (sans verdict) : jamais évalués → présents dans le baseline des 2 scénarios → s'annulent dans le gain.
+- Effet d'un filtre = −(P&L réel des positions des signaux REFUSE). Convention des tableaux : `move`/`ker` = **effet** (+ = le filtre améliore en refusant des perdants, − = dégrade en refusant des gagnants) ; `total = move + ker` ; `écart = baseline + total` = P&L avec filtres. Run pic (MOVE 10min/8$ + KER 9/40/0.45/0.35) : **MOVE +145.60 (38 refus) + KER +90.82 (65 refus) = +236.42** → P&L filtré = 579.92 + 236.42 = **+816.34**.
+- ⚠️ **Erreur documentée (05/09, autre agent)** : matcher « par signal/canal/jour » ou grouper les positions par signal (±5 s) fait **rater des refus** (68/103 trouvés → gain faux +66.31 au lieu de +236.42) et **double-compter le baseline** (+667.35 au lieu de +579.92, +87.43). Toujours repartir des **positions réelles**, chacune 1×.
+
+**7. Comparaison**
+- **Backtest** : baseline (sans filtres) vs baseline − refusés (avec filtres) = gain du filtre sur la période.
+- **A/B live** : bot 1 (sans filtres) et bot 2 (filtres MOVE+KER) reçoivent le même flux (forward port 8001) → comparer le P&L réel sur la même fenêtre (ex. 04/09 12:34→15:00 : bot 2 **+43.34** vs bot 1 **−102.89**).
+- **Revalidation obligatoire** : toute config positive doit être re-testée sur une autre période (leçon KER : +209 sur 24-27/08 était un artefact de régime 01-02/09).
+
+**8. Limites connues**
+- Le scénario contrefactuel suppose que refuser un signal n'affecte pas les autres (pas d'effet de portefeuille/corrélation entre canaux).
+- Le CSV actuel s'arrête au 02/09 → l'effet des filtres sur le **03-04/09** (tendance forte, −665.78$ en réel) **reste à mesurer** : il faut un run avec RAW étendu jusqu'au 04/09 (période 24/08 → 05/09).
+- La semaine 24-28/08 était range/gagnante : les filtres y dégradent (−97.44$) ; leur gain vient des journées de tendance et des canaux retirés.
+
 ### Build de l'app Android (repo `CopyTrading`)
 
 - **Déclenchement** : le workflow `.github/workflows/build.yml` (« Build Debug APK ») se lance **automatiquement à chaque `git push` sur `main`** (pas de build local) ; `workflow_dispatch` possible aussi.
