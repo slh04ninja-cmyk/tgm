@@ -1,6 +1,6 @@
 # AI Context — Bot CopyTrading (tgm) v17.4h
 
-> Contexte unique pour un agent AI reprenant ce projet. Fusion de CONTEXT.md + AI_AGENT_PROMPT.md + API_DOCUMENTATION.md, **mis à jour au 01/09/2026 (v17.4h)**.
+> Contexte unique pour un agent AI reprenant ce projet. Fusion de CONTEXT.md + AI_AGENT_PROMPT.md + API_DOCUMENTATION.md, **mis à jour au 04/09/2026 (v17.4h + filtres MOVE/KER)**.
 > Sources de vérité : ce fichier, `bot_documentation_v17.html` (doc complète), `~/.hermes/trading-bot-context.md` (notes opérationnelles), le code lui-même.
 
 ---
@@ -23,11 +23,120 @@
 - ⚠️ **Leçon 02/09** : un bot peut tourner **aveugle** (connexion MT5 tombée sans que le processus meure — fermetures échouées loggées `P&L: +0.00`, puis `symbole introuvable` en boucle). Le watchdog ne détecte que le processus mort. Toujours vérifier que les logs récents montrent une activité MT5 saine (`MT5 connecté`, ordres exécutés), pas seulement que le process vit.
 - **Ne pas ressusciter** (supprimés par décision) : génération XLSX, fusion par prix (`merge_quick_alert`, `_market_in_zone`), `MAX_TEMPS`, `SIGNAL_FORWARD_DIR`, `QA_PRICE_TOLERANCE`, `TP_PAR_DEFAUT`, `RR_RATIO_DEFAULT`, `QUICK_ALERT_SL_OFFSET`, `FUSION_TOLERANCE`, `TP_DISTANCE_MIN_RATIO`.
 
-### Bot 2 — expérience A/B (ABANDONNÉE, ne pas ressusciter)
+### Bot 2 — expérience A/B (RÉACTIVÉE le 03/09 — test live des filtres MOVE+KER)
 
-- **Méthode** : le bot 1 (actuel) forwardait les signaux détectés vers un **2e bot** (dossier `C:\TradingBot2`, via la variable `SIGNAL_FORWARD_DIR` → `C:\TradingBot2\inbox`) qui tradait **les mêmes signaux en ajoutant des filtres** supplémentaires.
-- **But** : **comparer les résultats** (P&L, winrate) entre les deux approches (sans filtres vs avec filtres) pour mesurer l'apport réel des filtres sur les trades.
-- **Statut : ABANDONNÉ** — l'approche a été laissée tombée **à cause de problèmes rencontrés** (gestion de deux bots/instances MT5 simultanées sur le même VPS, suivi compliqué). Ne pas ressusciter : bot 2 oublié, `SIGNAL_FORWARD_DIR` supprimée du .env et du code (0 usage), aucun forward actif.
+- **Méthode actuelle** : le bot 1 forwarde les signaux détectés vers le **bot 2** (`C:\TradingBot2\`, **forward HTTP port 8001** — serveur intégré au listener, envoi-seul @TrdReport2, compte Trial **474496186 / Exness-MT5Trial15** (EXNESS 2), **55 canaux** via `C:\TradingBot\Channels.txt` (retraits du 04/09 : 85 → 71 → 59 → 55 — l'utilisateur supprime les canaux déficitaires dans les dossiers Telegram), mapping Channels.txt prioritaire). Le bot 2 suit automatiquement les canaux du bot 1 (forward) : pas de redémarrage nécessaire après un retrait côté bot 1.
+- **But** : comparer (A/B) bot 1 (sans filtres) vs bot 2 (**avec filtres MOVE+KER** depuis le 04/09) sur le même flux de signaux.
+- **Ancienne méthode (abandonnée)** : dossier `inbox` + variable `SIGNAL_FORWARD_DIR` (supprimée du .env et du code). Le forward passe maintenant par le port 8001.
+- ⚠️ **Ne PAS utiliser `/api/bot/stop` ni `/api/bot/start` (bug constaté 04/09)** : l'API tracke un mauvais PID — `stop` a tué le **bot 2** au lieu du bot 1, `start` répond « already_running » sans rien lancer. Redémarrage fiable : `taskkill /F /PID <pid>` puis `Start-Process python C:\TradingBot2\telegram_listener_v17_1.py` (WorkingDirectory `C:\TradingBot2`). **Attendre ~6 s entre kill et relance** sinon crash au démarrage : `CRASH: database is locked` (session Telethon pas encore libérée). Log : `C:\TradingBot2\bot_trading.log`. Trouver le PID : `wmic process where "name='python.exe'" get ProcessId,CommandLine`.
+- ⚠️ **Redémarrage après 17h UTC = renvoi des rapports en doublon** : la routine EOD (rapport quotidien + hebdo le vendredi) s'exécute à chaque démarrage après 17h → doublons sur TrdReport/TrdReport2 (normal, à ignorer).
+- **Fix PDF hebdo bot 1 (04/09)** : un caractère hors latin-1 (emoji dans un nom de canal, ex. « 👑Jennifer GOLD👑 ») faisait échouer `_generate_weekly_report_pdf` (fpdf2/Helvetica) → rapport hebdo jamais envoyé. Correctif : monkey-patch `FPDF.cell`/`multi_cell` en début de fonction (assainissement latin-1 : accents conservés, le reste → `?`). **Rattrapage manuel** : créer `C:\TradingBot\SEND_WEEKLY.flag` puis redémarrer le bot 1 → le code (après « Telegram connecté ») envoie le hebdo et supprime le flag.
+
+### FILTRAGE DES SIGNAUX — contrainte & campagne de backtest (03-04/09) — À LIRE AVANT TOUTE MODIF
+
+**Contrainte utilisateur (04/09)** : le système (mean-reversion) est **rentable en range mais perdant en tendance forte** (03/09 : −300$ ; 04/09 : encore rouge). L'utilisateur **refuse la gestion du risque** (stop-loss journalier proposé, non retenu) → la solution = **FILTRER LES SIGNAUX D'ENTRÉE**. Toujours revalider une config positive sur une autre période (leçon KER : +209 sur 24-27/08 mais −119 sur 01-02/09 = artefact de régime).
+
+**Remarque clé (analyse des deals réels 24/08-04/09)** :
+- **La plupart des signaux PERDANTS sont ceux pris CONTRE la tendance en mouvement** (le bot achète les baisses / vend les hausses). Quand le mouvement est violent ou établi, le prix continue → **SL en cascade** : 82 cascades de ≥3 SL en ≤10 min, **489 SL = −4538$ cumulés** ; les grosses cascades (≥8 SL) sont précédées d'un move de 15-25$ en 15 min contre les positions.
+- ⚠️ **MAIS en range / faible mouvement, les contre-tendances GAGNENT** → ne PAS bloquer toutes les contre-tendances (KER/ROC « classiques » = négatifs car ils refusaient des gagnants). Ne bloquer que si le mouvement est **violent** (≥ 8$/10 min) ou la tendance **établie** (KER long M10 élevé).
+
+**Filtres testés** (méthode : EA évaluateur 0 trade → verdicts CSV → P&L via **deals MT5 réels**, 613 signaux 24/08-02/09, baseline réelle **+579.92$**) :
+
+| Filtre | Résultat |
+|---|---|
+| KER seul (toutes variantes/timeframes) | négatif ou artefact de régime ❌ |
+| ROC classique « bloquer contre-tendance » (0.2→0.6%) | négatif partout (−31 à −203$) ❌ |
+| Volume ticks (somme 3 bougies ≥ 2× moyenne 50) | inopérant : 0 refus (CFD Exness sans volume réel ; tick volume non discriminant dans le testeur) ❌ |
+| ROC 0.4% logique inversée (refuser le sens du move) | +46.48$ mais sur 01-02/09 seulement (jamais confirmé période complète) |
+| **MOVE seul** (refuser si le prix a bougé ≥ X$ en Y min CONTRE le signal) | pic **10 min / 8$ = +145.60$** (38 refus tous perdants) ; 6$=+83, 10$=+105, 8min/8$=+109, 15min/12$=+115, 20min/12$=**−36** ❌ |
+| **MOVE + KER (combo, OR)** | **+236.42$ (+41%)** — la meilleure config de toute la campagne |
+
+**Balayage KER dans le combo (Move 10min/8$ fixé)** : Strong 0.3→+156 · 0.4→+222 · **0.45→+236 pic** · 0.5→+201 · 0.6→+168 ; Accel 0.3→+170 (0.35 meilleur) ; Short 4→−69 · **9→pic** · 10→+140 · 12→+110 ; Long 20→−121 · **40→pic** · 50→−61.
+
+**✅ BONNES VALEURS (implémentées bot 2 le 04/09)** :
+```
+MOVE_FILTER_ENABLED=true  MOVE_FILTER_MIN=10  MOVE_FILTER_USD=8
+KER_FILTER_ENABLED=true   KER_SHORT=9  KER_LONG=40  KER_STRONG=0.45  KER_ACCEL=0.35
+```
+Logique (OR, appliquée aux flux direct + FWD) : REFUSE si move ≥ 8$ en 10 min contre le signal, OU tendance M10 établie (KER long > 0.45 ou accélération court−long > 0.35) opposée au signal. Le **filtre TradingView a été supprimé** du bot 2 (blocs retirés + `TV_FILTER_ENABLED=false`). Variables dans `C:\TradingBot2\.env` (ajustables sans toucher au code) ; backup code : `telegram_listener_v17_1.py.bak_moveker`.
+
+**EAs évaluateurs créés (hors repo — serveur `C:\TradingBot\` + copie locale `~/`)**
+- `ea_backtest_signaux.mq5` : évaluateur KER/ROC/volume (0 trade, RAW 613 signaux inline 24/08-02/09)
+- `ea_backtest_move.mq5` : évaluateur MOVE + KER (0 trade, même RAW) — utilisé pour le balayage final
+- Verdicts CSV dans le dossier Files du testeur (`InpOutFile`) : `timestamp,action,ch,type,entry_mk,l1,l2,sl,Etat,motif` ; le P&L est calculé APRÈS via les **deals MT5 réels** (méthode deals-only : MK + L1/L2 rattachés au dernier MK du même canal/type ; sanity check : P&L recomposé = P&L réel exact). Script d'analyse : `C:\TradingBot\_ana_combo.py` (P&L par motif MOVE/KER).
+- ⚠️ Pièges testeur MT5 : le **jour de fin de période est EXCLU** (fin au 03/09 pour couvrir le 02/09) ; un test avec une période plus courte que le RAW verdict les signaux hors période en « ACCEPTE » artefact (ne pas les analyser).
+
+**Calcul EXACT des résultats par canal — méthode deals validée (04/09)** :
+- Baseline réel vérifié directement dans les deals (EXNESS 1 262342460, 24/08 00:00 → 03/09 00:00) : **+579.92$** = 1422 positions CH (706 MK +117.90 ; 716 limites +462.02). P&L par jour : 24/08 +400.59 · 25/08 −114.86 · 26/08 +106.10 · 27/08 +92.05 · 28/08 +66.06 · 31/08 −95.06 · 01/09 +19.91 · 02/09 +105.26.
+- ⚠️ **Piège double comptage** : grouper par signal du CSV (find_mk ±5 s) SURRÉVALUE le baseline (+667.35 au lieu de 579.92, +87.43) — 2 signaux proches du même canal peuvent matcher le même MK ou partager des limites. **Méthode correcte** (script `C:\TradingBot\_tab_exact.py`) : itérer sur **chaque position CH 1 seule fois** (sanity check : total = +579.92 exact) ; statut « REFUSE » = le MK (ou le dernier MK même canal/type avant une L) a un verdict REFUSE ; les L3/L4 hors-zone **sans MK** et les MK orphelins (sans verdict CSV) ne sont **jamais évalués** → ils restent dans le baseline des 2 scénarios et s'annulent dans le gain.
+- **Gain des filtres (robuste — identique dans les 2 méthodes) : MOVE +145.60 + KER +90.82 = +236.42** → P&L global avec filtres = 579.92 + 236.42 = **+816.34** (+41%).
+
+**Tableau par canal — filtres MOVE+KER (10min/8$ + 9/40/0.45/0.35), 24/08-02/09, baseline exact** (58 canaux avec ≥1 refus ; convention : baseline = P&L réel du canal ; **move/ker = EFFET du filtre** (+ = améliore en refusant des perdants, − = dégrade en refusant des gagnants) ; **total = move + ker** ; **écart = baseline + total** = P&L du canal avec filtres) :
+
+```
+canal   baseline     move      ker    total     ecart
+CH103     -93.10    -0.00   +79.32   +79.32    -13.78
+CH8       -56.03   +33.34   +25.21   +58.55     +2.52
+CH30      -56.11   +23.40   +32.71   +56.11     +0.00
+CH94      -50.90   +35.02   +19.91   +54.93     +4.03
+CH99      +36.54   +26.31   +27.99   +54.30    +90.84
+CH15      -47.28   +50.26   -10.50   +39.76     -7.52
+CH26      -14.54    -0.00   +38.93   +38.93    +24.39
+CH81      -32.65   +26.79    +8.45   +35.24     +2.59
+CH2       -23.92   +29.43    -0.00   +29.43     +5.51
+CH3       -25.99   +29.31    -0.00   +29.31     +3.32
+CH93      -48.74    -0.00   +27.21   +27.21    -21.53
+CH73       +0.93   +27.00    -0.00   +27.00    +27.93
+CH58      +22.06    -0.00   +27.00   +27.00    +49.06
+CH79      -82.85    -0.00   +26.71   +26.71    -56.14
+CH61      -54.70    -0.00   +23.79   +23.79    -30.91
+CH64      -22.82    -0.00   +22.82   +22.82     +0.00
+CH5       -83.81   -21.00   +39.02   +18.02    -65.79
+CH106     +16.95   +26.45   -10.45   +16.00    +32.95
+CH29      -20.54    -0.00   +13.59   +13.59     -6.95
+CH65      -21.27   +26.93   -14.01   +12.92     -8.35
+CH109      +7.74   +12.79    -0.00   +12.79    +20.53
+CH4        -5.22    -0.00    +7.54    +7.54     +2.32
+CH102    +120.78    -0.00    +7.22    +7.22   +128.00
+CH1       +14.09   -14.08   +21.00    +6.92    +21.01
+CH21       +7.52    +0.20    -0.00    +0.20     +7.72
+CH87     +108.51    -6.69    -0.00    -6.69   +101.82
+CH39      +62.99    -0.00    -6.89    -6.89    +56.10
+CH24      +50.57    -0.00    -6.92    -6.92    +43.65
+CH38      +17.49    -0.00    -6.99    -6.99    +10.50
+CH66      -25.62    -0.00    -7.00    -7.00    -32.62
+CH55      +38.21    -0.00    -7.00    -7.00    +31.21
+CH70      +38.97    -7.00    -0.00    -7.00    +31.97
+CH17      +38.98    -0.00    -7.00    -7.00    +31.98
+CH74       +7.09    -7.09    -0.00    -7.09     +0.00
+CH22      +19.40    -0.00    -8.90    -8.90    +10.50
+CH27      +24.59    -0.00   -10.48   -10.48    +14.11
+CH67      +19.42    -0.00   -10.49   -10.49     +8.93
+CH75      +30.94   -10.49    -0.00   -10.49    +20.45
+CH11      +20.51    -0.00   -10.50   -10.50    +10.01
+CH62      +31.92   -10.50    -0.00   -10.50    +21.42
+CH13      -17.06    -0.00   -10.63   -10.63    -27.69
+CH85      +38.78   -10.64    -0.00   -10.64    +28.14
+CH60      +11.88   -10.71    -0.00   -10.71     +1.17
+CH45      +28.39    -0.00   -13.99   -13.99    +14.40
+CH53       +1.22    -0.00   -14.01   -14.01    -12.79
+CH31      +38.61    -0.00   -14.11   -14.11    +24.50
+CH91      +60.32   -14.32    -0.00   -14.32    +46.00
+CH90      -75.17   -14.39    -0.00   -14.39    -89.56
+CH107     +70.45    -0.00   -14.47   -14.47    +55.98
+CH18       -4.49   -14.51    -0.00   -14.51    -19.00
+CH42      +15.83    -0.00   -17.50   -17.50     -1.67
+CH72      +39.27    -0.00   -21.44   -21.44    +17.83
+CH92      +66.85   -18.53    -5.22   -23.75    +43.10
+CH82      +38.42    -0.00   -24.55   -24.55    +13.87
+CH6       +26.70    -0.00   -24.76   -24.76     +1.94
+CH88     +124.10   -13.68   -20.43   -34.11    +89.99
+CH110     +49.41   -28.00   -10.42   -38.42    +10.99
+CH105    +175.76    -0.00   -48.94   -48.94   +126.82
+TOTAL     +579.92  +145.60   +90.82  +236.42   +816.34
+```
+
+Lecture : les filtres aident surtout les canaux **perdants** (CH103 −93→−14, CH8 −56→+2.5, CH30, CH94, CH15) ; ils dégradent quelques gros gagnants (CH105 +176→+127, CH110, CH88, CH92, CH82) — net +236.42. 224 positions marquées REFUSE au total (38 MOVE + 65 KER × MK + leurs L).
 
 ### Build de l'app Android (repo `CopyTrading`)
 
