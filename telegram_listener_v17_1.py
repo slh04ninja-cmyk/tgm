@@ -1315,32 +1315,29 @@ class TradeManager:
                     })
                     if role == "market":
                         market_ticket = pos.ticket
-
                 # ★ FIX 02/09 : rattacher les LIMITs (L1/L2) ENCORE PENDANTES du même
-                # préfixe aux tickets de l'entrée reconstruite. Sans cela, après un
-                # restart, l'entrée ne contient que les positions (souvent le MK seul) :
-                # un NEW-SIGNAL ne ferme alors que le MK et laisse L1/L2 orphelines
-                # (cf. incident CH23 bot 2 du 02/09 : L1 remplie + L2 remplie après,
-                # sans MK). Les ordres et positions étant disjoints, pas de doublon.
+                # préfixe aux tickets de l'entrée reconstruite (sinon NEW-SIGNAL après
+                # restart ne ferme que le MK et laisse L1/L2 orphelines).
                 try:
                     for order in (mt5.orders_get() or []):
                         if order.magic != MAGIC_NUMBER:
                             continue
-                        ocomment = order.comment or ""
-                        oparts = ocomment.split("-")
-                        if len(oparts) >= 3 and oparts[0].startswith("CH") and oparts[2] in ("L1", "L2"):
-                            if f"{oparts[0]}-{oparts[1]}" == prefix:
+                        ocomment = order.comment or ''
+                        oparts = ocomment.split('-')
+                        if len(oparts) >= 3 and oparts[0].startswith('CH') and oparts[2] in ('L1', 'L2'):
+                            if f'{oparts[0]}-{oparts[1]}' == prefix:
                                 tickets.append({
-                                    "ticket": order.ticket,
-                                    "lot": order.volume_current,
-                                    "role": "limit",
-                                    "entry_price": order.price_open,
-                                    "tp_final": order.tp,
-                                    "sl_wanted": getattr(order, "sl", 0) or 0,
-                                    "_sl_fix_attempts": 0,
+                                    'ticket': order.ticket,
+                                    'lot': order.volume_current,
+                                    'role': 'limit',
+                                    'entry_price': order.price_open,
+                                    'tp_final': order.tp,
+                                    'sl_wanted': getattr(order, 'sl', 0) or 0,
+                                    '_sl_fix_attempts': 0,
                                 })
                 except Exception:
                     pass
+
 
                 # Construire le signal minimal
                 ch_parts = prefix.split("-")
@@ -2564,34 +2561,34 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
             if same_canal:
                 sig_type = sig.get("type", "PU")
                 ch_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(canal.lstrip("-"), "?"))
-                prefix = entry.get("_mt5_comment") or f"CH{ch_num}-{sig_type}"
+                prefix = entry.get('_mt5_comment') or f'CH{ch_num}-{sig_type}'
                 # ★ FIX 02/09 : fermer par PRÉFIXE de commentaire MT5 (scan réel) au lieu
-                # de la liste `tickets` en mémoire — incomplète après un recovery (les
-                # L1/L2 pendantes n'étaient pas rattachées) → NEW-SIGNAL ne fermait que
-                # le MK et laissait L1/L2 orphelines (cf. incident CH23 bot 2 du 02/09).
+                # de la liste tickets en mémoire — incomplète après un recovery →
+                # NEW-SIGNAL ne fermait que le MK et laissait L1/L2 orphelines.
                 # 1) Annuler les LIMITs pendantes du préfixe
                 try:
                     for order in (mt5.orders_get() or []):
                         if order.magic != MAGIC_NUMBER:
                             continue
-                        if (order.comment or "").startswith(prefix + "-"):
+                        if (order.comment or '').startswith(prefix + '-'):
                             if bridge.cancel_order(order.ticket):
-                                log.info(f"CH{ch_num}-{sig_type} | LIMIT #{order.ticket} annulé (nouveau signal)")
+                                log.info(f'CH{ch_num}-{sig_type} | LIMIT #{order.ticket} annulé (nouveau signal)')
                 except Exception as _e:
-                    log.warning(f"CH{ch_num}-{sig_type} | Erreur annulation LIMITs: {_e}")
+                    log.warning(f'CH{ch_num}-{sig_type} | Erreur annulation LIMITs: {_e}')
                 # 2) Fermer les positions ouvertes du préfixe
                 try:
                     for pos in (mt5.positions_get() or []):
                         if pos.magic != MAGIC_NUMBER:
                             continue
-                        if (pos.comment or "").startswith(prefix + "-"):
-                            if bridge.close_position(pos.ticket, "NEW-SIGNAL"):
-                                log.info(f"CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION #{pos.ticket}")
+                        if (pos.comment or '').startswith(prefix + '-'):
+                            if bridge.close_position(pos.ticket, 'NEW-SIGNAL'):
+                                log.info(f'CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION #{pos.ticket}')
                                 time.sleep(0.3)
-                                pnl = manager._get_last_pnl(pos.ticket, sig.get("symbol", ""))
+                                pnl = manager._get_last_pnl(pos.ticket, sig.get('symbol', ''))
                                 manager._update_daily_pnl(pnl)
                 except Exception as _e:
-                    log.warning(f"CH{ch_num}-{sig_type} | Erreur fermeture positions: {_e}")
+                    log.warning(f'CH{ch_num}-{sig_type} | Erreur fermeture positions: {_e}')
+
                 # Retirer l'entrée APRÈS la fermeture
                 manager.active.remove(entry)
                 return True
@@ -3166,6 +3163,28 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
             from fpdf import FPDF
         except Exception:
             return ""
+
+    # ★ FIX 04/09 : police core Helvetica = WinAnsi (latin-1). Un caractere hors
+    # latin-1 (emoji/symbole dans un nom de canal de la semaine) faisait echouer
+    # tout le PDF (fpdf2 leve une exception -> rapport hebdo jamais envoye).
+    # On assainit chaque texte a l'ecriture : accents francais conserves, le
+    # reste devient '?'. (patch aussi multi_cell pour les futurs usages)
+    _orig_cell = FPDF.cell
+    def _cell_latin1(self, *a, **k):
+        if len(a) >= 3 and isinstance(a[2], str):
+            a = a[:2] + (a[2].encode("latin-1", "replace").decode("latin-1"),) + a[3:]
+        if "txt" in k and isinstance(k["txt"], str):
+            k["txt"] = k["txt"].encode("latin-1", "replace").decode("latin-1")
+        return _orig_cell(self, *a, **k)
+    FPDF.cell = _cell_latin1
+    _orig_multi = FPDF.multi_cell
+    def _multi_latin1(self, *a, **k):
+        if len(a) >= 2 and isinstance(a[1], str):
+            a = a[:1] + (a[1].encode("latin-1", "replace").decode("latin-1"),) + a[2:]
+        if "txt" in k and isinstance(k["txt"], str):
+            k["txt"] = k["txt"].encode("latin-1", "replace").decode("latin-1")
+        return _orig_multi(self, *a, **k)
+    FPDF.multi_cell = _multi_latin1
 
     def _sanitize(text: str, max_len: int = 0) -> str:
         clean = re.sub(r'[^\x00-\x7F]+', '', str(text)).strip()
@@ -4267,6 +4286,25 @@ async def main():
         _alert_client = client
         log.info("Telegram connecté.")
 
+        # ★ Rattrapage manuel du rapport hebdomadaire : si le fichier
+        # SEND_WEEKLY.flag existe (serveur), envoyer le PDF hebdo puis supprimer
+        # le flag. Permet un envoi hors horaire (ex. vendredi 18:00 rate) sans
+        # toucher au code. Creer le fichier puis redemarrer le bot.
+        try:
+            _flag_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SEND_WEEKLY.flag")
+            if os.path.exists(_flag_path):
+                log.info("[MANUAL] SEND_WEEKLY.flag present - envoi hebdo de rattrapage...")
+                _wd = _collect_weekly_report_data()
+                _wp = _generate_weekly_report_pdf(_wd)
+                if _wp:
+                    _send_telegram_document(_wp, f"📊 Rapport Hebdo {_wd['week_start']} → {_wd['week_end']}")
+                try:
+                    os.remove(_flag_path)
+                except Exception:
+                    pass
+        except Exception as _e:
+            log.error(f"[MANUAL] Erreur rattrapage hebdo: {_e}")
+
         # ★ Signal handler pour fermeture propre (SIGINT/SIGTERM)
         import signal as _signal
         def _signal_shutdown(sig, frame):
@@ -4651,6 +4689,24 @@ async def main():
 
             if not _is_signal_message(text):
                 return
+
+            # ★ FORWARD VERS BOT 2 (A/B COMPARISON)
+            # Envoie le signal brut à Bot 2 (port 8001) AVANT le parsing.
+            # Bot 2 reçoit le même message quasi simultanément (<100ms).
+            # Fire-and-forget : n'attend pas la réponse, ne bloque pas Bot 1.
+            # Si Bot 2 est down, le forward échoue silencieusement.
+            try:
+                import urllib.request
+                _fwd_data = json.dumps({"text": text, "canal": canal_name, "msg_id": msg_id}).encode()
+                _fwd_req = urllib.request.Request(
+                    "http://127.0.0.1:8001/api/signal",
+                    data=_fwd_data,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(_fwd_req, timeout=1)
+            except Exception:
+                pass  # Bot 2 down ou timeout → on ignore
 
             # --- Tracker : enregistrer le message de signal ---
             try:

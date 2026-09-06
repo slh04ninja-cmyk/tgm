@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -612,6 +612,32 @@ def get_trades(days: int = 7, from_date: str = None, to_date: str = None):
 
     trades.sort(key=lambda x: x["close_time"], reverse=True)
     return {"trades": trades, "count": len(trades), "days": days}
+
+# --- REPORT PDF (rapport dynamique par periode) ---
+@app.get("/api/report")
+def generate_report(from_date: str, to_date: str):
+    """Genere le rapport PDF de performance pour la periode [from_date, to_date] (YYYY-MM-DD)."""
+    try:
+        datetime.strptime(from_date, "%Y-%m-%d")
+        datetime.strptime(to_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format date invalide (YYYY-MM-DD attendu)")
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="from_date > to_date")
+    out = os.path.join(BOT_WORKDIR, "rapport_%s_%s.pdf" % (from_date, to_date))
+    script = os.path.join(BOT_WORKDIR, "_report_dyn.py")
+    if not os.path.exists(script):
+        raise HTTPException(status_code=500, detail="_report_dyn.py absent sur le serveur")
+    cmd = '"%s" "%s" %s %s "%s"' % (sys.executable, script, from_date, to_date, out)
+    try:
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120, cwd=BOT_WORKDIR)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Generation PDF timeout (120s)")
+    if res.returncode != 0 or not os.path.exists(out):
+        detail = (res.stdout or "") + " | " + (res.stderr or "")
+        raise HTTPException(status_code=500, detail="Echec generation PDF: %s" % detail[-300:])
+    return FileResponse(out, media_type="application/pdf",
+                        filename="rapport_%s_%s.pdf" % (from_date, to_date))
 
 # --- CONFIG (.env) ---
 @app.get("/api/config")
