@@ -329,3 +329,47 @@ Plus aucune distinction par tier.
 | `LOT_MARKET` | 0.01 |
 | `LOT_LIMIT1` | 0.01 |
 | `LOT_LIMIT2` | 0.01 |
+
+---
+
+## 17. FIX 07/09 — Filtre horaire en liste, journée START/END, fiabilité
+
+### 17.1 TRADING_HOURS = liste d'heures exactes (remplace START/END)
+- `TRADING_HOURS=6,7,8,9,11,12,14,15` (CSV) = heures actives, éditables via la grille 24h de l'app.
+- `TRADING_START_HOUR` / `TRADING_END_HOUR` ne définissent plus les heures de trading quand `TRADING_HOURS` est présent.
+- ⚠️ **Fallback sûr** : `TRADING_HOURS` vide/absent = **aucune heure active → tout est bloqué**.
+  L'ancien fallback `range(START,END)` autorisait TOUTES les heures si la grille était sauvegardée vide
+  (cause : signaux acceptés à 13h alors que 13h n'était pas cochée).
+
+### 17.2 Journée de trading = START_HOUR → END_HOUR (pas min/max des heures cochées)
+- Reset journalier (compteurs P&L/limite) à `TRADING_START_HOUR` (5h UTC) — avant : `min(TRADING_HOURS)`.
+- **FIN DE JOURNÉE** (fermeture de toutes les positions + rapport quotidien) à `TRADING_END_HOUR` (19h UTC).
+  Avant : `max(TRADING_HOURS)+1` → avec des heures {6-12}, le bot fermait TOUT à 13h et envoyait le rapport.
+- Rapport hebdomadaire aligné sur START/END.
+
+### 17.3 Annulation des LIMITs à l'entrée d'une heure non active
+- Quand l'heure courante n'est pas dans `TRADING_HOURS` (une fois par heure, flag date+heure) :
+  tous les ordres LIMIT en attente du bot (`_cancel_all_pending_orders`) sont annulés.
+- Effet : les L1/L2 placés pendant une heure active ne se remplissent PLUS pendant une heure inactive
+  (ex: signal accepté à 12h40, L2 ne se remplit plus à 13h05).
+
+### 17.4 Dashboard / stats indépendantes des heures cochées
+- `daily_pnl` / `trades` / `wins` / `losses` : **toujours calculés** depuis `TRADING_START_HOUR` (5h UTC),
+  suppression du gate `if in_trading` qui affichait 0 dès qu'on sortait des heures actives.
+- **Filtre `MAGIC_NUMBER`** : seuls les trades du bot comptent (les manuels/diag externes sont exclus).
+- L'API renvoie `trading_hours_list` (CSV exact du .env) → les chips "Heures de Trading" de l'app
+  reflètent le .env réel, pas l'état d'édition de la grille Config.
+
+### 17.5 Tracker des signaux supprimés (fiabilisé)
+- Sauvegarde de `signal_tracker.json` **à chaque signal** (avant : périodique → entrées perdues au restart).
+- Nouveau champ `executed` : marqué quand le signal a ouvert un **MK** ou des **L3/L4** (hors-zone).
+- Le rapport "signaux supprimés par canal" ne liste plus que les signaux supprimés **APRÈS exécution**
+  (un canal qui efface ses signaux ayant généré un trade — indicateur de fiabilité).
+
+### 17.6 bot_api : filtre multi-bots corrigé
+- `_find_running_bot` exclut explicitement les autres dossiers de bots (`TradingBot2`, `TradingBotValid`).
+  Le `endswith(BOT_SCRIPT)` attrapait le listener du bot 2 (même nom de script) → bot 1 considéré running à tort.
+
+### 17.7 P&L du jour observé (07/09)
+- Journée whipsaw XAU (~4392-4436) : 97 trades, 41 TP (+217.63$), 56 SL (−425.65$) → −208.02$.
+- Pertes groupées par vagues corrélées (7 canaux BUY stoppés ensemble à 08:00-08:17 = −122$).

@@ -74,10 +74,21 @@ def _read_env_dynamic():
     """Relit les variables dynamiques depuis le .env a chaque appel."""
     from dotenv import dotenv_values
     vals = dotenv_values(ENV_FILE)
+    # Heures exactes : TRADING_HOURS (liste) si presente, sinon START/END (fallback)
+    hours_str = (vals.get("TRADING_HOURS") or "").strip()
+    if hours_str:
+        hours = sorted({int(h) for h in hours_str.split(",") if h.strip().isdigit() and 0 <= int(h) <= 23})
+    else:
+        hours = list(range(int(vals.get("TRADING_START_HOUR", TRADING_START_HOUR)),
+                           int(vals.get("TRADING_END_HOUR", TRADING_END_HOUR))))
+    if not hours:
+        hours = list(range(TRADING_START_HOUR, TRADING_END_HOUR))
     return {
         "daily_limit": float(vals.get("DAILY_PROFIT_LIMIT", DAILY_PROFIT_LIMIT)),
-        "start_hour": int(vals.get("TRADING_START_HOUR", TRADING_START_HOUR)),
-        "end_hour": int(vals.get("TRADING_END_HOUR", TRADING_END_HOUR)),
+        "start_hour": hours[0],
+        "end_hour": hours[-1] + 1,
+        "hours": hours,
+        "hours_csv": ",".join(str(h) for h in hours),
     }
 
 # =============================================================
@@ -164,8 +175,19 @@ class BotProcess:
                             # dossier (BOT_WORKDIR) pour ne pas attraper l'autre bot.
                             # ⚠️ Matcher avec séparateur "\" : "C:\TradingBot" est un préfixe
                             # de "C:\TradingBot2" — un simple "in" attraperait le mauvais bot.
+                            _cmd_l = wmic.stdout.lower()
                             workdir_marker = (BOT_WORKDIR.rstrip("\\") + "\\").lower()
-                            if workdir_marker in wmic.stdout.lower() or wmic.stdout.lower().strip().endswith(BOT_SCRIPT.lower()):
+                            # ★ FIX 07/09 : exclure explicitement les AUTRES dossiers de bots.
+                            # Le endswith(BOT_SCRIPT) attrapait le bot 2 (C:\TradingBot2) dont la
+                            # commande se termine par le même nom de script → bot 1 considéré running.
+                            _is_other_bot = False
+                            for _other in ("tradingbot2", "tradingbotvalid"):
+                                if ("\\" + _other) in _cmd_l and workdir_marker not in _cmd_l:
+                                    _is_other_bot = True
+                                    break
+                            if _is_other_bot:
+                                continue
+                            if workdir_marker in _cmd_l or _cmd_l.strip().endswith(BOT_SCRIPT.lower()):
                                 # Sauvegarder le PID pour les prochaines vérifications
                                 with open(PID_FILE, "w") as f:
                                     f.write(str(pid))
@@ -440,31 +462,38 @@ def get_dashboard():
     daily_limit = env["daily_limit"]
     start_hour = env["start_hour"]
     end_hour = env["end_hour"]
+    active_hours = env["hours"]
 
     now = datetime.now(timezone.utc)
     start = _get_trading_day_start()
 
-    # Hors plage trading → valeurs à zéro
-    in_trading = start_hour <= now.hour < end_hour
-
-    # P&L quotidien (deals)
+    # P&L quotidien (deals) : TOUJOURS calculé depuis le début de la journée
+    # de trading (TRADING_START_HOUR UTC). Indépendant des heures actives
+    # (TRADING_HOURS) — les stats reflètent la journée START/END, pas les
+    # heures cochées dans la grille Config.
     daily_pnl = 0.0
     trades_count = 0
     wins = 0
     losses = 0
 
-    if in_trading:
-        deals = mt5.history_deals_get(start, now)
-        if deals:
-            for d in deals:
-                if d.entry != mt5.DEAL_ENTRY_OUT:
-                    continue
-                daily_pnl += d.profit
-                trades_count += 1
-                if d.profit > 0:
-                    wins += 1
-                elif d.profit < 0:
-                    losses += 1
+    deals = mt5.history_deals_get(start, now)
+    if deals:
+        # Magic d'origine par position (le deal OUT peut avoir un magic différent)
+        origin_magic = {}
+        for d in deals:
+            if d.entry == mt5.DEAL_ENTRY_IN:
+                origin_magic[d.position_id] = d.magic
+        for d in deals:
+            if d.entry != mt5.DEAL_ENTRY_OUT:
+                continue
+            if origin_magic.get(d.position_id, d.magic) != MAGIC_NUMBER:
+                continue  # ne compter que les trades du bot (pas les manuels/diag)
+            daily_pnl += d.profit
+            trades_count += 1
+            if d.profit > 0:
+                wins += 1
+            elif d.profit < 0:
+                losses += 1
 
     # Positions ouvertes
     positions = mt5.positions_get()
@@ -512,6 +541,7 @@ def get_dashboard():
         "daily_limit": daily_limit,
         "limit_pct": round((daily_pnl + floating_pnl) / daily_limit * 100, 1) if daily_limit > 0 else 0,
         "trading_hours": f"{start_hour}h-{end_hour}h UTC",
+        "trading_hours_list": env["hours_csv"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

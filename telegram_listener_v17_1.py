@@ -142,8 +142,17 @@ MAX_SL_USD = float(os.getenv("MAX_SL_USD", "10.0"))
 
 # === FILTRES ===
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
+TRADING_HOURS_STR = os.getenv("TRADING_HOURS", "")
+# ★ FIX 07/09 : START/END toujours définis (journée de trading des stats / fin de journée)
 TRADING_START_HOUR = int(os.getenv("TRADING_START_HOUR", "3"))
 TRADING_END_HOUR = int(os.getenv("TRADING_END_HOUR", "20"))
+if TRADING_HOURS_STR:
+    TRADING_HOURS = set(int(h.strip()) for h in TRADING_HOURS_STR.split(",") if h.strip().isdigit())
+else:
+    # ★ FIX 07/09 : TRADING_HOURS vide/absent = AUCUNE heure active → tout est bloqué.
+    # (l'ancien fallback range(START,END) autorisait TOUTES les heures quand la grille
+    #  etait sauvegardee vide — comportement inverse de celui attendu)
+    TRADING_HOURS = set()
 DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "200.0"))
 
 # === FILTRE TRADINGVIEW (consensus 26 indicateurs) ===
@@ -205,6 +214,19 @@ def _save_signal_tracker():
     except Exception:
         pass
 
+def _mark_signal_executed(msg_id):
+    """★ FIX 07/09 : marque un signal tracké comme EXÉCUTÉ (MK ou L3/L4 ouvert)
+    puis sauvegarde immédiate (évite la perte d'info lors d'un restart)."""
+    if not msg_id:
+        return
+    try:
+        mid = str(msg_id)
+        if mid in _signal_tracker:
+            _signal_tracker[mid]["executed"] = True
+            _save_signal_tracker()
+    except Exception:
+        pass
+
 _load_signal_tracker()
 
 NEWS_ENABLED = os.getenv("NEWS_FILTER_ENABLED", "false").lower() == "true"
@@ -258,8 +280,9 @@ log.addHandler(flush_handler)
 # =============================================================
 def get_trading_day_start() -> datetime:
     now = datetime.now(timezone.utc)
-    start = now.replace(hour=TRADING_START_HOUR, minute=0, second=0, microsecond=0)
-    if now.hour < TRADING_START_HOUR:
+    min_hour = TRADING_START_HOUR  # ★ FIX 07/09 : journee = START_HOUR (pas min des heures cochees)
+    start = now.replace(hour=min_hour, minute=0, second=0, microsecond=0)
+    if now.hour < min_hour:
         start = start - timedelta(days=1)
     return start
 
@@ -267,9 +290,9 @@ def in_blocked_window() -> tuple[bool, str]:
     if not TIME_FILTER_ENABLED:
         return False, ""
     now = datetime.now(timezone.utc)
-    if TRADING_START_HOUR <= now.hour < TRADING_END_HOUR:
+    if now.hour in TRADING_HOURS:
         return False, ""
-    return True, f"Hors plage {TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC"
+    return True, f"Heure {now.hour}h hors plage active"
 
 # =============================================================
 # TELEGRAM ALERTS
@@ -1103,6 +1126,7 @@ class TradeManager:
 
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
+        self._last_pending_cancel: tuple = None  # ★ FIX 07/09 : (date, heure) du dernier cancel LIMIT hors plage
         self._completed_entries = []  # entrées terminées (pour rapport fin de journée)
 
         # ★ RECOVERY : reconstruire self.active depuis les positions MT5 ouvertes
@@ -1594,7 +1618,7 @@ class TradeManager:
             send_alert_sync(msg.alert_daily_limit(total, DAILY_PROFIT_LIMIT, nb_positions, cancelled))
 
     def _shutdown_end_of_day(self):
-        """Ferme toutes les positions à TRADING_END_HOUR et génère le rapport quotidien."""
+        """Ferme toutes les positions à la fin de la plage de trading et génère le rapport quotidien."""
         self._end_of_day_done = True
         log.info(f" FIN DE JOURNÉE {TRADING_END_HOUR}H UTC — Fermeture de toutes les positions")
 
@@ -2135,6 +2159,18 @@ class TradeManager:
             if now.hour >= TRADING_END_HOUR:
                 self._shutdown_end_of_day()
                 return
+
+        # ★ FIX 07/09 : heure NON active (mais avant la fin de journée) → annuler
+        # les ordres LIMIT en attente. Les LIMITs placés pendant une heure active ne
+        # doivent pas se remplir pendant une heure où le bot est censé ne pas trader
+        # (ex: signal accepté à 12h40, L1/L2 qui se remplissent à 13h00-13h10).
+        if TIME_FILTER_ENABLED and TRADING_HOURS and now.hour not in TRADING_HOURS:
+            stamp = (now.date(), now.hour)
+            if self._last_pending_cancel != stamp:
+                self._last_pending_cancel = stamp
+                nb = self._cancel_all_pending_orders()
+                if nb > 0:
+                    log.info(f" [HORAIRE] Heure {now.hour}h non active — {nb} ordre(s) LIMIT en attente annulé(s)")
 
         if not self._check_daily_pnl_limit() or self._daily_limit_reached:
             if self.active and not self._daily_limit_reached:
@@ -3106,6 +3142,10 @@ def _collect_weekly_report_data() -> dict:
         for mid, info in _signal_tracker.items():
             if not info.get("deleted"):
                 continue
+            # ★ FIX 07/09 : ne compter que les signaux supprimés APRÈS exécution
+            # (MK ou L3/L4 ouverts) — un signal supprimé sans trade n'est pas pertinent
+            if not info.get("executed"):
+                continue
             ts = info.get("timestamp", 0)
             if ts < week_start.timestamp():
                 continue
@@ -3682,6 +3722,8 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
         })
         orders_desc.append(f"MK=#{t} @{current}")
         log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final} SL={sl}")
+        # ★ FIX 07/09 : MK ouvert → marquer le signal tracké comme exécuté
+        _mark_signal_executed(signal.get("msg_id"))
     else:
         log.error("  ✗ MARKET échoué")
         return False
@@ -3870,6 +3912,9 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
     if not tickets:
         log.warning(f"  ✗ HORS-ZONE: aucun LIMIT placé | zone={zone_low}-{zone_high} current={current}")
         return False
+
+    # ★ FIX 07/09 : L3/L4 placés (hors-zone) → marquer le signal tracké comme exécuté
+    _mark_signal_executed(signal.get("msg_id"))
 
     entry = {
         "signal": signal,
@@ -4725,6 +4770,8 @@ async def main():
                     stale = [k for k, v in _signal_tracker.items() if v.get("timestamp", 0) < cutoff]
                     for k in stale[:500]:
                         del _signal_tracker[k]
+                # ★ FIX 07/09 : sauvegarde immédiate à chaque signal (pas de perte au restart)
+                _save_signal_tracker()
             except Exception:
                 pass
 
@@ -4857,6 +4904,9 @@ async def main():
                         return
 
                 sig_dict = signal_data.to_dict()
+                # ★ FIX 07/09 : propager le msg_id Telegram jusqu'à l'exécution
+                # (pour marquer le tracker "executed" quand MK/L3 est ouvert)
+                sig_dict["msg_id"] = str(msg_id)
 
                 if signal_data.is_quick_alert:
                     execute_quick_alert(sig_dict, bridge, manager, _quick_alerts, tv_filter=tv_filter)
@@ -4901,7 +4951,7 @@ async def main():
         log.info(f" Lot : market : {LOT_MARKET} | limit1 : {LOT_LIMIT1} | limit2 : {LOT_LIMIT2}")
         log.info(f" Gain fixe par position : {TP_FIXED_GAIN_USD}$")
         log.info(f" Objectif quotidien : {DAILY_PROFIT_LIMIT}$")
-        log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC)")
+        log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({sorted(TRADING_HOURS)})")
         log.info(f" Filtre news : {'ON' if NEWS_ENABLED else 'OFF'}")
         if NEWS_ENABLED:
             log.info(f"   Impact min : {NEWS_MIN_IMPACT.upper()}")

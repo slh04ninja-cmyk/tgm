@@ -52,6 +52,8 @@ GET /api/dashboard
 ```
 
 Retourne les statistiques du jour en cours.
+Le P&L quotidien est TOUJOURS calculé depuis `TRADING_START_HOUR` (5h UTC) — indépendant des heures
+actives (`TRADING_HOURS`), et filtré sur le `MAGIC_NUMBER` du bot (trades manuels exclus).
 
 **Reponse :**
 ```json
@@ -67,12 +69,16 @@ Retourne les statistiques du jour en cours.
   "winrate": 62.5,
   "open_positions": [...],
   "open_count": 3,
-  "daily_limit": false,
+  "daily_limit": 400.0,
   "limit_pct": 45.2,
-  "trading_hours": true,
+  "trading_hours": "6h-16h UTC",
+  "trading_hours_list": "6,7,8,9,11,12,14,15,16",
   "timestamp": "2026-08-24T12:00:00Z"
 }
 ```
+
+`trading_hours_list` = CSV exact des heures actives du .env (`TRADING_HOURS`), utilisé par l'app pour
+afficher les chips "Heures de Trading" synchronisées avec le .env réel.
 
 ---
 
@@ -489,3 +495,19 @@ curl -X POST -H "Authorization: Bearer TOKEN" \
 curl -X POST -H "Authorization: Bearer TOKEN" \
   http://38.247.138.124:8000/api/bot/start
 ```
+
+---
+
+### Rapport PDF dynamique
+
+```bash
+GET /api/report?from_date=2026-08-24&to_date=2026-08-31
+```
+
+Génère un rapport PDF de performance (KPI + P&L par jour + par canal + par signal) pour la période
+`[from_date, to_date]` (format `YYYY-MM-DD`). Nécessite `_report_dyn.py` présent dans `C:\TradingBot`.
+
+- **Réponse** : fichier PDF (`application/pdf`), nommé `rapport_{from}_{to}.pdf`.
+- **Erreurs** : `400` dates invalides ou `from_date > to_date` ; `500` échec génération (timeout 120s).
+
+Utilisé par l'app (bouton PDF de l'écran Performance) avec FileProvider pour l'ouverture locale.
