@@ -628,7 +628,7 @@ def get_trades(days: int = 7, from_date: str = None, to_date: str = None):
             trades.append({
                 "ticket": d.position_id,
                 "symbol": d.symbol,
-                "type": "BUY" if d.type == mt5.DEAL_TYPE_BUY else "SELL",
+                "type": "BUY" if (open_d.type if open_d else d.type) == mt5.DEAL_TYPE_BUY else "SELL",
                 "volume": d.volume,
                 "open_price": round(open_d.price, 2) if open_d else 0,
                 "close_price": round(d.price, 2),
