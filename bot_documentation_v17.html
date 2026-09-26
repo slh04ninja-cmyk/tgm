@@ -136,7 +136,7 @@ Log : <code>CH110-ZN | ACCEPTE | MK=4438 | L1=4435 | L2=4432</code></div>
 <table>
 <tr><th>Ordre</th><th>Prix</th><th>Lot</th><th>Commentaire MT5</th></tr>
 <tr><td><b>LIMIT L3</b></td><td><b>bord de zone</b> (high BUY / low SELL)</td><td>0.01</td><td class="mono">CH{num}-ZN-L3</td></tr>
-<tr><td><b>LIMIT L4</b></td><td><b>milieu de zone</b> (low+high)/2</td><td>0.01</td><td class="mono">CH{num}-ZN-L4</td></tr>
+<tr><td><b>LIMIT L4</b></td><td><b>autre bord de zone</b> (low pour BUY / high pour SELL) — <b>★ 26/09 : était le milieu de zone</b> ; l'écart L3-L4 = la largeur complète de la zone</td><td>0.01</td><td class="mono">CH{num}-ZN-L4</td></tr>
 </table>
 <p class="small"><b>Jamais de MARKET</b> (on n'entre pas à un mauvais prix, on attend le retour du prix dans la zone).</p>
 <h3>SL (cas 2)</h3>
@@ -153,12 +153,12 @@ Log : <code>CH110-ZN | ACCEPTE | MK=4438 | L1=4435 | L2=4432</code></div>
 </ul>
 <div class="ok"><b>Exemple — Cas 2 :</b> « XAUUSD BUY zone 4437–4440 TP 4455 SL 4428 », prix actuel = <b>4442</b> (hors zone : 4442 &gt; 4440 + 1)<br>
 → dist = 4442 − 4441 = <b>1$ ≤ MAX_DISTANCE (3$)</b> ✓ (bord = 4440 + 1)<br>
-→ <code>TRADE_HORS_ZONE=true</code> → ouverture : L3 @<b>4440</b> (bord) + L4 @<b>4438.5</b> (milieu), pas de MARKET<br>
+→ <code>TRADE_HORS_ZONE=true</code> → ouverture : L3 @<b>4440</b> (bord) + L4 @<b>4437</b> (autre bord), pas de MARKET<br>
 → SL = 4440 − 12 = <b>4428</b> (commun aux 2)<br>
-→ TP initial : 4440 + 7 = <b>4447</b> (L3) et 4438.5 + 7 = <b>4445.5</b> (L4)<br>
+→ TP initial : 4440 + 7 = <b>4447</b> (L3) et 4437 + 7 = <b>4444</b> (L4)<br>
 → L3 seule se remplit → TP recalculé = 4447 → L3 ferme à <b>+7.00$</b>, L4 annulée<br>
 → L3 + L4 remplies → TP commun = avg(L3,L4) ± 5.25 → cible <b>10.5$</b><br>
-Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></div>
+Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4437 | SL=4428</code></div>
 <div class="warn"><b>REFUSE HORS ZONE (dist &gt; 3$) :</b> prix = 4445 → dist = 4445 − 4441 = 4$ &gt; 3$ → <code>CH110-ZN | REFUSE HORS ZONE (dist 4.00$ &gt; MAX_DISTANCE=3)</code> — rien n'est ouvert.</div>
 <div class="info"><b>Autres types :</b> PU / QA → <code>REFUSE HORS ZONE</code> (refus simple, jamais de L3/L4) — AL n'est que le mode log des QA ; MP → jamais refusé (sa zone est créée autour du prix courant).</div>
 
@@ -233,7 +233,7 @@ Log : <code>CH110-ZN | BUY | HORS-ZONE | L3=4440 | L4=4438.5 | SL=4428</code></d
 <tr><td>3</td><td>3 positions (MK+L1+L2)</td><td>7.0 × 2.0 = 14.0$</td><td>± 4.67$</td></tr>
 </table>
 <p>Le TP est recalculé quand le <b>nombre de positions change</b> (guard <code>_tp_calculated_for</code>) et appliqué à <b>toutes</b> les positions. Le SL ne bouge jamais.</p>
-<div class="info"><b>Comportement réel vérifié (deals) :</b> le recalcul <b>cas 1</b> s'exécute dès le 1er cycle de la boucle (les LIMITs en attente ne comptent pas comme positions) → le TP initial est immédiatement remplacé par <code>entry_MK ± 7</code>. Résultat : tout MK seul ferme à <b>+7.00$ exactement</b> (115 trades confirmés sur la semaine, ex. CH85-ZN-MK open 4450.91 → close 4457.91 = +7.00$). Le TP initial (milieu de zone ± 7 dans le code actuel) ne survit que si le bot est down au moment du remplissage.</div>
+<div class="info"><b>Comportement réel vérifié (deals) :</b> le recalcul <b>cas 1</b> s'exécute dès le 1er cycle de la boucle (les LIMITs en attente ne comptent pas comme positions) → le TP initial est immédiatement remplacé par <code>entry_MK ± 7</code>. Résultat : tout MK seul ferme à <b>+7.00$ exactement</b> (115 trades confirmés sur la semaine, ex. CH85-ZN-MK open 4450.91 → close 4457.91 = +7.00$). Le TP initial (autre bord de zone ± 7 dans le code actuel) ne survit que si le bot est down au moment du remplissage.</div>
 <h3>5.3 P&L cible (clôture par trade)</h3>
 <p>⚠️ Ce n'est <b>pas</b> la limite quotidienne (<code>DAILY_PROFIT_LIMIT</code>, §9) : c'est la cible de gain d'un <b>trade individuel</b> (un signal), vérifiée en continu par la PHASE 4b.</p>
 <p>Si le <b>P&L flottant cumulé</b> de <b>toutes</b> les positions du trade (<code>profit + swap</code> de chaque position ouverte) ≥ <code>pnl_cible</code> (cas 1 = 7$ / cas 2 = 10.5$ / cas 3 = 14$, cf. 5.2) → le bot ferme <b>toutes</b> les positions et annule les LIMITs restantes (commentaire <code class="mono">PNL-TARGET</code>), une seule fois par trade (guard <code>_pnl_close_done</code>).</p>

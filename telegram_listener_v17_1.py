@@ -182,7 +182,8 @@ TOLERANCE_MP = float(os.getenv("TOLERANCE_MP", "2.0"))
 
 # === TRADE HORS ZONE (booléen d'activation, défaut FALSE) ===
 # Si le prix est hors zone (signaux type zone uniquement), placer 2 LIMITs :
-#   L3 = bord de la zone, L4 = milieu de zone (mid_zone)
+#   L3 = bord de la zone (cote prix), L4 = AUTRE bord de la zone (26/09 : etait le
+#   milieu de zone ; ecart L3-L4 = largeur complete de la zone au lieu de la moitie)
 # TP initial unifié : current ± TP_FIXED_GAIN_USD (7$), puis recalcul dynamique
 # Expiration : cas1 prix dépasse MAX_DISTANCE ; cas2 expiration native MT5 (LIMIT_EXPIRY_MIN)
 TRADE_HORS_ZONE = os.getenv("TRADE_HORS_ZONE", "false").lower() == "true"
@@ -1259,7 +1260,7 @@ class TradeManager:
                         })
                 if hz_groups:
                     for prefix, g in hz_groups.items():
-                        # Trier les tickets par prix (L3 = bord, L4 = mid)
+                        # Trier les tickets par prix (L3 = bord cote prix, L4 = autre bord)
                         g["tickets"].sort(key=lambda t: t["entry_price"])
                         ch_parts = prefix.split("-")
                         ch_num = ch_parts[0].replace("CH", "")
@@ -3831,21 +3832,22 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
                            zone_low: float, zone_high: float,
                            ch_num, canal: str) -> bool:
     """TRADE_HORS_ZONE : prix hors zone → placer 2 LIMITs (pas de MARKET).
-    L3 = bord de zone côté prix, L4 = mid_zone.
+    L3 = bord de zone côté prix, L4 = AUTRE bord de zone (modif 26/09 : L4 était
+    le milieu de zone ; l'écart L3-L4 = la largeur complète de la zone).
     TP initial (cas 1) = TP_FIXED_GAIN_USD depuis L3 ; SL = MAX_SL_USD depuis L3 (commun aux 2).
     Expiration = LIMIT_EXPIRY_MIN (30 min).
     Le TP dynamique cas 2/3 est géré par _recalculate_tp (nb positions).
     Retourne True si au moins un LIMIT est placé.
     """
-    mid_zone = round((zone_low + zone_high) / 2, 2)
     # Bord de zone côté prix actuel
     if action == "BUY":
         l3_price = round(zone_high, 2)   # prix au-dessus de la zone → bord haut
+        l4_price = round(zone_low, 2)    # ★ 26/09 : AUTRE bord (avant : milieu de zone)
         order_type = mt5.ORDER_TYPE_BUY_LIMIT
     else:
         l3_price = round(zone_low, 2)    # prix en dessous de la zone → bord bas
+        l4_price = round(zone_high, 2)   # ★ 26/09 : AUTRE bord (avant : milieu de zone)
         order_type = mt5.ORDER_TYPE_SELL_LIMIT
-    l4_price = mid_zone
 
     # SL commun = MAX_SL_USD depuis L3
     if action == "BUY":

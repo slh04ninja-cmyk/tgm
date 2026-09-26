@@ -270,8 +270,8 @@ Telegram (91 canaux) → Parser → Filtres (horaire/news/spread/TV) → Anti-do
 
 ### Ordres
 
-- **Cas 1 (dans zone)** : 1 **MARKET** (exécution immédiate) + 2 **LIMITs** (offsets `LIMIT_OFFSET_1`=3, `LIMIT_OFFSET_2`=6, expiration native MT5 `LIMIT_EXPIRY_MIN`=30 min)
-- **Cas 2 (hors zone ZN)** : 2 **LIMITs L3/L4** (pas de market) — L3 = bord de zone côté prix, L4 = milieu. TP/SL ±7/±12 sur le prix de l'ordre
+- **Cas 1 (dans zone)** : 1 **MARKET** (exécution immédiate) + 2 **LIMITs** (offsets `LIMIT_OFFSET_1`/`LIMIT_OFFSET_2` = **7$/6$ bot 1**, **3$/6$ bot 2**, expiration native MT5 `LIMIT_EXPIRY_MIN`=30 min)
+- **Cas 2 (hors zone ZN)** : 2 **LIMITs L3/L4** (pas de market) — L3 = bord de zone côté prix, **L4 = AUTRE bord de zone** (★ 26/09 : était le milieu ; l'écart L3-L4 = la largeur complète de la zone). TP/SL ±7/±12 sur le prix de l'ordre
 - Filling fallback : FOK → IOC → RETURN (erreur 10013 gérée)
 - `LOT_MARKET`/`LOT_LIMIT1`/`LOT_LIMIT2` = 0.01, `MAX_POSITIONS`=60
 
