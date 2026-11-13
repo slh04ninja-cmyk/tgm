@@ -52,12 +52,25 @@ BOT_WORKDIR = os.getenv("BOT_WORKDIR", os.path.dirname(os.path.abspath(__file__)
 ENV_FILE = os.path.join(BOT_WORKDIR, ".env")
 LOG_FILE = os.path.join(BOT_WORKDIR, "bot_trading.log")
 PID_FILE = os.path.join(BOT_WORKDIR, "bot.pid")
+STOP_FLAG = os.path.join(BOT_WORKDIR, "STOP.flag")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 
 # MT5 connection (reprend les mêmes vars que le bot)
 from dotenv import load_dotenv
-load_dotenv(ENV_FILE)
+load_dotenv(ENV_FILE, override=True)
+
+# ★ 26/09 : relus APRES load_dotenv -> API_PORT / API_HOST du .env sont pris en compte
+API_PORT = int(os.getenv("API_PORT", "8000"))
+API_HOST = os.getenv("API_HOST", "0.0.0.0")
+
+# ★ 26/09 : table de correction de LECTURE (canal reel des anciennes positions "CH?")
+_CH_CORR = {}
+try:
+    with open(os.path.join(BOT_WORKDIR, "_corrections_ch.json"), encoding="utf-8") as _f:
+        _CH_CORR = json.load(_f).get("canal_par_ticket", {}) or {}
+except Exception:
+    _CH_CORR = {}
 
 API_TOKEN = os.getenv("API_TOKEN", "")  # Token d'authentification (Bearer) — vérifié par middleware (★ 01/09), lu APRÈS load_dotenv
 
@@ -69,6 +82,7 @@ MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "20250226"))
 DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "200.0"))
 TRADING_START_HOUR = int(os.getenv("TRADING_START_HOUR", "3"))
 TRADING_END_HOUR = int(os.getenv("TRADING_END_HOUR", "20"))
+DAILY_RESET_HOUR = int(os.getenv("DAILY_RESET_HOUR", "0"))
 
 def _read_env_dynamic():
     """Relit les variables dynamiques depuis le .env a chaque appel."""
@@ -94,6 +108,35 @@ def _read_env_dynamic():
 # =============================================================
 # APP
 # =============================================================
+# 12/10/2026 : codes de fermeture reconnus (badge jaune de l'appli).
+# Lus dans le .env (MOTIF_CODES) -> ajouter un motif = ajouter son code ici,
+# AUCUN rebuild d'APK n'est necessaire.
+DEFAULT_MOTIF_CODES = "NS,NWS,CF,DB,DD,DTG,TMO,DEL,MAN,EOD"
+_MOTIF_CACHE = {"mt": None, "v": ()}
+
+
+def _motif_codes():
+    """Liste des codes, relue depuis le .env des que le fichier change."""
+    try:
+        mt = os.path.getmtime(ENV_FILE)
+    except Exception:
+        mt = None
+    if _MOTIF_CACHE["v"] and _MOTIF_CACHE["mt"] == mt:
+        return _MOTIF_CACHE["v"]
+    brut = ""
+    try:
+        from dotenv import dotenv_values
+        brut = (dotenv_values(ENV_FILE).get("MOTIF_CODES") or "").strip()
+    except Exception:
+        brut = ""
+    codes = tuple(c.strip().upper() for c in (brut or DEFAULT_MOTIF_CODES).split(",") if c.strip())
+    if not codes:
+        codes = tuple(DEFAULT_MOTIF_CODES.split(","))
+    _MOTIF_CACHE["mt"] = mt
+    _MOTIF_CACHE["v"] = codes
+    return codes
+
+
 app = FastAPI(title="CopyTrading Bot API", version="1.0.0")
 
 app.add_middleware(
@@ -144,8 +187,17 @@ class BotProcess:
                     capture_output=True, text=True, timeout=5
                 )
                 if result.returncode == 0 and "python" in result.stdout.lower():
-                    return pid
-                # PID file obsolète, le supprimer
+                    # ★ 26/09 : ce PID doit etre NOTRE bot (meme nom de script dans les 2 dossiers !)
+                    _chk = subprocess.run(
+                        ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/FORMAT:LIST"],
+                        capture_output=True, text=True, timeout=5)
+                    _cl = (_chk.stdout or "").lower()
+                    _marker = (BOT_WORKDIR.rstrip("\\") + "\\").lower()
+                    _others = [d for d in ("\\tradingbot\\", "\\tradingbot2\\", "\\tradingbotvalid\\")
+                               if d != _marker]
+                    if BOT_SCRIPT.lower() in _cl and (_marker in _cl or not any(d in _cl for d in _others)):
+                        return pid
+                # PID file obsolète OU appartenant a l'autre bot -> le supprimer
                 os.remove(PID_FILE)
         except Exception:
             pass
@@ -187,7 +239,15 @@ class BotProcess:
                                     break
                             if _is_other_bot:
                                 continue
-                            if workdir_marker in _cmd_l or _cmd_l.strip().endswith(BOT_SCRIPT.lower()):
+                            # ★ 26/09 : le repli endswith(BOT_SCRIPT) attrapait le bot 1
+                            # (meme nom de script, autre dossier) => exiger SON dossier, sauf si la
+                            # ligne de commande ne mentionne AUCUN dossier de bot (lancement relatif).
+                            _other_dirs = [d for d in ("\\tradingbot\\", "\\tradingbot2\\",
+                                                      "\\tradingbotvalid\\") if d != workdir_marker]
+                            _no_bot_dir = (workdir_marker not in _cmd_l
+                                           and not any(d in _cmd_l for d in _other_dirs))
+                            if workdir_marker in _cmd_l or (
+                                    _cmd_l.strip().endswith(BOT_SCRIPT.lower()) and _no_bot_dir):
                                 # Sauvegarder le PID pour les prochaines vérifications
                                 with open(PID_FILE, "w") as f:
                                     f.write(str(pid))
@@ -233,6 +293,11 @@ class BotProcess:
                 try:
                     with open(PID_FILE, "w") as f:
                         f.write(str(self.pid))
+                except Exception:
+                    pass
+                try:
+                    if os.path.exists(STOP_FLAG):
+                        os.remove(STOP_FLAG)
                 except Exception:
                     pass
                 self._log_action(f"Bot demarré via API — PID {self.pid}")
@@ -306,6 +371,11 @@ class BotProcess:
                     os.remove(PID_FILE)
             except Exception:
                 pass
+            try:
+                with open(STOP_FLAG, "w", encoding="utf-8") as _sf:
+                    _sf.write(str(int(time.time())))
+            except Exception:
+                pass
             self._log_action("Bot arrêté via API")
             return {"status": "stopped"}
 
@@ -351,35 +421,40 @@ def _ensure_mt5():
         # Vérifier que la connexion est toujours active
         try:
             info = mt5.account_info()
-            if info and info.login > 0:
+            if info and info.login == MT5_LOGIN:
                 return True
-            # Connexion perdue, reconnecter
+            # ★ 26/09 : mauvais compte ou connexion perdue -> on coupe et on reconnecte
             _mt5_connected = False
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
         except Exception:
             _mt5_connected = False
 
     try:
-        # Essayer d'initialiser sans login (terminal deja ouvert)
-        if not mt5.initialize():
-            # Si ça échoue, essayer avec les credentials
-            if MT5_LOGIN and MT5_PASSWORD and MT5_SERVER:
-                mt5.initialize(login=MT5_LOGIN, password=MT5_PASSWORD,
-                              server=MT5_SERVER,
-                              path=MT5_PATH if os.path.exists(MT5_PATH) else None)
-            else:
-                return False
+        # ★ 26/09 : JAMAIS mt5.initialize() sans argument ici : il s'attache au PREMIER
+        # terminal ouvert (= celui de bot 1) et l'API piloterait le mauvais compte.
+        if not mt5.initialize(login=MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER,
+                              path=MT5_PATH if os.path.exists(MT5_PATH) else None):
+            return False
         info = mt5.account_info()
-        if info and info.login > 0:
+        if info and info.login == MT5_LOGIN:
             _mt5_connected = True
             return True
+        # ★ 26/09 : garde-fou : compte different => on n'agit PAS du tout
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
         return False
     except Exception:
         return False
 
 def _get_trading_day_start() -> datetime:
     now = datetime.now(timezone.utc)
-    start = now.replace(hour=TRADING_START_HOUR, minute=0, second=0, microsecond=0)
-    if now.hour < TRADING_START_HOUR:
+    start = now.replace(hour=DAILY_RESET_HOUR, minute=0, second=0, microsecond=0)
+    if now.hour < DAILY_RESET_HOUR:
         start = start - timedelta(days=1)
     return start
 
@@ -425,6 +500,7 @@ def get_status():
 
     return {
         "bot": bot_status,
+        "deliberate_stop": os.path.exists(STOP_FLAG),
         "mt5": {"connected": mt5_ok, "account": account},
         "server_time": datetime.now(timezone.utc).isoformat(),
     }
@@ -442,6 +518,8 @@ def _restart_bot_after_config():
     """Redémarre le bot après une sauvegarde config (.env) pour appliquer les nouvelles valeurs.
     Ne fait rien si le bot n'est pas en cours d'exécution."""
     try:
+        if os.path.exists(STOP_FLAG):
+            return {"restarted": False, "reason": "deliberate_stop"}
         running = (bot.process and bot.process.poll() is None) or bot.status == "running" or bot._find_running_bot() is not None
         if not running:
             return {"restarted": False, "reason": "not_running"}
@@ -452,6 +530,23 @@ def _restart_bot_after_config():
         return {"restarted": False, "error": str(e)}
 
 # --- DASHBOARD ---
+def _canaux_actifs():
+    n = 0
+    ex = set()
+    try:
+        for _l in open('C:/TradingBot/Channels.txt', encoding='utf-8', errors='replace'):
+            if _l.strip() and not _l.strip().startswith('#'): n += 1
+    except Exception: pass
+    try:
+        for _l in open('C:/TradingBot/.env', encoding='utf-8', errors='replace'):
+            if _l.startswith('CANAUX_RETIRES'):
+                _v = _l.split('=',1)[1] if '=' in _l else ''
+                ex = {x for x in _v.replace(' ','').split(',') if x.strip().isdigit()}
+                break
+    except Exception: pass
+    return max(0, n - len(ex))
+
+
 @app.get("/api/dashboard")
 def get_dashboard():
     if not _ensure_mt5():
@@ -528,6 +623,7 @@ def get_dashboard():
 
     return {
         "daily_pnl": round(daily_pnl, 2),
+        "channels": _canaux_actifs(),
         "floating_pnl": round(floating_pnl, 2),
         "total_pnl": round(daily_pnl + floating_pnl, 2),
         "balance": balance,
@@ -625,6 +721,21 @@ def get_trades(days: int = 7, from_date: str = None, to_date: str = None):
                 continue
             # Utiliser le commentaire du deal IN (CH5-ZN-MK) au lieu du deal OUT ([tp], [sl], etc.)
             comment = open_comments.get(d.position_id, d.comment)
+            # 12/10/2026 : ajouter le MOTIF de fermeture (badge jaune cote appli).
+            # Les bots ecrivent deja le code sur l'ordre de fermeture : NS, DD, DTG, NWS, CF,
+            # DEL, MAN, EOD. On l'ajoute en 4e position (CH67-ZN-MK-NS) : les 3 premiers
+            # elements restent inchanges, donc les badges existants ne bougent pas.
+            _TAGS = _motif_codes()
+            _outc = (d.comment or "").upper().replace("[", " ").replace("]", " ")
+            _tok = [t for t in _outc.replace(",", " ").split() if t in _TAGS]
+            if _tok:
+                _code = _tok[0]
+                if not comment.upper().endswith("-" + _code):
+                    comment = comment + "-" + _code
+            # ★ 26/09 : correction de lecture des anciennes positions "CH?"
+            _c2 = _CH_CORR.get(str(d.position_id)) or _CH_CORR.get(d.position_id)
+            if _c2 and comment.startswith("CH?") and "-" in comment:
+                comment = "CH%d-%s" % (int(_c2), comment.split("-", 1)[1])
             trades.append({
                 "ticket": d.position_id,
                 "symbol": d.symbol,
@@ -638,6 +749,8 @@ def get_trades(days: int = 7, from_date: str = None, to_date: str = None):
                 "comment": comment,
                 "open_time": datetime.fromtimestamp(open_d.time, tz=timezone.utc).isoformat() if open_d else "",
                 "close_time": datetime.fromtimestamp(d.time, tz=timezone.utc).isoformat(),
+                # ★ 26/09 : raison de cloture (4 = SL, 5 = TP, autre = fermeture bot / news / manuelle)
+                "reason": int(getattr(d, "reason", 0)),
             })
 
     trades.sort(key=lambda x: x["close_time"], reverse=True)
@@ -1018,7 +1131,7 @@ def restart_server():
 
 if __name__ == "__main__":
     import uvicorn
-    print(f"🚀 CopyTrading API démarrée sur {API_HOST}:{API_PORT}")
-    print(f"📁 Bot script: {BOT_SCRIPT}")
-    print(f"📁 Workdir: {BOT_WORKDIR}")
+    print(f"[API] CopyTrading API demarree sur {API_HOST}:{API_PORT}")
+    print(f"[API] Bot script: {BOT_SCRIPT}")
+    print(f"[API] Workdir: {BOT_WORKDIR}")
     uvicorn.run(app, host=API_HOST, port=API_PORT, log_level="warning")

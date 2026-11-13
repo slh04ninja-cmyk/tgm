@@ -173,6 +173,14 @@ EXCLUDE_KEYWORDS = [
     "contact", "good morning", "good night", "hello", "welcome", "thank",
     "recap", "result", "motivation", "join", "vip", "subscribe",
     "will", "analysis only", "not signal",
+    "touched", "boom boom", "amazing shot", "are you happy", "congrat",
+    "enjoy", "well done", "reached", "touched target",
+    # === FIX 10/10 : annonces / gestion (liste principale + forte) ===
+    "next target", "just wait", "all tp", "tp done", "tp complete",
+    "feedback", "breakeven", "break even", "adjust sl", "hold last tp",
+    "small lot", "waiting game", "see you on monday",
+    # === FIX 10/10 (2) : gestion de trade et mises a jour de cible ===
+    "keep sl at", "hold on", "my target", "open tp in", "at be",
 ]
 SPAM_STANDALONE = ["target", "running"]
 
@@ -186,10 +194,30 @@ STRONG_EXCLUDE_KEYWORDS = [
     "mission acomplished", "boom boom boom", "my signal are on fire",
     "closed at", "exit at", "sl hit", "stopped", "secured", "hit target",
     "recap", "result",
+    "touched", "boom boom", "amazing shot", "are you happy", "congrat",
+    "enjoy", "well done", "reached", "touched target",
+    # === FIX 10/10 : annonces / gestion de trade (jamais des entrees) ===
+    "next target", "just wait", "all tp", "tp done", "tp complete",
+    "feedback", "breakeven", "break even", "adjust sl", "hold last tp",
+    "small lot", "wait for", "waiting game", "see you on monday",
+    "keep sl at", "hold on", "my target", "open tp in", "at be",
 ]
 
 def is_spam(text: str) -> bool:
+    # === FIX 10/10 : normalisation avant analyse ===
+    # (les canaux utilisent des lettres decoratives ou substituees pour evader)
+    text = unicodedata.normalize("NFKC", text)
     low = text.lower()
+    for _a, _b in (("hlt", "hit"), ("hlts", "hits"), ("plps", "pips"),
+                   ("proflt", "profit"), ("proflts", "profits")):
+        low = low.replace(_a, _b)
+    # === FIX 10/10 (2) : un message long sans prix = commentaire, jamais un signal ===
+    if len(low) > 120 and not re.search(r"\d{4}", low):
+        return True
+    # === FIX 10/10 : message quasi reduit a un lien => pas un signal ===
+    _sans_lien = re.sub(r'https?://\S+', '', low).strip()
+    if 'http' in low and len(_sans_lien) < 15:
+        return True
     lines = low.split("\n")
     # ★ FIX (v16) : filtrer les messages “Active” même s’ils contiennent BUY/SELL
     # Ex: "GOLD SELL 4337 Active" → statut de signal déjà suivi, pas un nouveau signal
@@ -211,6 +239,9 @@ def is_spam(text: str) -> bool:
             stripped = line.strip().strip("📍🎯📊📈📉❌✅🔴🟢⚪")
             if stripped == kw or stripped == kw + ":":
                 return True
+    # 08/10 : filet de securite -- "TOUCHED / REACHED <prix>" = message de RESULTAT
+    if re.search(r'\b(touched|reached)\b[^\n]{0,20}?\d{3,5}', low):
+        return True
     return False
 
 
@@ -340,6 +371,11 @@ def _extract_action(normalized_text: str) -> Optional[str]:
     return None
 
 def _extract_entry_and_zone(normalized_text: str) -> Tuple[Optional[float], Optional[float], bool]:
+    # === FIX 10/10 : les niveaux TP / SL / TARGET ne sont JAMAIS un prix d'entree ===
+    normalized_text = re.sub(
+        r'(?:\bTP\s*\d{0,2}|\bTARGET\b|\bTGT\b|\bSL\b|\bSTOP\s*LOSS\b)'
+        r'\s*[:@=]?\s*\d{4,6}(?:\.\d+)?',
+        ' ', normalized_text)
     # 1. Prix collés
     m = re.search(r'(\d{4})(\d{4})', normalized_text)
     if m:
@@ -499,11 +535,13 @@ def _extract_entry_and_zone(normalized_text: str) -> Tuple[Optional[float], Opti
             if 1000 <= val <= 99999:
                 return val, val, True
 
-    # 12. Dernier recours
-    all_nums = re.findall(r'\b\d{4,6}(?:\.\d+)?\b', normalized_text)
-    if all_nums:
-        val = float(all_nums[0])
-        return val, val, True
+    # 12. Dernier recours : UNIQUEMENT si une direction est explicite
+    #     (sinon un commentaire, un lien ou un texte quelconque deviendrait un signal)
+    if re.search(r'(?:^|[^A-Za-z])(BUY|SELL|LONG|SHORT|SEL|BUYS|SELLS)(?:[^A-Za-z]|$)', normalized_text):
+        all_nums = re.findall(r'\b\d{4,6}(?:\.\d+)?\b', normalized_text)
+        if all_nums:
+            val = float(all_nums[0])
+            return val, val, True
 
     log.warning(f"[PARSING] Aucune entrée trouvée dans : {normalized_text[:100]}")
     return None, None, False
@@ -940,7 +978,8 @@ class SignalParser:
         # Mots-clés indiquant un ordre marché immédiat
         market_keywords = ['NOW', 'MARKET', 'MKT', 'IMMEDIATELY', 'IMMEDIATE', 'INSTANT', 'OPEN']
         # Vérifier qu'il n'y a AUCUN prix dans le texte (pas de nombre 4-5 chiffres)
-        has_price = re.search(r'\b\d{4,6}(?:\.\d+)?\b', normalized_text)
+        _txt_no_sltp = re.sub(r'(?i)\b(?:SL|TP\d?|STOP\s*LOSS|TARGET)\s*[:=]?\s*\d+(?:\.\d+)?', ' ', normalized_text)
+        has_price = re.search(r'\b\d{4,6}(?:\.\d+)?\b', _txt_no_sltp)
         if has_price:
             return False
         # Vérifier présence d'un mot-clé marché

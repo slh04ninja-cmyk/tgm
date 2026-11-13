@@ -108,6 +108,21 @@ _CHANNELS_LIST = _load_channels_from_env()
 CHANNEL_NAME = _CHANNELS_LIST[0][1] if _CHANNELS_LIST else ""
 
 CHANNEL_NUM_MAP = {}
+_CH_NAME_BY_NUM = {}
+
+
+def _load_ch_names_by_num():
+    """{numero: nom officiel} depuis Channels.txt (source unique)."""
+    out = {}
+    try:
+        _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Channels.txt')
+        for _l in io.open(_p, encoding='utf-8', errors='replace'):
+            _m = re.match(r'Canal_(\d+)\s*:\s*(.+?)\s*#\s*(.+)$', _l.strip())
+            if _m:
+                out[int(_m.group(1))] = _m.group(3).strip()
+    except Exception as _e:
+        pass
+    return out
 for _env_name, _val in _CHANNELS_LIST:
     _num = int(_env_name.replace("TG_CHANNEL_", ""))
     CHANNEL_NUM_MAP[_val] = _num
@@ -116,10 +131,17 @@ for _env_name, _val in _CHANNELS_LIST:
 
 # ★ DOSSIER TELEGRAM : si TG_FOLDER est défini, le bot charge les canaux
 # depuis ce dossier Telegram au lieu de TG_CHANNEL_*
+# 22/10/2026 : noms non latins (arabe / persan) -> libelle ASCII pour les PDF (Helvetica).
+# NFKC convertit les caracteres mathematiques (ALICE en gras) ; l'arabe et le persan
+# n'ont pas d'equivalent ASCII, on leur donne donc un libelle lisible.
+NOMS_PDF_ALIAS = {250: "GHOUL AL-DHAHAB (arabe)",
+                  274: "Analyse & signaux or (persan)"}
+
 # ★ V15 : si Channels.txt existe, les canaux sont lus depuis ce fichier
 # pour garantir une numérotation persistante après redémarrage.
 TG_FOLDER = os.getenv("TG_FOLDER", "")
-CHANNELS_TXT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Channels.txt")
+# ★ 26/09 : lu/ecrit dans SON PROPRE dossier (avant : C:\TradingBot\Channels.txt en dur)
+CHANNELS_TXT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Channels.txt")  # ★ 26/09 : fichier LOCAL de bot 2
 
 MT5_LOGIN    = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD = os.getenv("MT5_PASSWORD", "")
@@ -142,39 +164,55 @@ MAX_SL_USD = float(os.getenv("MAX_SL_USD", "10.0"))
 
 # === FILTRES ===
 TIME_FILTER_ENABLED = os.getenv("TIME_FILTER_ENABLED", "true").lower() == "true"
-TRADING_HOURS_STR = os.getenv("TRADING_HOURS", "")
-# ★ FIX 07/09 : START/END toujours définis (journée de trading des stats / fin de journée)
 TRADING_START_HOUR = int(os.getenv("TRADING_START_HOUR", "3"))
 TRADING_END_HOUR = int(os.getenv("TRADING_END_HOUR", "20"))
-if TRADING_HOURS_STR:
-    TRADING_HOURS = set(int(h.strip()) for h in TRADING_HOURS_STR.split(",") if h.strip().isdigit())
-else:
-    # ★ FIX 07/09 : TRADING_HOURS vide/absent = AUCUNE heure active → tout est bloqué.
-    # (l'ancien fallback range(START,END) autorisait TOUTES les heures quand la grille
-    #  etait sauvegardee vide — comportement inverse de celui attendu)
-    TRADING_HOURS = set()
+# 19/10/2026 : la grille 24 h de l'application (TRADING_HOURS) devient la SOURCE DE VERITE.
+# Elle liste les heures autorisees, une par une. START/END ne sont plus que :
+#   - un secours si la liste est vide,
+#   - la fenetre du rapport hebdo (recalculee sur le min/max de la liste).
+_h_liste = os.getenv("TRADING_HOURS", "").strip()
+TRADING_HOURS_SET = sorted({int(h) for h in _h_liste.split(",")
+                            if h.strip().isdigit() and 0 <= int(h) <= 23})
+if TRADING_HOURS_SET:
+    TRADING_START_HOUR = TRADING_HOURS_SET[0]
+    TRADING_END_HOUR = TRADING_HOURS_SET[-1] + 1
+DAILY_RESET_HOUR = int(os.getenv("DAILY_RESET_HOUR", "0"))    # remise a zero du P&L quotidien
+DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", "20"))  # fin de journee : clouture + rapport
 DAILY_PROFIT_LIMIT = float(os.getenv("DAILY_PROFIT_LIMIT", "200.0"))
-
-# === FILTRE TRADINGVIEW (consensus 26 indicateurs) ===
-# Bloque les signaux en opposition avec le consensus TradingView.
-# 26 indicateurs votent BUY/SELL/NEUTRAL → consensus = STRONG_BUY / BUY / NEUTRAL / SELL / STRONG_SELL
-TV_FILTER_ENABLED = os.getenv("TV_FILTER_ENABLED", "false").lower() == "true"
-TV_FILTER_SYMBOL = os.getenv("TV_FILTER_SYMBOL", "GOLD")
-TV_FILTER_SCREENER = os.getenv("TV_FILTER_SCREENER", "cfd")
-TV_FILTER_EXCHANGE = os.getenv("TV_FILTER_EXCHANGE", "TVC")
-TV_FILTER_TIMEFRAME = os.getenv("TV_FILTER_TIMEFRAME", "5m")  # 1m, 5m, 15m, 30m, 1h, 4h, 1d
-TV_FILTER_CACHE_TTL = int(os.getenv("TV_FILTER_CACHE_TTL", "30"))  # secondes entre chaque refresh
-# Seuils de consensus (nombre de votes BUY/SELL sur 26 indicateurs)
-TV_STRONG_BUY = int(os.getenv("TV_STRONG_BUY", "15"))   # ≥ 15 BUY → STRONG_BUY
-TV_BUY = int(os.getenv("TV_BUY", "10"))                  # ≥ 10 BUY → BUY
-TV_STRONG_SELL = int(os.getenv("TV_STRONG_SELL", "15"))   # ≥ 15 SELL → STRONG_SELL
-TV_SELL = int(os.getenv("TV_SELL", "10"))                 # ≥ 10 SELL → SELL
-TV_NEUTRAL_ALLOW = os.getenv("TV_NEUTRAL_ALLOW", "true").lower() == "true"  # NEUTRAL accepte BUY+SELL
 
 # === PARAMÈTRES SL (définis dans .env) ===
 TEMPS_DE_FUSION = float(os.getenv("TEMPS_DE_FUSION", "2"))  # ★ v17.4h : fusion QA/MP + PU/ZN par TEMPS (minutes)
+# 18/10/2026 : l'anti-doublon par TEMPS (5 min) est REMPLACE par l'anti-doublon
+# "position deja ouverte dans le meme sens" (voir _position_ouverte plus bas).
+# _LAST_SIG_TS supprime -> code mort.
+# 13/10/2026 : MESSAGE REPETE = MEME SIGNAL (anti-doublon sur le TEXTE du message).
+# Certains canaux repostent 3-4 fois le meme message (ex. KING EL GOLD) : sans cette regle,
+# un signal au marche (MP/QA) etait execute plusieurs fois de suite.
+# Reglage : REPEAT_SAME_SIGNAL_ENABLED=false dans .env pour desactiver.
+REPEAT_SAME_SIGNAL_ENABLED = os.getenv("REPEAT_SAME_SIGNAL_ENABLED", "true").lower() == "true"
+_LAST_SIG_TXT = {}   # {(canal, empreinte du texte): timestamp}
+
+
+def _sig_fp(_t):
+    """Empreinte du message : lettres et chiffres seulement, minuscules."""
+    _c = re.sub(r"[^a-z0-9]+", "", (_t or "").lower())[:400]
+    return _c if len(_c) >= 8 else None
+
+
+# 13/10/2026 : CANAUX EXCLUS (13/10 : CH142 = 97% de bruit -> faussait les winrates).
+# Ajouter un numero ici pour l'exclure ; le retirer pour le reactiver.
+# 24/10/2026 (valide SaLaH) : PLUS AUCUNE LISTE EN DUR.
+# La liste des canaux retires vit dans le .env (CANAUX_RETIRES=4,6,15,...) :
+# le bot et l'application lisent la meme source. Cle absente = aucune exclusion.
+EXCLUS_CH = {int(_x) for _x in os.getenv("CANAUX_RETIRES", "").replace(" ", "").split(",")
+             if _x.strip().isdigit()}
+# L'exclusion par NOM sert de secours : si le canal est retire de Channels.txt,
+# le numero devient "?" et seul le nom permet encore de le reconnaitre.
+EXCLUS_NOMS = {"GOLD SCALPING TRADER", "PIPS PROFESSOR", "XAUUSD/GOLD SCALPERS"}
 CONFLIT_FILTER_ENABLED = os.getenv("CONFLIT_FILTER_ENABLED", "true").lower() == "true"
 
+# 12/10/2026 : filtres MOVE et KER SUPPRIMES (mesures du 12/10 : KER nuisible,
+# 21% de precision sur ses refus ; MOVE trop rare, 2 refus sur 172 signaux).
 # === TOLÉRANCES ===
 TOLERANCE_ZN = float(os.getenv("TOLERANCE_ZN", "1.0"))
 TOLERANCE_PU = float(os.getenv("TOLERANCE_PU", "3.0"))
@@ -212,19 +250,6 @@ def _save_signal_tracker():
     try:
         with open(_SIGNAL_TRACKER_FILE, "w", encoding="utf-8") as f:
             json.dump(_signal_tracker, f)
-    except Exception:
-        pass
-
-def _mark_signal_executed(msg_id):
-    """★ FIX 07/09 : marque un signal tracké comme EXÉCUTÉ (MK ou L3/L4 ouvert)
-    puis sauvegarde immédiate (évite la perte d'info lors d'un restart)."""
-    if not msg_id:
-        return
-    try:
-        mid = str(msg_id)
-        if mid in _signal_tracker:
-            _signal_tracker[mid]["executed"] = True
-            _save_signal_tracker()
     except Exception:
         pass
 
@@ -281,9 +306,8 @@ log.addHandler(flush_handler)
 # =============================================================
 def get_trading_day_start() -> datetime:
     now = datetime.now(timezone.utc)
-    min_hour = TRADING_START_HOUR  # ★ FIX 07/09 : journee = START_HOUR (pas min des heures cochees)
-    start = now.replace(hour=min_hour, minute=0, second=0, microsecond=0)
-    if now.hour < min_hour:
+    start = now.replace(hour=DAILY_RESET_HOUR, minute=0, second=0, microsecond=0)
+    if now.hour < DAILY_RESET_HOUR:
         start = start - timedelta(days=1)
     return start
 
@@ -291,9 +315,13 @@ def in_blocked_window() -> tuple[bool, str]:
     if not TIME_FILTER_ENABLED:
         return False, ""
     now = datetime.now(timezone.utc)
-    if now.hour in TRADING_HOURS:
+    if TRADING_HOURS_SET:                      # liste cochee dans l'application
+        if now.hour in TRADING_HOURS_SET:
+            return False, ""
+        return True, "Hors plage %s UTC" % ",".join(str(h) for h in TRADING_HOURS_SET)
+    if TRADING_START_HOUR <= now.hour < TRADING_END_HOUR:
         return False, ""
-    return True, f"Heure {now.hour}h hors plage active"
+    return True, f"Hors plage {TRADING_START_HOUR}h-{TRADING_END_HOUR}h UTC"
 
 # =============================================================
 # TELEGRAM ALERTS
@@ -548,7 +576,7 @@ class NewsManager:
             positions_before = mt5.positions_get()
             tickets_before = {p.ticket: p for p in positions_before if p.magic == MAGIC_NUMBER} if positions_before else {}
             log.info(f"[NEWS] Fermeture de {len(tickets_before)} positions...")
-            closed = self.bridge.close_all()
+            closed = self.bridge.close_all(comment="NWS")
             # ★ Annuler aussi les ordres LIMIT en attente
             with self.manager._lock:
                 for entry in self.manager.active:
@@ -585,248 +613,6 @@ class NewsManager:
         if self._task:
             self._task.cancel()
 
-# =============================================================
-# TRADINGVIEW FILTER (consensus 26 indicateurs)
-# =============================================================
-
-_tv_install_attempted = False  # flag pour ne tenter l'installation qu'une seule fois
-_tv_install_lock = threading.Lock()
-
-def _ensure_tradingview_ta_installed() -> bool:
-    """Installe tradingview_ta à la volée si absent (une seule tentative par run).
-
-    Installation avec dépendances (requests) : tradingview_ta n'a qu'une
-    seule dépendance légère, donc pas besoin de --no-deps. --quiet limite
-    le bruit dans les logs.
-    Protégé par un verrou pour éviter les tentatives concurrentes si
-    plusieurs signaux arrivent avant la fin de l'installation.
-    Retourne True si le package est importable après l'appel (déjà présent
-    ou installé avec succès), False sinon.
-    """
-    global _tv_install_attempted
-
-    try:
-        importlib.import_module("tradingview_ta")
-        return True
-    except ImportError:
-        pass
-
-    with _tv_install_lock:
-        # Revérifier sous verrou : un autre thread a peut-être déjà installé
-        # le package pendant qu'on attendait le lock
-        try:
-            importlib.invalidate_caches()
-            importlib.import_module("tradingview_ta")
-            return True
-        except ImportError:
-            pass
-
-        if _tv_install_attempted:
-            # Déjà tenté une fois dans ce run, ne pas réessayer à chaque signal
-            return False
-
-        _tv_install_attempted = True
-        log.info("[TV] Installation de tradingview_ta en cours (une seule fois)...")
-
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--quiet",
-                 "tradingview_ta"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode != 0:
-                log.error(f"[TV] Échec installation tradingview_ta: {result.stderr.strip()[:300]}")
-                return False
-
-            # Invalider le cache des import finders + purger toute entrée
-            # partielle/échouée pour que le nouveau package soit immédiatement
-            # visible dans ce process sans redémarrage
-            importlib.invalidate_caches()
-            for _mod_name in list(sys.modules):
-                if _mod_name == "tradingview_ta" or _mod_name.startswith("tradingview_ta."):
-                    del sys.modules[_mod_name]
-
-            try:
-                importlib.import_module("tradingview_ta")
-                log.info("[TV] tradingview_ta installé avec succès.")
-                return True
-            except ImportError as e:
-                log.error(f"[TV] pip a réussi mais l'import échoue toujours: {e}")
-                log.error(f"[TV] pip stdout: {result.stdout.strip()[:500]}")
-                log.error(f"[TV] python exécutable: {sys.executable}")
-                log.error(f"[TV] sys.path: {sys.path}")
-                return False
-        except Exception as e:
-            log.error(f"[TV] Erreur lors de l'installation de tradingview_ta: {e}")
-            return False
-
-
-class TradingViewFilter:
-    """Filtre basé sur le consensus des 26 indicateurs TradingView.
-
-    Logique :
-    - 26 indicateurs (11 oscillateurs + 15 moyennes mobiles) votent BUY/SELL/NEUTRAL
-    - Consensus = STRONG_BUY / BUY / NEUTRAL / SELL / STRONG_SELL
-    - Signal BUY reçu + consensus SELL/STRONG_SELL → BLOQUÉ
-    - Signal SELL reçu + consensus BUY/STRONG_BUY → BLOQUÉ
-    """
-
-    _INTERVAL_MAP = {
-        "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
-        "1h": "1h", "2h": "2h", "4h": "4h",
-        "1d": "1d", "1W": "1W", "1M": "1M",
-    }
-
-    def __init__(self):
-        self.enabled = TV_FILTER_ENABLED
-        self.symbol = TV_FILTER_SYMBOL
-        self.screener = TV_FILTER_SCREENER
-        self.exchange = TV_FILTER_EXCHANGE
-        self.timeframe = TV_FILTER_TIMEFRAME
-        self.cache_ttl = TV_FILTER_CACHE_TTL
-        self.strong_buy_threshold = TV_STRONG_BUY
-        self.buy_threshold = TV_BUY
-        self.strong_sell_threshold = TV_STRONG_SELL
-        self.sell_threshold = TV_SELL
-        self.neutral_allow = TV_NEUTRAL_ALLOW
-        # Cache
-        self._last_consensus = None    # "STRONG_BUY" | "BUY" | "NEUTRAL" | "SELL" | "STRONG_SELL"
-        self._last_buy_count = 0
-        self._last_sell_count = 0
-        self._last_neutral_count = 0
-        self._last_recommendation = ""
-        self._last_update = 0.0
-
-    def is_allowed(self, action: str) -> tuple[bool, str]:
-        """Vérifie si la direction du signal est alignée avec le consensus TradingView.
-
-        Returns:
-            (True, "") si le signal est autorisé
-            (False, motif) si le signal doit être bloqué
-        """
-        if not self.enabled:
-            return True, ""
-
-        now = time.time()
-        if now - self._last_update > self.cache_ttl:
-            self._refresh()
-
-        if self._last_consensus is None:
-            # Données indisponibles → laisser passer (ne pas bloquer par erreur)
-            return True, ""
-
-        consensus = self._last_consensus
-
-        # Signal BUY → consensus doit être BUY, STRONG_BUY ou NEUTRAL (si TV_NEUTRAL_ALLOW)
-        if action == "BUY":
-            if consensus in ("BUY", "STRONG_BUY"):
-                return True, ""
-            if consensus == "NEUTRAL" and self.neutral_allow:
-                return True, ""
-            motif = (
-                f"TRADINGVIEW OPPOSÉ : signal BUY mais consensus {consensus} "
-                f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
-            )
-            return False, motif
-
-        # Signal SELL → consensus doit être SELL, STRONG_SELL ou NEUTRAL (si TV_NEUTRAL_ALLOW)
-        if action == "SELL":
-            if consensus in ("SELL", "STRONG_SELL"):
-                return True, ""
-            if consensus == "NEUTRAL" and self.neutral_allow:
-                return True, ""
-            motif = (
-                f"TRADINGVIEW OPPOSÉ : signal SELL mais consensus {consensus} "
-                f"({self._last_buy_count} BUY / {self._last_sell_count} SELL / {self._last_neutral_count} NEUTRAL)"
-            )
-            return False, motif
-
-        return True, ""
-
-    def _refresh(self):
-        """Interroge TradingView pour obtenir le consensus des 26 indicateurs."""
-        if not _ensure_tradingview_ta_installed():
-            log.error("[TV] tradingview_ta non installé → pip install tradingview_ta")
-            self._last_consensus = None
-            return
-
-        try:
-            from tradingview_ta import TA_Handler, Interval
-
-            # Mapper le timeframe
-            interval = self._INTERVAL_MAP.get(self.timeframe, Interval.INTERVAL_5_MINUTES)
-
-            handler = TA_Handler(
-                symbol=self.symbol,
-                screener=self.screener,
-                exchange=self.exchange,
-                interval=interval,
-            )
-
-            analysis = handler.get_analysis()
-            summary = analysis.summary
-
-            recommendation = summary.get("RECOMMENDATION", "")
-            buy_count = summary.get("BUY", 0)
-            sell_count = summary.get("SELL", 0)
-            neutral_count = summary.get("NEUTRAL", 0)
-
-            # Déterminer le consensus avec les seuils personnalisés
-            if buy_count >= self.strong_buy_threshold:
-                consensus = "STRONG_BUY"
-            elif buy_count >= self.buy_threshold:
-                consensus = "BUY"
-            elif sell_count >= self.strong_sell_threshold:
-                consensus = "STRONG_SELL"
-            elif sell_count >= self.sell_threshold:
-                consensus = "SELL"
-            else:
-                consensus = "NEUTRAL"
-
-            self._last_consensus = consensus
-            self._last_buy_count = buy_count
-            self._last_sell_count = sell_count
-            self._last_neutral_count = neutral_count
-            self._last_recommendation = recommendation
-            self._last_update = time.time()
-
-            log.debug(
-                f"[TV] {self.symbol} {self.timeframe} → {consensus} "
-                f"({buy_count} BUY / {sell_count} SELL / {neutral_count} NEUTRAL) "
-                f"[TV raw: {recommendation}]"
-            )
-
-        except ImportError:
-            log.error("[TV] tradingview_ta non installé → pip install tradingview_ta")
-            self._last_consensus = None
-        except Exception as e:
-            log.warning(f"[TV] Erreur TradingView: {e}")
-            self._last_consensus = None
-
-    def get_status(self) -> str:
-        """Retourne une ligne de status pour les logs."""
-        if not self.enabled:
-            return "Filtre TradingView: OFF"
-        if self._last_consensus is None:
-            return (
-                f"Filtre TradingView: ON ({self.symbol} {self.timeframe}) "
-                f"— données indisponibles"
-            )
-        return (
-            f"Filtre TradingView: ON ({self.symbol} {self.timeframe}) "
-            f"— {self._last_consensus} "
-            f"({self._last_buy_count}B/{self._last_sell_count}S/{self._last_neutral_count}N)"
-        )
-
-
-def _tv_status(tv_filter) -> str:
-    """Retourne le status TV pour les logs (ex: '| TV=BUY')."""
-    if not tv_filter or not tv_filter.enabled or tv_filter._last_consensus is None:
-        return ""
-    return f" | TV={tv_filter._last_consensus}"
-
 
 # =============================================================
 # MT5 BRIDGE
@@ -859,12 +645,18 @@ class MT5Bridge:
         terminal = mt5.terminal_info()
         try:
             algo_ok = bool(getattr(terminal, "trade_expert", True))
+            # ★ FIX (v17.4k) : vérifier AUSSI trade_allowed — le bouton "Algo Trading"
+            # du terminal peut être OFF (retcode 10027 sur tous les ordres) alors que
+            # trade_expert est True. Sans cette vérif, le bot tourne mais ne peut
+            # placer AUCUN ordre (spam ORPHAN 10027 en boucle).
+            trade_allowed = bool(getattr(terminal, "trade_allowed", True))
+            algo_ok = algo_ok and trade_allowed
         except Exception:
             algo_ok = True
         if algo_ok:
             log.info("MT5 connecté | Algo Trading actif ✅")
         else:
-            log.info("MT5 connecté | Algo Trading DÉSACTIVÉ ⚠️ (activez le bouton vert dans MT5)")
+            log.warning("MT5 connecté | Algo Trading DÉSACTIVÉ ⚠️ (activez le bouton vert 'Algo Trading' dans MT5 — trade_allowed=False)")
         return True
 
     def disconnect(self):
@@ -968,6 +760,13 @@ class MT5Bridge:
             if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                 log.debug(f"MARKET {action} {sym.name} lot={lot} @{price} ticket#{result.order}")
                 return result.order
+            if result:
+                self._last_order_error = "retcode=%s comment='%s'" % (result.retcode, getattr(result, "comment", ""))
+                if result.retcode in (10018, 10017):
+                    self._last_order_error += " (marche ferme ou hors session)"
+            else:
+                self._last_order_error = "aucun resultat order_send"
+        log.error(f"MARKET REFUSE {sym.name} lot={lot} @{price} fill_modes={filling_modes} -> {getattr(self, '_last_order_error', '?')}")
         return None
 
     def cancel_order(self, order_ticket: int) -> bool:
@@ -1065,7 +864,7 @@ class MT5Bridge:
         log.info(f"SL MOVE canal {channel_num} → {new_sl} sur {updated} positions")
 
 
-    def close_all(self, symbol: str | None = None, channel_num: int | None = None):
+    def close_all(self, symbol: str | None = None, channel_num: int | None = None, comment: str = "close-all"):
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
         if not positions:
             return
@@ -1076,7 +875,7 @@ class MT5Bridge:
             if channel_num is not None:
                 if not pos.comment.startswith(f"CH{channel_num}-"):
                     continue
-            if not self.close_position(pos.ticket, comment="close-all"):
+            if not self.close_position(pos.ticket, comment=comment):
                 failed.append(pos.ticket)
                 log.warning(f"[CLOSE-ALL] Échec fermeture #{pos.ticket} ({pos.comment})")
         if failed:
@@ -1127,12 +926,10 @@ class TradeManager:
 
         self._pos_cache = None  # rafraîchi à chaque cycle par _refresh_pos_cache()
         self._end_of_day_done = False  # flag pour éviter les fermetures répétées
-        self._last_pending_cancel: tuple = None  # ★ FIX 07/09 : (date, heure) du dernier cancel LIMIT hors plage
         self._completed_entries = []  # entrées terminées (pour rapport fin de journée)
 
         # ★ RECOVERY : reconstruire self.active depuis les positions MT5 ouvertes
         self._recover_open_positions()
-
 
 
     # =============================================================
@@ -1498,7 +1295,7 @@ class TradeManager:
                 self._running_pnl = 0.0
                 self._min_pnl = 0.0
                 self._completed_entries = []  # reset pour le nouveau jour
-                log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
+                log.info(f"RESET JOURNALIER A {DAILY_RESET_HOUR}H UTC")
             self._daily_pnl += pnl
             total = self._daily_pnl + self._get_floating_pnl()
         log.debug(msg.log_daily_pnl_periodic(self._daily_pnl, self._get_floating_pnl(), total))
@@ -1516,7 +1313,7 @@ class TradeManager:
                 self._running_pnl = 0.0
                 self._min_pnl = 0.0
                 self._completed_entries = []  # reset pour le nouveau jour
-                log.info(f"RESET JOURNALIER A {TRADING_START_HOUR}H UTC")
+                log.info(f"RESET JOURNALIER A {DAILY_RESET_HOUR}H UTC")
             total_pnl = self._daily_pnl + self._get_floating_pnl()
             if DAILY_PROFIT_LIMIT > 0 and total_pnl >= DAILY_PROFIT_LIMIT:
                 # ★ FIX (v16) : cette fonction est appelée à chaque cycle de _check_all()
@@ -1553,7 +1350,7 @@ class TradeManager:
         for pos in positions:
             if pos.magic == MAGIC_NUMBER:
                 ticket = pos.ticket
-                if self.bridge.close_position(ticket, comment="DAILY-LIMIT-CLOSE"):
+                if self.bridge.close_position(ticket, comment="DD"):
                     # ★ FIX : attendre la propagation du deal dans MT5 history
                     time.sleep(0.3)
                     deals = mt5.history_deals_get(position=ticket)
@@ -1619,9 +1416,9 @@ class TradeManager:
             send_alert_sync(msg.alert_daily_limit(total, DAILY_PROFIT_LIMIT, nb_positions, cancelled))
 
     def _shutdown_end_of_day(self):
-        """Ferme toutes les positions à la fin de la plage de trading et génère le rapport quotidien."""
+        """Ferme toutes les positions à TRADING_END_HOUR et génère le rapport quotidien."""
         self._end_of_day_done = True
-        log.info(f" FIN DE JOURNÉE {TRADING_END_HOUR}H UTC — Fermeture de toutes les positions")
+        log.info(f" FIN DE JOURNÉE {DAILY_REPORT_HOUR}H UTC — Fermeture de toutes les positions")
 
         positions = mt5.positions_get()
         nb_positions = len([p for p in positions if p.magic == MAGIC_NUMBER]) if positions else 0
@@ -1657,6 +1454,10 @@ class TradeManager:
         # Générer et envoyer le rapport
         if ALERT_DAILY_PERFORMANCE:
             from datetime import date as date_cls
+            # === FIX 11/10 : pas de rapport journalier le samedi et le dimanche ===
+            if date_cls.today().weekday() in (5, 6):
+                log.info("RAPPORT JOURNALIER IGNORE (samedi/dimanche)")
+                return
             today = date_cls.today().isoformat()
             report = msg.report_daily_full(
                 date=today,
@@ -2074,7 +1875,7 @@ class TradeManager:
         # "TP dynamique" qui se répétait à chaque cycle sans rien changer).
         if updated > 0 or already_ok == len(active):
             entry["_tp_calculated_for"] = nb
-        entry["_pnl_cible"] = pnl_cible
+        entry["_pnl_cible"] = 0.0  # TP EN PRIX uniquement (regle SaLaH 12/11)
         # ★ v17.4h : log uniquement en cas de changement effectif (anti-spam)
         if updated > 0:
             _log_mgmt(f"TP dynamique: {nb} pos | avg={weighted_entry:.2f} | lot={total_lot} | "
@@ -2151,27 +1952,42 @@ class TradeManager:
             except Exception as exc:
                 log.error(f"TradeManager erreur: {exc}")
 
+    def _check_max_age(self):
+        """12/10/2026 : ferme une position ouverte depuis plus de POSITION_MAX_MIN minutes.
+        Chaque position a son propre compteur (depuis SON ouverture). 0 = desactive."""
+        if POSITION_MAX_MIN <= 0:
+            return
+        try:
+            positions = mt5.positions_get()
+        except Exception as exc:
+            log.warning(f"[TMO] lecture des positions impossible : {exc}")
+            return
+        if not positions:
+            return
+        now_ts = time.time()
+        for pos in positions:
+            if pos.magic != MAGIC_NUMBER:
+                continue
+            age_min = (now_ts - pos.time) / 60.0
+            if age_min < POSITION_MAX_MIN:
+                continue
+            log.info(f"[TMO] {pos.comment} | age {age_min:.0f} min >= {POSITION_MAX_MIN:.0f} min -> fermeture")
+            if self.bridge.close_position(pos.ticket, "TMO"):
+                _log_mgmt(f"Duree max {POSITION_MAX_MIN:.0f} min atteinte ({age_min:.0f} min) | {pos.comment} -> ferme (TMO)")
+            else:
+                log.warning(f"[TMO] echec de fermeture #{pos.ticket} ({pos.comment})")
+
     def _check_all(self):
         now = datetime.now(timezone.utc)
         self._refresh_pos_cache()
+        # 12/10/2026 : duree max des positions ouvertes (ORDER_EXPIRY_MINUTES, 0 = jamais)
+        self._check_max_age()
 
         # ★ FIN DE JOURNÉE : fermer toutes les positions à TRADING_END_HOUR
         if TIME_FILTER_ENABLED and not self._end_of_day_done:
-            if now.hour >= TRADING_END_HOUR:
+            if now.hour >= DAILY_REPORT_HOUR:
                 self._shutdown_end_of_day()
                 return
-
-        # ★ FIX 07/09 : heure NON active (mais avant la fin de journée) → annuler
-        # les ordres LIMIT en attente. Les LIMITs placés pendant une heure active ne
-        # doivent pas se remplir pendant une heure où le bot est censé ne pas trader
-        # (ex: signal accepté à 12h40, L1/L2 qui se remplissent à 13h00-13h10).
-        if TIME_FILTER_ENABLED and TRADING_HOURS and now.hour not in TRADING_HOURS:
-            stamp = (now.date(), now.hour)
-            if self._last_pending_cancel != stamp:
-                self._last_pending_cancel = stamp
-                nb = self._cancel_all_pending_orders()
-                if nb > 0:
-                    log.info(f" [HORAIRE] Heure {now.hour}h non active — {nb} ordre(s) LIMIT en attente annulé(s)")
 
         if not self._check_daily_pnl_limit() or self._daily_limit_reached:
             if self.active and not self._daily_limit_reached:
@@ -2423,7 +2239,7 @@ class TradeManager:
                     for t in entry.get("tickets", []):
                         pos = self._get_pos(t["ticket"])
                         if pos:
-                            if self.bridge.close_position(t["ticket"], comment="PNL-TARGET"):
+                            if self.bridge.close_position(t["ticket"], comment="DTG"):
                                 closed += 1
                     cancelled = self.bridge.cancel_pending_limits(entry)
                     entry["_limit_cancelled"] = True
@@ -2559,14 +2375,14 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
     for e in to_remove:
         # ★ FIX : ne supprimer l'entrée qu'APRÈS la fermeture réussie
         pass
-    bridge.close_all(symbol=symbol, channel_num=ch_num)
+    bridge.close_all(symbol=symbol, channel_num=ch_num, comment="CF")
     # Vérifier que les positions sont bien fermées
     time.sleep(0.3)
     remaining = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
     still_open = [p for p in remaining if p.magic == MAGIC_NUMBER and (ch_num is None or p.comment.startswith(f"CH{ch_num}-"))] if remaining else []
     if still_open:
         log.warning(f"CONFLIT: {len(still_open)} positions encore ouvertes après close_all — retry")
-        bridge.close_all(symbol=symbol, channel_num=ch_num)
+        bridge.close_all(symbol=symbol, channel_num=ch_num, comment="CF")
         time.sleep(0.3)
     # Mettre à jour le P&L quotidien
     for ticket in conflict_tickets:
@@ -2580,6 +2396,32 @@ def check_conflict(signal: dict, bridge: MT5Bridge, manager) -> bool:
             if e in manager.active:
                 manager.active.remove(e)
     return True
+
+# 18/10/2026 : ANTI-DOUBLON "POSITION OUVERTE" (mesure semaine 12-16/10).
+# 73 % des coupes NS etaient un nouveau signal de MEME SENS dans le MEME canal, 14 min
+# en mediane apres l'ouverture. Les ignorer : -272,76 -> -174,25 $ sur la semaine
+# (+98,51 $), meilleur resultat de toutes les variantes testees.
+# Reglage : ANTI_DOUBLON_OUVERT=false dans .env pour revenir en arriere en 1 ligne.
+ANTI_DOUBLON_OUVERT = os.getenv("ANTI_DOUBLON_OUVERT", "true").lower() == "true"
+
+
+def _position_ouverte(canal: str, action: str) -> bool:
+    """True si ce canal a DEJA une position ouverte dans le MEME sens."""
+    try:
+        canal_num = CHANNEL_NUM_MAP.get(canal, CHANNEL_NUM_MAP.get(str(canal).lstrip("-")))
+        if canal_num is None:
+            return False
+        pref = "CH%s-" % canal_num
+        want = mt5.POSITION_TYPE_BUY if str(action).upper() == "BUY" else mt5.POSITION_TYPE_SELL
+        for pos in (mt5.positions_get() or []):
+            if pos.magic != MAGIC_NUMBER:
+                continue
+            if (pos.comment or "").startswith(pref) and pos.type == want:
+                return True
+    except Exception as _e:
+        log.warning(f"ANTI-DOUBLON: {_e}")
+    return False
+
 
 def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager) -> bool:
     """Ferme le signal actif d'un canal s'il en existe déjà un."""
@@ -2618,7 +2460,7 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
                         if pos.magic != MAGIC_NUMBER:
                             continue
                         if (pos.comment or '').startswith(prefix + '-'):
-                            if bridge.close_position(pos.ticket, 'NEW-SIGNAL'):
+                            if bridge.close_position(pos.ticket, 'NS'):
                                 log.info(f'CH{ch_num}-{sig_type} | ANNULE PAR DUPLICATION #{pos.ticket}')
                                 time.sleep(0.3)
                                 pnl = manager._get_last_pnl(pos.ticket, sig.get('symbol', ''))
@@ -2632,17 +2474,18 @@ def _close_previous_signal(canal: str, bridge: MT5Bridge, manager: TradeManager)
     return False
 
 def _cap_sl(action: str, entry_price: float, signal_sl: float, max_sl_usd: float) -> float:
-    """Plafonne le SL à max_sl_usd$ de l'entrée.
+    """22/10/2026 (regle SaLaH) : le SL est TOUJOURS place a max_sl_usd de l'entree.
+    Avant, un SL de signal plus serre etait conserve ; la mesure sur 12->22/10 montre
+    qu'un SL fixe a MAX_SL_USD donne +122,96 $ de mieux que le simple plafonnement
+    (meme TP 8 $). Les SL plus larges etaient deja ramenes a MAX_SL_USD.
     Pour XAUUSD 0.01 lot : 1$ de prix = 1$ de P&L."""
-    distance = abs(entry_price - signal_sl)
-    if distance <= max_sl_usd:
-        return signal_sl
     if action == "BUY":
-        capped = round(entry_price - max_sl_usd, 2)
+        sl = round(entry_price - max_sl_usd, 2)
     else:
-        capped = round(entry_price + max_sl_usd, 2)
-    _log_mgmt(msg.log_sl_cap(signal_sl, capped, distance, max_sl_usd))
-    return capped
+        sl = round(entry_price + max_sl_usd, 2)
+    if abs(signal_sl - sl) > 0.005:
+        _log_mgmt(msg.log_sl_cap(signal_sl, sl, abs(entry_price - signal_sl), max_sl_usd))
+    return sl
 
 
 # =============================================================
@@ -2669,7 +2512,10 @@ LIMIT_OFFSET_2 = float(os.getenv("LIMIT_OFFSET_2", "6.0"))  # 2ème LIMIT à cur
 LOT_MARKET = float(os.getenv("LOT_MARKET", "0.01"))         # Lot pour le MARKET
 LOT_LIMIT1 = float(os.getenv("LOT_LIMIT1", "0.01"))         # Lot pour le LIMIT 1
 LOT_LIMIT2 = float(os.getenv("LOT_LIMIT2", "0.01"))         # Lot pour le LIMIT 2
-LIMIT_EXPIRY_MIN = int(os.getenv("LIMIT_EXPIRY_MIN", "30"))  # Expiration des LIMIT orders (minutes)
+LIMIT_EXPIRY_MIN = int(os.getenv("LIMIT_EXPIRY_MIN", "30"))
+# 12/10/2026 : DUREE MAX d'une position OUVERTE (minutes) = ORDER_EXPIRY_MINUTES.
+# 0 = jamais de coupure. Chaque position a son propre compteur depuis SON ouverture.
+POSITION_MAX_MIN = float(os.getenv("ORDER_EXPIRY_MINUTES", "0") or 0)  # Expiration des LIMIT orders (minutes)
 TP_MULTIPE1 = float(os.getenv("TP_MULTIPE1", "2.0"))         # Multiplicateur TP quand MARKET + L1 rempli
 TP_MULTIPE2 = float(os.getenv("TP_MULTIPE2", "3.0"))         # Multiplicateur TP quand MARKET + L1 + L2 remplis
 
@@ -2706,8 +2552,16 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
 
     # ── Helpers ──
     def _sanitize(text: str, max_len: int = 0) -> str:
-        """Supprime les caractères non-ASCII et tronque."""
-        clean = re.sub(r'[^\x00-\x7F]+', '', str(text)).strip()
+        """Supprime les caracteres non-ASCII et tronque.
+        22/10/2026 : NFKC d'abord, sinon les titres en caracteres mathematiques
+        (ALICE en gras unicode) sortaient vides -> 'CH234' dans le PDF."""
+        try:
+            _t = str(text).replace("\u2105", "%")
+            _t = unicodedata.normalize("NFKC", _t)
+        except Exception:
+            _t = str(text)
+        clean = re.sub(r'[^\x00-\x7F]+', '', _t).strip()
+        clean = re.sub(r'\s+', ' ', clean)
         if max_len > 0:
             clean = clean[:max_len]
         return clean or "?"
@@ -2880,7 +2734,7 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
             c_wr = c_wins / c_trades * 100 if c_trades > 0 else 0
             c_name = _sanitize(c.get('name', ''), 22)
             if not c_name or c_name == '?':
-                c_name = f"CH{c.get('ch_num', '?')}"
+                c_name = NOMS_PDF_ALIAS.get(c.get('ch_num'), f"CH{c.get('ch_num', '?')}")
             pdf.cell(18, 7, f"CH{c.get('ch_num', '?')}", border=1)
             pdf.cell(48, 7, c_name, border=1)
             pdf.cell(25, 7, f"{c_pnl:+.2f}$", border=1, align="C")
@@ -2946,6 +2800,12 @@ def _generate_daily_report_pdf(report_data: dict, daily_pnl: float, date_str: st
         pdf.ln(5)
 
     # ── Sauvegarde ──
+    # --- LABORATOIRE DES FILTRES : section ajoutee au rapport quotidien ---
+    try:
+        if lab_filtres is not None:
+            lab_filtres.add_pdf_section(pdf, date_str)
+    except Exception as _lpe:
+        log.warning(f"[LABO] erreur section PDF: {type(_lpe).__name__}: {_lpe}")
     filepath = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"daily_report_{date_str}.pdf")
     try:
         pdf.output(filepath)
@@ -3143,10 +3003,6 @@ def _collect_weekly_report_data() -> dict:
         for mid, info in _signal_tracker.items():
             if not info.get("deleted"):
                 continue
-            # ★ FIX 07/09 : ne compter que les signaux supprimés APRÈS exécution
-            # (MK ou L3/L4 ouverts) — un signal supprimé sans trade n'est pas pertinent
-            if not info.get("executed"):
-                continue
             ts = info.get("timestamp", 0)
             if ts < week_start.timestamp():
                 continue
@@ -3205,30 +3061,14 @@ def _generate_weekly_report_pdf(weekly_data: dict) -> str:
         except Exception:
             return ""
 
-    # ★ FIX 04/09 : police core Helvetica = WinAnsi (latin-1). Un caractere hors
-    # latin-1 (emoji/symbole dans un nom de canal de la semaine) faisait echouer
-    # tout le PDF (fpdf2 leve une exception -> rapport hebdo jamais envoye).
-    # On assainit chaque texte a l'ecriture : accents francais conserves, le
-    # reste devient '?'. (patch aussi multi_cell pour les futurs usages)
-    _orig_cell = FPDF.cell
-    def _cell_latin1(self, *a, **k):
-        if len(a) >= 3 and isinstance(a[2], str):
-            a = a[:2] + (a[2].encode("latin-1", "replace").decode("latin-1"),) + a[3:]
-        if "txt" in k and isinstance(k["txt"], str):
-            k["txt"] = k["txt"].encode("latin-1", "replace").decode("latin-1")
-        return _orig_cell(self, *a, **k)
-    FPDF.cell = _cell_latin1
-    _orig_multi = FPDF.multi_cell
-    def _multi_latin1(self, *a, **k):
-        if len(a) >= 2 and isinstance(a[1], str):
-            a = a[:1] + (a[1].encode("latin-1", "replace").decode("latin-1"),) + a[2:]
-        if "txt" in k and isinstance(k["txt"], str):
-            k["txt"] = k["txt"].encode("latin-1", "replace").decode("latin-1")
-        return _orig_multi(self, *a, **k)
-    FPDF.multi_cell = _multi_latin1
-
     def _sanitize(text: str, max_len: int = 0) -> str:
-        clean = re.sub(r'[^\x00-\x7F]+', '', str(text)).strip()
+        try:
+            _t = str(text).replace("\u2105", "%")
+            _t = unicodedata.normalize("NFKC", _t)
+        except Exception:
+            _t = str(text)
+        clean = re.sub(r'[^\x00-\x7F]+', '', _t).strip()
+        clean = re.sub(r'\s+', ' ', clean)
         if max_len > 0:
             clean = clean[:max_len]
         return clean or "?"
@@ -3691,7 +3531,7 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
                        action: str, symbol: str, current: float,
                        sl: float, tp_final: float,
                        lot_market: float,
-                       ch_num, canal: str, prefix: str = "ZN", tv_filter=None) -> bool:
+                       ch_num, canal: str, prefix: str = "ZN") -> bool:
     """Ouvre 1 MARKET + N LIMIT orders pour catcher le pullback.
     Retourne True si au moins le MARKET est ouvert."""
     tickets = []
@@ -3723,8 +3563,6 @@ def _open_market_limit(signal: dict, bridge: MT5Bridge, manager,
         })
         orders_desc.append(f"MK=#{t} @{current}")
         log.debug(f"  ✓ MARKET #{t} @{current} TP={tp_final} SL={sl}")
-        # ★ FIX 07/09 : MK ouvert → marquer le signal tracké comme exécuté
-        _mark_signal_executed(signal.get("msg_id"))
     else:
         log.error("  ✗ MARKET échoué")
         return False
@@ -3915,9 +3753,6 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
         log.warning(f"  ✗ HORS-ZONE: aucun LIMIT placé | zone={zone_low}-{zone_high} current={current}")
         return False
 
-    # ★ FIX 07/09 : L3/L4 placés (hors-zone) → marquer le signal tracké comme exécuté
-    _mark_signal_executed(signal.get("msg_id"))
-
     entry = {
         "signal": signal,
         "tickets": tickets,
@@ -3938,7 +3773,7 @@ def _open_limits_hors_zone(signal: dict, bridge: MT5Bridge, manager,
     return True
 
 
-def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
+def execute_signal(signal: dict, bridge: MT5Bridge, manager):
     action = signal["action"]
     symbol = signal["symbol"]
     zone_low = signal["zone_low"]
@@ -4077,9 +3912,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             l1_price = round(current + LIMIT_OFFSET_1, 2)
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
+        log.info(f"CH{ch_num}-{prefix} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
         _open_market_limit(signal, bridge, manager, action, symbol, current,
-                          sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
+                          sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         return
 
     # ── Prix unique → converti en zone [entry ± TOLERANCE_PU] ──
@@ -4110,9 +3945,9 @@ def execute_signal(signal: dict, bridge: MT5Bridge, manager, tv_filter=None):
             l1_price = round(current + LIMIT_OFFSET_1, 2)
             l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-        log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
+        log.info(f"CH{ch_num}-PU | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
         _open_market_limit(signal, bridge, manager, action, symbol, current,
-                          sl, tp_final, LOT_MARKET, ch_num, canal, prefix, tv_filter=tv_filter)
+                          sl, tp_final, LOT_MARKET, ch_num, canal, prefix)
         return
 
     # ── Les signaux zone sont convertis en Prix Unique plus haut ──
@@ -4130,7 +3965,7 @@ def _qa_key(symbol: str, action: str, channel_name: str = "") -> str:
     return f"CH{ch_num}_{symbol}_{action}"
 
 def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
-                        quick_alerts: dict, tv_filter=None):
+                        quick_alerts: dict):
     action = signal["action"]
     symbol = signal["symbol"]
     sl = signal.get("sl")
@@ -4172,8 +4007,8 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
     clean_canal = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', canal)
     ch_num = CHANNEL_NUM_MAP.get(clean_canal, CHANNEL_NUM_MAP.get(clean_canal.lstrip("-"), "?"))
 
-    # ★ 1 signal par canal : fermer l'ancien si un nouveau arrive
-    _close_previous_signal(canal, bridge, manager)
+    # 19/10/2026 : la fermeture de l'ancienne position a ete DEPLACEE plus bas,
+    # APRES le controle de zone (avant : une alerte refusee fermait la position en cours).
 
     # ★ v17.4h : TP initial UNIFIÉ pour tous les types (ZN/PU/MP/QA)
     # current ± TP_FIXED_GAIN_USD depuis le prix d'exécution RÉEL du MK —
@@ -4214,6 +4049,14 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         return
 
     key = _qa_key(symbol, action, canal)
+    # 20/10/2026 (regle SaLaH) : un signal de MEME SENS est IGNORE -> on ne touche JAMAIS
+    # au TP/SL d'un ordre deja ouvert. Constat : l'alerte CH231 de 16:10 (sl=4115, tp=4135)
+    # a reecrit le SL de la position ouverte (4125,18 -> 4115, soit -22$) et son TP
+    # (4145,01 -> 4136,60, donc SOUS le prix d'entree) -> position condamnee a perdre.
+    if ANTI_DOUBLON_OUVERT and _position_ouverte(canal, action):
+        log.info(f"CH{ch_num}-{qa_label} | DOUBLON IGNORE (position deja ouverte meme sens) "
+                 f"-> TP/SL de la position INCHANGES")
+        return
     if key in quick_alerts and quick_alerts[key]:
         existing = quick_alerts[key][0]
         existing_ticket = existing.get("ticket")
@@ -4252,15 +4095,24 @@ def execute_quick_alert(signal: dict, bridge: MT5Bridge, manager: TradeManager,
         l1_price = round(current + LIMIT_OFFSET_1, 2)
         l2_price = round(current + LIMIT_OFFSET_2, 2)
 
-    log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}{_tv_status(tv_filter)}")
+    log.info(f"CH{ch_num}-{qa_label} | ACCEPTE | MK={current} | L1={l1_price} | L2={l2_price}")
 
     # SL plafonné
     entry_for_sl = entry_price if entry_price else current
     sl = _cap_sl(action, entry_for_sl, sl, MAX_SL_USD)
 
+    # 19/10/2026 : ANTI-DOUBLON (meme canal + meme sens) puis fermeture de l'ancienne position
+    # SEULEMENT maintenant que le signal est valide (zone OK). Mesure 19/10 sur CH194 :
+    # deux alertes rapides de meme sens (reposts du meme signal) fermaient une position
+    # gagnante puis etaient refusees HORS ZONE -> 18,80 $ de perte evitable.
+    if ANTI_DOUBLON_OUVERT and _position_ouverte(canal, action):
+        log.info(f"CH{ch_num}-{qa_label} | DOUBLON IGNORE (position deja ouverte meme sens)")
+        return
+    _close_previous_signal(canal, bridge, manager)
+
     # MARKET + LIMITS (toujours LOT_MARKET — plus de LIMITs seules)
     ok = _open_market_limit(signal, bridge, manager, action, symbol, current,
-                            sl, default_tp, LOT_MARKET, ch_num, canal, qa_label, tv_filter=tv_filter)
+                            sl, default_tp, LOT_MARKET, ch_num, canal, qa_label)
     if not ok:
         log.error("✗ QUICK MARKET échoué")
         return
@@ -4304,13 +4156,78 @@ def _is_signal_message(text: str) -> bool:
         return True
     return False
 
+
+# =============================================================
+# SERVEUR HTTP POUR RECEVOIR LES SIGNAUX DE BOT 1 (A/B COMPARISON)
+# Le hub envoie les signaux bruts via POST /api/signal
+# Ce serveur les reçoit et les traite comme des messages Telegram.
+# Port : 8003 (BOT2_FWD_PORT) - hub comme source unique
+# =============================================================
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import queue
+
+_signal_queue = queue.Queue()
+
+class SignalForwardHandler(BaseHTTPRequestHandler):
+    """Reçoit les signaux forwardés par Bot 1 et les met en file d'attente."""
+
+    def do_POST(self):
+        if self.path == "/api/signal":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length).decode("utf-8")
+                data = json.loads(body)
+                _signal_queue.put(data)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+            except Exception as e:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_GET(self):
+        if self.path == "/api/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","bot":"bot2","source":"bot1_forward"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Supprimer les logs HTTP par défaut
+
+def _start_signal_server(port=8001):
+    """Démarre le serveur HTTP dans un thread séparé."""
+    server = HTTPServer(("0.0.0.0", port), SignalForwardHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log.info(f"[FORWARD] Serveur signal démarré sur port {port} (réception de Bot 1)")
+    return server
+
+# === LABORATOIRE DES FILTRES (mesure seule - bot 2 demo) =====================
+LAB_MODE = os.getenv("LAB_MODE", "false").lower() == "true"
+try:
+    import lab_filtres
+    lab_filtres.init()
+    log.info(f"[LABO] MODULE LABO CHARGE | LAB_MODE={LAB_MODE}")
+except Exception as _lab_imp:
+    lab_filtres = None
+    log.warning(f"[LABO] module indisponible: {type(_lab_imp).__name__}: {_lab_imp}")
+
 async def main():
     global _main_loop, _alert_client
     _main_loop = asyncio.get_running_loop()
     
     parser = SignalParser()
     bridge = MT5Bridge()
-    tv_filter = TradingViewFilter()
     manager = None
     news_mgr = None
 
@@ -4328,41 +4245,36 @@ async def main():
         news_mgr = NewsManager(bridge)
         news_mgr.set_manager(manager)
 
-        client = TelegramClient(os.getenv("TG_SESSION_NAME", "session_trading"), API_ID, API_HASH)
+        # ★ Démarrer le serveur HTTP pour recevoir les signaux de Bot 1
+        _fwd_port = int(os.getenv("BOT2_FWD_PORT", "8001"))
+        _start_signal_server(port=_fwd_port)
+
+        # ★ CONNEXION TELEGRAM DÉSACTIVÉE — Bot 2 reçoit les signaux via forward de Bot 1
+        # Pas de connexion Telegram pour éviter le doublon de signaux.
+        # ★ CONNEXION TELEGRAM ENVOI-SEUL (02/09) - signaux recus via forward du hub (HTTP 8003)
+        # Client connecte UNIQUEMENT pour l'ENVOI (alertes + rapport PDF sur TG_ALERT_CHANNEL).
+        # Aucun canal dans chats -> aucune ecoute -> aucun doublon de signaux.
+        client = TelegramClient(os.getenv("TG_SESSION_NAME", "session_trading2"), API_ID, API_HASH)
         await client.start()
         _alert_client = client
-        log.info("Telegram connecté.")
-
-        # ★ Rattrapage manuel du rapport hebdomadaire : si le fichier
-        # SEND_WEEKLY.flag existe (serveur), envoyer le PDF hebdo puis supprimer
-        # le flag. Permet un envoi hors horaire (ex. vendredi 18:00 rate) sans
-        # toucher au code. Creer le fichier puis redemarrer le bot.
-        try:
-            _flag_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SEND_WEEKLY.flag")
-            if os.path.exists(_flag_path):
-                log.info("[MANUAL] SEND_WEEKLY.flag present - envoi hebdo de rattrapage...")
-                _wd = _collect_weekly_report_data()
-                _wp = _generate_weekly_report_pdf(_wd)
-                if _wp:
-                    _send_telegram_document(_wp, f"📊 Rapport Hebdo {_wd['week_start']} → {_wd['week_end']}")
-                try:
-                    os.remove(_flag_path)
-                except Exception:
-                    pass
-        except Exception as _e:
-            log.error(f"[MANUAL] Erreur rattrapage hebdo: {_e}")
+        log.info("[FORWARD] Telegram connecte (envoi seul) - signaux recus via le hub (port 8003)")
 
         # ★ Signal handler pour fermeture propre (SIGINT/SIGTERM)
         import signal as _signal
         def _signal_shutdown(sig, frame):
             sig_name = _signal.Signals(sig).name
             log.info(f"[SHUTDOWN] Signal {sig_name} reçu — fermeture propre...")
-            _main_loop.call_soon_threadsafe(client.disconnect)
+            if client is not None:
+                _main_loop.call_soon_threadsafe(client.disconnect)
         _signal.signal(_signal.SIGINT, _signal_shutdown)
         _signal.signal(_signal.SIGTERM, _signal_shutdown)
 
+        # ★ Canaux non nécessaires — Bot 2 reçoit les signaux via forward
         chats = []
         entity_to_name = {}
+        if client is None:
+            log.info("[FORWARD] Chargement des canaux ignoré (Telegram désactivé)")
+        log.info("[FORWARD] Chargement des canaux Telegram ignoré (signaux via forward)")
 
         # =============================================================
         # CHARGEMENT DES CANAUX — ORDRE DE PRIORITÉ :
@@ -4395,8 +4307,116 @@ async def main():
             except Exception as e:
                 log.warning(f"Erreur lecture Channels.txt pour persistance: {e}")
 
-        if TG_FOLDER:
+        # ★ 26/09 : bot 2 actualise SON PROPRE Channels.txt depuis ses dossiers Telegram
+        # a chaque demarrage (comme bot 1). En cas d'echec : le fichier reste tel quel.
+        if TG_FOLDER and client is not None:
+            try:
+                _id_to_num2 = {k: v[0] for k, v in _existing_ch_mapping.items()}
+                _next2 = _max_ch_num + 1
+                _new2 = []
+                from telethon import functions as _fn2
+                _res2 = None
+                for _n2 in ('GetDialogFilters', 'GetDialogFiltersRequest', 'getDialogFilters'):
+                    try:
+                        _res2 = await client(getattr(_fn2.messages, _n2)())
+                        break
+                    except AttributeError:
+                        continue
+                _filters2 = getattr(_res2, 'filters', None) or []
+                _fmap2 = {}
+                for _f2 in _filters2:
+                    _fid2 = _f2.get('id') if isinstance(_f2, dict) else getattr(_f2, 'id', None)
+                    _ft2 = _f2.get('title', '') if isinstance(_f2, dict) else getattr(_f2, 'title', '')
+                    _ftitle2 = _ft2.get('text', str(_ft2)) if isinstance(_ft2, dict) else (
+                        _ft2.text if hasattr(_ft2, 'text') else str(_ft2))
+                    _fmap2[_ftitle2.lower()] = _f2
+                    _fmap2[str(_fid2)] = _f2
+                _peers2, _found2 = [], []
+                for _name2 in [f.strip() for f in TG_FOLDER.split(',') if f.strip()]:
+                    _f2 = _fmap2.get(_name2.lower()) or _fmap2.get(_name2)
+                    if _f2 is None:
+                        continue
+                    _found2.append(_name2)
+                    _peers2.extend((_f2.get('include_peers', []) if isinstance(_f2, dict)
+                                    else getattr(_f2, 'include_peers', [])) or [])
+                _seen2 = set()
+                for _p2 in _peers2:
+                    _pid2 = (getattr(_p2, 'user_id', None) or getattr(_p2, 'channel_id', None)
+                             or getattr(_p2, 'chat_id', None) or str(_p2))
+                    if _pid2 in _seen2:
+                        continue
+                    _seen2.add(_pid2)
+                    try:
+                        _e2 = await client.get_entity(_p2)
+                        if not hasattr(_e2, 'title'):
+                            continue
+                        _tc2 = unicodedata.normalize('NFKC', re.sub(
+                            r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', _e2.title)).strip()
+                        if not _tc2:
+                            _tc2 = str(_e2.id)
+                        _tg2 = f"-100{_e2.id}"
+                        _num2 = (_id_to_num2.get(_tg2) or _id_to_num2.get(str(_e2.id))
+                                 or _id_to_num2.get(_tc2))
+                        if _num2 is None:
+                            _num2 = _next2
+                            _next2 += 1
+                        _new2.append((_tg2, _num2, _tc2))
+                    except Exception:
+                        continue
+                if _new2:
+                    _new2.sort(key=lambda x: x[1])
+                    with open(CHANNELS_TXT_FILE, 'w', encoding='utf-8') as _fh2:
+                        _fh2.write("# Canaux Telegram \u2014 Num\u00e9rotation persistante\n")
+                        _fh2.write("# Format: Canal_N : -100XXXXXXXXXX # NomDuCanal\n")
+                        _fh2.write(f"# Mis \u00e0 jour automatiquement \u2014 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+                        _fh2.write(f"# Sources: {', '.join(_found2)}\n\n")
+                        for _tg2, _num2, _tc2 in _new2:
+                            _fh2.write(f"Canal_{_num2} : {_tg2} # {_tc2}\n")
+                    log.info(f"Channels.txt actualise depuis les dossiers Telegram : {len(_new2)} canaux")
+                else:
+                    log.warning("Actualisation des canaux : aucun canal trouve, fichier inchange")
+            except Exception as _ea2:
+                log.warning(f"Actualisation des canaux ignoree (fichier inchange) : {_ea2}")
+
+        if os.path.exists(CHANNELS_TXT_FILE):
+            # ★ PRIORITÉ 2 : CHARGEMENT DEPUIS Channels.txt (si TG_FOLDER absent)
+            log.info(f"Chargement des canaux depuis {CHANNELS_TXT_FILE}")
+            try:
+                _channels_from_file = []
+                with open(CHANNELS_TXT_FILE, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
+                        if m:
+                            ch_num = int(m.group(1))
+                            value = m.group(2).split('#')[0].strip()
+                            _channels_from_file.append((ch_num, value))
+
+                if not _channels_from_file:
+                    log.error(f"Aucun canal trouvé dans {CHANNELS_TXT_FILE}")
+                    return
+
+                log.info(f"{len(_channels_from_file)} canaux trouvés dans Channels.txt")
+                # Bot 2 (forward HTTP) : mapping direct depuis Channels.txt (aucune resolution Telegram)
+                for ch_num, value in _channels_from_file:
+                    _info = _existing_ch_mapping.get(value)
+                    name = _info[1] if _info else ''
+                    CHANNEL_NUM_MAP[value] = ch_num
+                    if value.lstrip('-') != value:
+                        CHANNEL_NUM_MAP[value.lstrip('-')] = ch_num
+                    if name:
+                        CHANNEL_NUM_MAP[name] = ch_num
+                    log.debug(f'Canal_{ch_num} : {name or value}')
+
+                log.info(f"Canaux charges : {len(_channels_from_file)} (mapping Channels.txt, forward-only)")
+                if TG_ALERT_CHANNEL:
+                    log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
+            except Exception as e:
+                log.error(f"Erreur lecture Channels.txt: {e}")
+                return
+
+        elif TG_FOLDER and client is not None:
             # ★ PRIORITÉ 1 : CHARGEMENT DEPUIS LES DOSSIERS TELEGRAM
+            # (désactivé quand Bot 2 reçoit via forward de Bot 1)
             folder_names = [f.strip() for f in TG_FOLDER.split(',') if f.strip()]
             log.info(f"Chargement depuis dossiers Telegram: {', '.join(folder_names)}...")
             try:
@@ -4544,60 +4564,9 @@ async def main():
                 log.error(f"Erreur lecture dossier Telegram '{TG_FOLDER}': {e}")
                 return
 
-        elif os.path.exists(CHANNELS_TXT_FILE):
-            # ★ PRIORITÉ 2 : CHARGEMENT DEPUIS Channels.txt (si TG_FOLDER absent)
-            log.info(f"Chargement des canaux depuis {CHANNELS_TXT_FILE}")
-            try:
-                _channels_from_file = []
-                with open(CHANNELS_TXT_FILE, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        m = re.match(r'Canal_(\d+)\s*:\s*(.+)', line.strip())
-                        if m:
-                            ch_num = int(m.group(1))
-                            value = m.group(2).split('#')[0].strip()
-                            _channels_from_file.append((ch_num, value))
-
-                if not _channels_from_file:
-                    log.error(f"Aucun canal trouvé dans {CHANNELS_TXT_FILE}")
-                    return
-
-                log.info(f"{len(_channels_from_file)} canaux trouvés dans Channels.txt")
-                from telethon.tl.types import PeerChannel
-
-                def _is_telegram_id(value: str) -> bool:
-                    try:
-                        return int(value) < 0
-                    except ValueError:
-                        return False
-
-                for ch_num, value in _channels_from_file:
-                    try:
-                        if _is_telegram_id(value):
-                            raw_id = int(value)
-                            channel_id = int(str(raw_id)[4:]) if str(raw_id).startswith('-100') else abs(raw_id)
-                            entity = await client.get_entity(PeerChannel(channel_id))
-                        else:
-                            entity = await client.get_entity(value)
-                        title_raw = getattr(entity, 'title', value)
-                        title_clean = re.sub(r'[\u200b-\u200f\u2028-\u202f\u2060-\u206f\u00a0]', '', title_raw)
-                        title_clean = unicodedata.normalize('NFKC', title_clean)
-                        chats.append(entity)
-                        entity_to_name[entity.id] = title_clean
-                        CHANNEL_NUM_MAP[title_clean] = ch_num
-                        CHANNEL_NUM_MAP[str(entity.id)] = ch_num
-                        log.debug(f"Canal_{ch_num} : {title_clean}")
-                    except Exception as e:
-                        log.warning(f"Canal_{ch_num} : {value} — introuvable: {e}")
-
-                log.info(f"Canaux chargés : {len(chats)}")
-                if TG_ALERT_CHANNEL:
-                    log.info(f"Canal de Rapport : {TG_ALERT_CHANNEL}")
-            except Exception as e:
-                log.error(f"Erreur lecture Channels.txt: {e}")
-                return
-
-        else:
+        elif client is not None:
             # ★ PRIORITÉ 3 : CHARGEMENT DEPUIS .ENV (TG_CHANNEL_*)
+            # (désactivé quand Bot 2 reçoit via forward de Bot 1)
             active_channels = [(e, v) for e, v in _CHANNELS_LIST if v]
             log.info(f"Canaux depuis .env : {len(active_channels)}")
 
@@ -4696,8 +4665,11 @@ async def main():
                 except Exception as e:
                     log.error(f"[DELETED-CHECK] Erreur: {e}", exc_info=True)
 
-        @client.on(events.NewMessage(chats=chats))
+        # ★ Handler Telegram désactivé — Bot 2 reçoit via forward
+        # @client.on(events.NewMessage(chats=chats))
         async def handler(event):
+            # Cette fonction n'est plus appelée (pas de connexion Telegram)
+            return
             text = event.message.text or ""
             chat = await event.get_chat()
             canal_name = entity_to_name.get(chat.id, getattr(chat, "title", "inconnu"))
@@ -4737,24 +4709,6 @@ async def main():
             if not _is_signal_message(text):
                 return
 
-            # ★ FORWARD VERS BOT 2 (A/B COMPARISON)
-            # Envoie le signal brut à Bot 2 (port 8001) AVANT le parsing.
-            # Bot 2 reçoit le même message quasi simultanément (<100ms).
-            # Fire-and-forget : n'attend pas la réponse, ne bloque pas Bot 1.
-            # Si Bot 2 est down, le forward échoue silencieusement.
-            try:
-                import urllib.request
-                _fwd_data = json.dumps({"text": text, "canal": canal_name, "msg_id": msg_id}).encode()
-                _fwd_req = urllib.request.Request(
-                    "http://127.0.0.1:8001/api/signal",
-                    data=_fwd_data,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                urllib.request.urlopen(_fwd_req, timeout=1)
-            except Exception:
-                pass  # Bot 2 down ou timeout → on ignore
-
             # --- Tracker : enregistrer le message de signal ---
             try:
                 _ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
@@ -4772,8 +4726,6 @@ async def main():
                     stale = [k for k, v in _signal_tracker.items() if v.get("timestamp", 0) < cutoff]
                     for k in stale[:500]:
                         del _signal_tracker[k]
-                # ★ FIX 07/09 : sauvegarde immédiate à chaque signal (pas de perte au restart)
-                _save_signal_tracker()
             except Exception:
                 pass
 
@@ -4883,6 +4835,22 @@ async def main():
                     log.info(msg.log_refuse(ch_num_news, "", msg.MOTIF_PROTECTION_NEWS))
                     return
 
+                if _sig_ch_num in EXCLUS_CH or str(canal_name).strip().upper() in EXCLUS_NOMS:
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | CANAL EXCLU -> ignore")
+                    return
+                # 13/10/2026 : message REPETE (meme canal, meme texte) < TEMPS_DE_FUSION min
+                # = le MEME signal -> une seule position.
+                if REPEAT_SAME_SIGNAL_ENABLED:
+                    _fp = _sig_fp(text)
+                    if _fp:
+                        _tk = (str(canal_name), _fp)
+                        _nw = time.time()
+                        _pv = _LAST_SIG_TXT.get(_tk)
+                        if _pv is not None and (_nw - _pv) < TEMPS_DE_FUSION * 60.0:
+                            log.info(f"CH{_sig_ch_num}-{_sig_mode} | MESSAGE REPETE (< {TEMPS_DE_FUSION:.0f} min)"
+                                     f" -> meme signal, ignore")
+                            return
+                        _LAST_SIG_TXT[_tk] = _nw
                 blocked, reason = in_blocked_window()
                 if blocked:
                     log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSE HORAIRE")
@@ -4892,26 +4860,19 @@ async def main():
                     log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSE LIMITE P&L")
                     return
 
-                # ★ FILTRE TRADINGVIEW — bloquer les signaux opposés au consensus 26 indicateurs
-                if tv_filter.enabled and signal_data.direction:
-                    allowed, motif = tv_filter.is_allowed(signal_data.direction)
-                    if not allowed:
-                        ch_num_tf = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
-                        log.info(f"CH{ch_num_tf}-{_sig_mode} | REFUSE TV OPPOSE")
-                        _alert_mgmt(msg.alert_trend_blocked(
-                            signal_data.direction, signal_data.pair, ch_num_tf,
-                            signal_data.direction, tv_filter._last_consensus,
-                            tv_filter._last_buy_count, tv_filter._last_sell_count
-                        ))
-                        return
-
+                # 12/10/2026 : filtres MOVE et KER supprimes (sans effet mesure).
+                _f_ok, _f_motif = True, ""
                 sig_dict = signal_data.to_dict()
-                # ★ FIX 07/09 : propager le msg_id Telegram jusqu'à l'exécution
-                # (pour marquer le tracker "executed" quand MK/L3 est ouvert)
-                sig_dict["msg_id"] = str(msg_id)
+
+                if lab_filtres is not None:
+                    try:
+                        _lab = lab_filtres.record(sig_dict, _f_ok, _f_motif, canal_name, _sig_ch_num, _sig_mode)
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | LABO chemin1 {_lab}")
+                    except Exception as _le:
+                        log.warning(f"[LABO] mesure impossible: {type(_le).__name__}: {_le}")
 
                 if signal_data.is_quick_alert:
-                    execute_quick_alert(sig_dict, bridge, manager, _quick_alerts, tv_filter=tv_filter)
+                    execute_quick_alert(sig_dict, bridge, manager, _quick_alerts)
                     return
 
                 key = _qa_key(sig_dict["symbol"], sig_dict["action"], canal_name)
@@ -4939,12 +4900,178 @@ async def main():
                 # → execute_signal (ferme l'ancien du canal via _close_previous_signal puis ouvre)
                 if qa_list:
                     log.info(f"CH{_sig_ch_num}-{_sig_mode} | NOUVEAU SIGNAL (QA/MP > {TEMPS_DE_FUSION:.0f} min)")
-                execute_signal(sig_dict, bridge, manager, tv_filter=tv_filter)
+                # 18/10/2026 : ANTI-DOUBLON "position deja ouverte dans le meme sens".
+                # Remplace l'ancienne regle des 5 minutes (devenue redondante).
+                if ANTI_DOUBLON_OUVERT and _position_ouverte(canal_name, sig_dict.get("action")):
+                    log.info(f"CH{_sig_ch_num}-{_sig_mode} | DOUBLON IGNORE (position deja ouverte "
+                             f"meme sens) -> trade conserve")
+                    return
+                execute_signal(sig_dict, bridge, manager)
 
         # ★ Démarrer les boucles APRÈS le chargement des canaux
         await manager.start()
         await news_mgr.start()
         asyncio.create_task(_check_deleted_messages())
+
+        # ★ Boucle de traitement des signaux forwardés par Bot 1
+        async def _process_forwarded_signals():
+            import concurrent.futures
+            loop = asyncio.get_running_loop()
+            while True:
+                try:
+                    data = await loop.run_in_executor(None, lambda: _signal_queue.get(timeout=0.5))
+                except queue.Empty:
+                    await asyncio.sleep(0.1)
+                    continue
+                except Exception:
+                    await asyncio.sleep(0.5)
+                    continue
+
+                text = data.get("text", "")
+                canal_name = data.get("canal", "Inconnu")
+                # 11/10/2026 : reconnaissance par IDENTIFIANT (chat_id) - le nom peut changer
+                # et deux canaux peuvent avoir le meme nom visuel (gras/italique).
+                _cid2 = data.get("chat_id")
+                _num2 = None
+                if _cid2 is not None:
+                    for _k2 in (_cid2, str(_cid2), -abs(int(_cid2)), abs(int(_cid2)),
+                                abs(int(_cid2)) - 1000000000000,
+                                -(abs(int(_cid2)) - 1000000000000)):
+                        if _k2 in CHANNEL_NUM_MAP:
+                            _num2 = CHANNEL_NUM_MAP[_k2]
+                            break
+                if _num2 is not None:
+                    CHANNEL_NUM_MAP[canal_name] = _num2
+                    _off2 = _CH_NAME_BY_NUM.get(_num2)
+                    if _off2:
+                        CHANNEL_NUM_MAP[_off2] = _num2
+                        canal_name = _off2
+                msg_id = data.get("msg_id", 0)
+                # ★ 26/09 : le NUMERO transmis par Bot 1 fait autorite -> immunise contre les
+                # renommages Telegram (cas CH56 : bot 2 gardait l'ancien nom => "CH?") et les
+                # caracteres invisibles. On l'injecte dans le mapping : toutes les recherches
+                # de numero (commentaire CHx, CLOSE, anti-doublon) le trouvent ensuite.
+                _fwd_ch_num = data.get("ch_num")
+                if _fwd_ch_num not in (None, "", "?") and canal_name:
+                    CHANNEL_NUM_MAP[canal_name] = _fwd_ch_num
+                if not text:
+                    continue
+
+                try:
+                    signal_data = parser.parse(text)
+                    if signal_data is None:
+                        continue
+                    signal_data.source_channel = canal_name
+
+                    _sig_mode = None
+                    _sig_ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
+                    if signal_data.signal_type == "TRADE":
+                        if signal_data.is_market_price:
+                            _sig_mode = "MP"
+                        elif signal_data.is_quick_alert:
+                            _sig_mode = "AL"
+                        elif signal_data.is_single_price:
+                            _sig_mode = "PU"
+                        elif signal_data.zone_low is not None and signal_data.zone_high is not None and signal_data.zone_low != signal_data.zone_high:
+                            _sig_mode = "ZN"
+                        else:
+                            _sig_mode = "C"
+
+                    if signal_data.signal_type == "CLOSE":
+                        ch_num = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), None))
+                        close_symbol = signal_data.close_symbol
+                        if close_symbol and ch_num is not None:
+                            _close_previous_signal(canal_name, bridge, manager, close_symbol)
+                        continue
+
+                    if signal_data.signal_type != "TRADE":
+                        continue
+
+                    if is_spam(text):
+                        continue
+
+                    if NEWS_ENABLED and news_mgr.is_blocked():
+                        ch_num_news = CHANNEL_NUM_MAP.get(canal_name, CHANNEL_NUM_MAP.get(canal_name.lstrip("-"), "?"))
+                        log.info(msg.log_refuse(ch_num_news, "", msg.MOTIF_PROTECTION_NEWS))
+                        continue
+
+                    if _sig_ch_num in EXCLUS_CH or str(canal_name).strip().upper() in EXCLUS_NOMS:
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | CANAL EXCLU -> ignore [FWD]")
+                        continue
+                    # 13/10/2026 : message REPETE (meme canal, meme texte) < TEMPS_DE_FUSION min
+                    # = le MEME signal -> une seule position.
+                    if REPEAT_SAME_SIGNAL_ENABLED:
+                        _fp = _sig_fp(text)
+                        if _fp:
+                            _tk = (str(canal_name), _fp)
+                            _nw = time.time()
+                            _pv = _LAST_SIG_TXT.get(_tk)
+                            if _pv is not None and (_nw - _pv) < TEMPS_DE_FUSION * 60.0:
+                                log.info(f"CH{_sig_ch_num}-{_sig_mode} | MESSAGE REPETE (< {TEMPS_DE_FUSION:.0f} min)"
+                                         f" -> meme signal, ignore [FWD]")
+                                continue
+                            _LAST_SIG_TXT[_tk] = _nw
+                    blocked, reason = in_blocked_window()
+                    if blocked:
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSE HORAIRE [FWD]")
+                        continue
+
+                    if not manager._check_daily_pnl_limit() or manager._daily_limit_reached:
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | REFUSE LIMITE P&L [FWD]")
+                        continue
+
+                    # 12/10/2026 : filtres MOVE et KER supprimes (sans effet mesure).
+                    _f_ok, _f_motif = True, ""
+                    sig_dict = signal_data.to_dict()
+
+                    if lab_filtres is not None:
+                        try:
+                            _lab = lab_filtres.record(sig_dict, _f_ok, _f_motif, canal_name, _sig_ch_num, _sig_mode)
+                            log.info(f"CH{_sig_ch_num}-{_sig_mode} | LABO chemin2 {_lab}")
+                        except Exception as _le:
+                            log.warning(f"[LABO] mesure impossible: {type(_le).__name__}: {_le}")
+
+                    if signal_data.is_quick_alert:
+                        execute_quick_alert(sig_dict, bridge, manager, _quick_alerts)
+                        continue
+
+                    key = _qa_key(sig_dict["symbol"], sig_dict["action"], canal_name)
+                    qa_list = _quick_alerts.get(key, [])
+                    found_qa = None
+                    for idx, qa in enumerate(qa_list):
+                        qa_time = qa.get("time")
+                        if qa_time is not None:
+                            qa_age_min = (datetime.now(timezone.utc) - qa_time).total_seconds() / 60.0
+                            if qa_age_min <= TEMPS_DE_FUSION:
+                                found_qa = qa
+                                break
+
+                    if found_qa is not None:
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | DOUBLON IGNORE (QA/MP <= {TEMPS_DE_FUSION:.0f} min) [FWD]")
+                        continue
+
+                    if qa_list:
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | NOUVEAU SIGNAL (QA/MP > {TEMPS_DE_FUSION:.0f} min) [FWD]")
+
+                    # 18/10/2026 : ANTI-DOUBLON "position deja ouverte dans le meme sens" [FWD].
+                    if ANTI_DOUBLON_OUVERT and _position_ouverte(canal_name, sig_dict.get("action")):
+                        log.info(f"CH{_sig_ch_num}-{_sig_mode} | DOUBLON IGNORE (position deja ouverte "
+                                 f"meme sens) [FWD] -> trade conserve")
+                        continue
+                    execute_signal(sig_dict, bridge, manager)
+
+                except Exception as e:
+                    log.error(f"[FWD] Erreur traitement signal {canal_name}: {e}")
+
+        global _CH_NAME_BY_NUM
+        _CH_NAME_BY_NUM = {}
+        for _k3, _v3 in CHANNEL_NUM_MAP.items():
+            _s3 = str(_k3)
+            if not _s3.lstrip("-").isdigit():
+                _CH_NAME_BY_NUM.setdefault(_v3, _s3)
+        log.info("[CANAUX] noms officiels (numerotation figee) : %d" % len(_CH_NAME_BY_NUM))
+        asyncio.create_task(_process_forwarded_signals())
+        log.info("[FORWARD] Boucle de traitement des signaux Bot 1 demarree")
 
         # Banner
         mode = "🔲 DEMO" if DEMO_MODE else "💰 LIVE"
@@ -4953,16 +5080,22 @@ async def main():
         log.info(f" Lot : market : {LOT_MARKET} | limit1 : {LOT_LIMIT1} | limit2 : {LOT_LIMIT2}")
         log.info(f" Gain fixe par position : {TP_FIXED_GAIN_USD}$")
         log.info(f" Objectif quotidien : {DAILY_PROFIT_LIMIT}$")
-        log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({sorted(TRADING_HOURS)})")
+        _plage = (",".join(str(h) for h in TRADING_HOURS_SET) if TRADING_HOURS_SET
+                  else "%dh-%dh" % (TRADING_START_HOUR, TRADING_END_HOUR))
+        log.info(f" Filtre horaire : {'ON' if TIME_FILTER_ENABLED else 'OFF'} ({_plage} UTC)")
         log.info(f" Filtre news : {'ON' if NEWS_ENABLED else 'OFF'}")
+        if NEWS_ENABLED:
+            log.info("[NEWS] blocage des entrees actif sur LES 2 CHEMINS (local + forward)")
         if NEWS_ENABLED:
             log.info(f"   Impact min : {NEWS_MIN_IMPACT.upper()}")
             log.info(f"   Fenêtres  : bloc={NEWS_BLOCK_MIN}min / close={NEWS_CLOSE_MIN}min / après={NEWS_AFTER_MIN}min")
         log.info(f" Max signaux actifs : {MAX_POSITIONS}")
-        log.info(f" {tv_filter.get_status()}")
         log.info("=" * 55)
 
-        await client.run_until_disconnected()
+        # ★ Boucle principale sans Telegram — garder le bot en vie
+        log.info("[FORWARD] Bot 2 en attente de signaux du hub (port 8003)...")
+        while True:
+            await asyncio.sleep(1)
 
     except Exception as e:
         send_alert_sync(
